@@ -1,0 +1,64 @@
+# Race data: pull following day at 5PM, update results every 20 min, remove old after 5 days.
+# Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY
+name: Race data
+
+on:
+  schedule:
+    # Pull tomorrow's racing at 5PM UTC (day before; races usually up by ~5PM)
+    - cron: '0 17 * * *'
+    # Update results: every 20 min (30 min after race + retry 10 min if blank)
+    - cron: '*/20 * * * *'
+    # Remove race_days older than 5 days, daily at 18:00 UTC
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 17 * * *' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Pull races (following day)
+        run: npx tsx scripts/pull-races.ts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+
+  results:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '*/20 * * * *' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Update race results
+        run: npx tsx scripts/update-race-results.ts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+
+  remove-old:
+    runs-on: ubuntu-latest
+    if: github.event.schedule == '0 18 * * *' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Remove races older than 5 days
+        run: npx tsx scripts/remove-old-races.ts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}

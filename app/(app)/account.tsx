@@ -1,0 +1,86 @@
+import { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, Platform } from 'react-native';
+import { router } from 'expo-router';
+import { useAuth } from '@/contexts/AuthContext';
+import { theme } from '@/constants/theme';
+import { getOrCreateTabletCode, clearTabletCodeCache } from '@/lib/tabletCode';
+
+async function doSignOut(signOut: () => Promise<void>) {
+  await clearTabletCodeCache();
+  await signOut();
+  router.replace('/(auth)/login');
+}
+
+export default function AccountScreen() {
+  const { session, signOut } = useAuth();
+  const [tabletCode, setTabletCode] = useState<string | null>(null);
+  const [codeLoading, setCodeLoading] = useState(true);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    getOrCreateTabletCode(session.user.id)
+      .then(setTabletCode)
+      .catch(() => setTabletCode(null))
+      .finally(() => setCodeLoading(false));
+  }, [session?.user?.id]);
+
+  const handleSignOut = () => {
+    if (Platform.OS === 'web') {
+      if (window.confirm('Are you sure you want to sign out?')) {
+        doSignOut(signOut);
+      }
+      return;
+    }
+    Alert.alert('Sign out', 'Are you sure?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out',
+        style: 'destructive',
+        onPress: () => doSignOut(signOut),
+      },
+    ]);
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.section}>
+        <Text style={styles.label}>Signed in as</Text>
+        <Text style={styles.email} numberOfLines={1}>{session?.user?.email ?? '—'}</Text>
+      </View>
+      <View style={styles.section}>
+        <Text style={styles.label}>Tablet mode code</Text>
+        <Text style={styles.hint}>Use this code on a shared device to make selections without logging in. Hold Sign in for 7s on the login screen to open tablet mode.</Text>
+        {codeLoading ? (
+          <ActivityIndicator size="small" color={theme.colors.accent} style={styles.codeLoader} />
+        ) : tabletCode ? (
+          <Text style={styles.tabletCode}>{tabletCode}</Text>
+        ) : (
+          <Text style={styles.muted}>Unable to load code</Text>
+        )}
+      </View>
+      <TouchableOpacity style={styles.button} onPress={handleSignOut}>
+        <Text style={styles.buttonText}>Sign out</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: theme.colors.background, padding: theme.spacing.lg },
+  section: { marginBottom: theme.spacing.xl },
+  label: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textMuted, marginBottom: 4 },
+  email: { fontFamily: theme.fontFamily.input, fontSize: 16, color: theme.colors.text },
+  hint: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary, marginBottom: theme.spacing.sm },
+  codeLoader: { marginVertical: theme.spacing.sm },
+  tabletCode: { fontFamily: theme.fontFamily.input, fontSize: 28, letterSpacing: 6, color: theme.colors.accent },
+  muted: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textMuted },
+  button: {
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.md,
+    paddingVertical: theme.spacing.md,
+    alignItems: 'center',
+  },
+  buttonText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.text },
+});
