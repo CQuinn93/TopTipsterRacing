@@ -14,17 +14,18 @@ These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/hor
 
 | Script | Purpose | When to run |
 |--------|---------|-------------|
-| **pull-races.ts** | 1) DB: Competitions where tomorrow ∈ [festival_start_date, festival_end_date]; get their **course** (one per competition). 2) API: One call GET /racecards for tomorrow; filter by those courses. 3) API: One call per race GET /race/{id} for runners (with delay). 4) DB: One bulk upload – upsert race_days, insert races, insert horses, upsert competition_race_days. | **5PM (day before)** – cron `0 17 * * *` UTC. |
-| **update-race-results.ts** | Gets from DB the **latest race** where `scheduled_time_utc` + 30 min < now and no winner yet. Calls GET /race/{id}. If no positions yet, exits (retry in 10 min). Applies place rules (Handicap vs not, runner count), sets **Winner**, **Place 1–4** on `races` and **sp** on `horses`; also updates `race_days.races[].results` for the app. | **30 min after each race**; retry after 10 min if blank – cron every 20 min `*/20 * * * *`. |
+| **pull-races.ts** | 1) DB: Competitions where tomorrow ∈ [festival_start_date, festival_end_date]; get their **course** (one per competition). 2) API: One call GET /racecards for tomorrow; filter by those courses. 3) API: One call per race GET /race/{id} for runners (with delay). Each race gets an extra **FAV** option (SP favourite). 4) DB: One bulk upload – upsert race_days, insert races, insert horses, upsert competition_race_days. | **5PM (day before)** – cron `0 17 * * *` UTC. |
+| **update-race-results.ts** | Gets from DB the **latest race** where `scheduled_time_utc` + 30 min < now and `is_finished = false`. Calls GET /race/{id}. If no positions yet, exits (retry in 10 min). Updates **horses**: position, sp, is_fav. Sets **races.is_finished = true**. App derives races from races + horses tables. | **30 min after each race**; retry after 10 min if blank – cron every 20 min `*/20 * * * *`. |
 | **remove-old-races.ts** | Deletes **race_days** where `race_date` is older than **5 days** (cascade deletes `races` and `horses`). Keeps DB small. | Daily, e.g. **18:00 UTC** – cron `0 18 * * *`. |
+| **backfill-fav-selections.ts** | For each race day where the selection deadline (1 hour before first race) has passed, sets any **missing** per-race selections to **FAV** for every participant. Run after deadline so users who didn't pick get the favourite. | **After deadline** – e.g. every 15 min `*/15 * * * *` or once per race day. |
 
 ## Database tables (migrations 010–011)
 
-- **race_days**: one row per (course, race_date); `races` JSONB for the app. No competition_id.
+- **race_days**: one row per (course, race_date); course, race_date, first_race_utc. Races derived from races + horses.
 - **competition_courses**: competition ↔ courses (admin sets 1+ courses per competition).
 - **competition_race_days**: bridge linking competitions to race_days.
-- **races**: id, race_day_id, api_race_id, name, scheduled_time_utc, distance, is_handicap, **winner_horse_id**, **place1_horse_id**, **place2_horse_id**, **place3_horse_id**, **place4_horse_id**.
-- **horses**: id, race_id, api_horse_id, name, **jockey**, **trainer**, **age**, **weight**, **number**, **last_ran_days_ago**, **non_runner**, **form**, **owner**, odds_decimal, **sp** (filled after result).
+- **races**: id, race_day_id, api_race_id, name, scheduled_time_utc, distance, is_handicap, **is_finished** (default false; true when results applied).
+- **horses**: id, race_id, api_horse_id, name, jockey, trainer, age, weight, number, last_ran_days_ago, non_runner, form, owner, odds_decimal, **sp**, **position** (finishing position), **is_fav** (true for horse(s) with lowest SP in race), **pos_points**, **sp_points** (scoring, when rules applied).
 
 ## Place rules (update-race-results)
 
@@ -37,7 +38,6 @@ These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/hor
 - **RAPIDAPI_KEY** (for pull-races and update-race-results)
 - **RACE_FETCH_DELAY_MS** (optional) – delay in ms between each GET /race/{id} in pull-races. Default 6000 (6s = 10/min, fastest). Increase if you hit rate limits.
 - **COURSE_FILTER** – ignored; courses are taken from active competitions in the DB (one course per competition).
-- **RACE_FETCH_DELAY_MS** (optional) – ms between each GET /race/{id} to stay under 10/min (default `10000` = 10s)
 
 ## Running locally
 
@@ -50,6 +50,9 @@ SUPABASE_URL=... SUPABASE_SERVICE_KEY=... RAPIDAPI_KEY=... npx tsx scripts/updat
 
 # Remove race_days older than 5 days
 SUPABASE_URL=... SUPABASE_SERVICE_KEY=... npx tsx scripts/remove-old-races.ts
+
+# Backfill FAV for users who didn't select before deadline (1h before first race)
+SUPABASE_URL=... SUPABASE_SERVICE_KEY=... npx tsx scripts/backfill-fav-selections.ts
 ```
 
 ## GitHub Actions

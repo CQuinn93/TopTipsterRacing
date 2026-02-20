@@ -16,7 +16,7 @@ This document maps your intended entity model to the current Supabase schema.
 | **Horses** | `horses` | One row per runner in a race (`race_id`). Not a global horse entity; same horse in two races = two rows. |
 | **Race_Horses** | `horses` | We model “runner in race” as `horses(race_id, …)`; no separate bridge. |
 | **Selections** | `daily_selections` (current) | Currently one row per (competition, user, race_date) with JSON `{ raceId → { runnerId, runnerName, oddsDecimal } }`. Your model: one row per (user, competition, race, horse). See below. |
-| **Race_Results** | `races.winner_horse_id`, `place1_horse_id`, …; `race_days.races[].results` | Stored on `races` and in JSON for the app. |
+| **Race_Results** | `horses.position`, `horses.sp`, `horses.is_fav`; `races.is_finished` | Single source of truth: horses table; app derives via buildRacesFromTables / get_races_for_race_day. |
 
 ## Selections: aligning with your model
 

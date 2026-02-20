@@ -11,6 +11,8 @@ SplashScreen.preventAutoHideAsync();
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Roundex: require('../assets/fonts/Roundex.otf'),
+    'Polygon-Regular': require('../assets/fonts/Polygon-Regular.otf'),
+    'Polygon-Italic': require('../assets/fonts/Polygon-Italic.otf'),
   });
 
   useEffect(() => {

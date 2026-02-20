@@ -37,6 +37,9 @@ export const theme = {
     regular: 'Roundex',
     /** Use Arial for text inputs so special characters display correctly. */
     input: 'Arial, Helvetica, sans-serif',
+    /** Polygon for Results section. */
+    polygon: 'Polygon-Regular',
+    polygonItalic: 'Polygon-Italic',
   },
 } as const;
 

@@ -61,14 +61,6 @@ type RaceDetailResponse = {
   date?: string;
 };
 
-type RaceDayRace = {
-  id: string;
-  name: string;
-  scheduledTimeUtc: string;
-  distance?: string;
-  runners: Array<{ id: string; name: string; oddsDecimal: number; number?: number }>;
-};
-
 function toStr(v: unknown): string | null {
   if (v == null) return null;
   return String(v);
@@ -163,9 +155,8 @@ async function main() {
     }
   }
 
-  // 3) Collect data: by course -> { racesForJson, racesForDb, firstRaceUtc }
+  // 3) Collect data: by course -> { racesForDb, firstRaceUtc }
   type CourseData = {
-    racesForJson: RaceDayRace[];
     racesForDb: Array<{
       api_race_id: string;
       name: string;
@@ -202,31 +193,12 @@ async function main() {
       const title = (card.title ?? detail?.title ?? '').toLowerCase();
       const is_handicap = title.includes('handicap');
 
-      const runners = horses.map((h, idx) => {
-        const oddsStr = h.odds?.[0]?.odd ?? h.sp;
-        const oddsDecimal = oddsStr != null ? parseFloat(String(oddsStr)) : 0;
-        const id = h.id_horse ?? `runner-${card.id_race}-${idx}`;
-        return {
-          id: String(id),
-          name: h.horse ?? '',
-          oddsDecimal: Number.isFinite(oddsDecimal) ? oddsDecimal : 0,
-          number: h.number != null ? Number(h.number) : undefined,
-        };
-      });
-
       if (!byCourse.has(courseName)) {
-        byCourse.set(courseName, { racesForJson: [], racesForDb: [], firstRaceUtc: '' });
+        byCourse.set(courseName, { racesForDb: [], firstRaceUtc: '' });
       }
       const data = byCourse.get(courseName)!;
       if (!data.firstRaceUtc || scheduledTimeUtc < data.firstRaceUtc) data.firstRaceUtc = scheduledTimeUtc;
 
-      data.racesForJson.push({
-        id: String(card.id_race),
-        name: card.title ?? detail?.title ?? '',
-        scheduledTimeUtc,
-        distance: card.distance,
-        runners,
-      });
       data.racesForDb.push({
         api_race_id: String(card.id_race),
         name: card.title ?? detail?.title ?? '',
@@ -257,16 +229,15 @@ async function main() {
     }
   }
 
-  // 4) Bulk upload
-  const raceDaysToUpsert: { course: string; race_date: string; first_race_utc: string; races: RaceDayRace[]; updated_at: string }[] = [];
+  // 4) Bulk upload – race_days (course, date, first_race_utc); races + horses tables store full data
+  const raceDaysToUpsert: { course: string; race_date: string; first_race_utc: string; updated_at: string }[] = [];
   for (const [courseName, data] of byCourse.entries()) {
-    if (data.racesForJson.length === 0) continue;
+    if (data.racesForDb.length === 0) continue;
     const firstUtc = data.firstRaceUtc || `${targetDate}T12:00:00.000Z`;
     raceDaysToUpsert.push({
       course: courseName,
       race_date: targetDate,
       first_race_utc: firstUtc,
-      races: data.racesForJson,
       updated_at: new Date().toISOString(),
     });
   }

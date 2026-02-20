@@ -12,6 +12,8 @@ export type AvailableRaceDay = {
   raceDate: string;
   raceDayId: string;
   pendingCount: number;
+  /** First race start time (ISO). Deadline for selections = firstRaceUtc - 1 hour */
+  firstRaceUtc: string;
 };
 
 export async function fetchAvailableRacesForUser(
@@ -22,11 +24,11 @@ export async function fetchAvailableRacesForUser(
 ): Promise<AvailableRaceDay[]> {
   if (!competitionIds.length) return [];
 
-  const allRaceDays: { compId: string; compName: string; day: { id: string; race_date: string; course?: string; races: Race[] } }[] = [];
+  const allRaceDays: { compId: string; compName: string; day: { id: string; race_date: string; course?: string; first_race_utc?: string; races: Race[] } }[] = [];
   for (const compId of competitionIds) {
-    const days = await fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, races');
+    const days = await fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, first_race_utc, races');
     const compName = competitionsByName.get(compId) ?? 'Competition';
-    for (const d of days as { id: string; race_date: string; course?: string; races: Race[] }[]) {
+    for (const d of days as { id: string; race_date: string; course?: string; first_race_utc?: string; races: Race[] }[]) {
       if (d.races?.length) allRaceDays.push({ compId, compName, day: d });
     }
   }
@@ -46,6 +48,7 @@ export async function fetchAvailableRacesForUser(
   for (const { compId, compName, day } of allRaceDays) {
     const selections = selectionsByCompDate.get(`${compId}:${day.race_date}`) ?? {};
     const pendingCount = (day.races ?? []).filter((r) => !(r.id in selections)).length;
+    const firstRaceUtc = day.first_race_utc ?? `${day.race_date}T12:00:00.000Z`;
     if (pendingCount > 0) {
       result.push({
         competitionId: compId,
@@ -54,6 +57,7 @@ export async function fetchAvailableRacesForUser(
         raceDate: day.race_date,
         raceDayId: day.id,
         pendingCount,
+        firstRaceUtc,
       });
     }
   }

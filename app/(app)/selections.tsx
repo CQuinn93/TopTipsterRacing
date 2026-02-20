@@ -12,8 +12,16 @@ import { useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
+import { fetchMySelectionsView, type MySelectionItem } from '@/lib/mySelectionsView';
 import { theme } from '@/constants/theme';
 import type { Race } from '@/types/races';
+
+const SELECTION_CLOSE_HOURS_BEFORE_FIRST = 1;
+
+function isSelectionClosedForDay(firstRaceUtc: string): boolean {
+  const deadline = new Date(firstRaceUtc).getTime() - SELECTION_CLOSE_HOURS_BEFORE_FIRST * 60 * 60 * 1000;
+  return Date.now() >= deadline;
+}
 
 type RaceDay = {
   id: string;
@@ -34,6 +42,7 @@ export default function SelectionsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [userCompetitions, setUserCompetitions] = useState<{ id: string; name: string }[]>([]);
+  const [mySelectionsList, setMySelectionsList] = useState<MySelectionItem[]>([]);
 
   useEffect(() => {
     if (!userId) return;
@@ -55,8 +64,22 @@ export default function SelectionsScreen() {
   }, [userId]);
 
   useEffect(() => {
-    if (!competitionId) {
+    if (!userId || competitionId) return;
+    (async () => {
+      setLoading(true);
+      const { data: parts } = await supabase
+        .from('competition_participants')
+        .select('competition_id')
+        .eq('user_id', userId);
+      const compIds = (parts ?? []).map((p: { competition_id: string }) => p.competition_id);
+      const list = await fetchMySelectionsView(supabase, userId, compIds);
+      setMySelectionsList(list);
       setLoading(false);
+    })();
+  }, [userId, competitionId]);
+
+  useEffect(() => {
+    if (!competitionId) {
       setRaceDays([]);
       return;
     }
@@ -97,6 +120,7 @@ export default function SelectionsScreen() {
 
   const currentDay = raceDays.find((d) => d.race_date === selectedDate);
   const races = currentDay?.races ?? [];
+  const selectionsClosed = currentDay ? isSelectionClosedForDay(currentDay.first_race_utc) : false;
 
   const setSelection = (raceId: string, runnerId: string, runnerName: string, oddsDecimal: number) => {
     setSelections((prev) => ({ ...prev, [raceId]: { runnerId, runnerName, oddsDecimal } }));
@@ -125,33 +149,35 @@ export default function SelectionsScreen() {
     }
   };
 
-  if (loading && raceDays.length === 0) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={theme.colors.accent} />
-      </View>
-    );
-  }
-
-  if (!competitionId && !loading) {
-    return (
-      <View style={styles.centered}>
-        <Text style={styles.text}>
-          To make your daily selections, go to My Competitions, tap a competition, then tap "Make my selections" on the leaderboard.
-        </Text>
-        {userCompetitions.length > 0 && (
-          <TouchableOpacity
-            style={styles.linkButton}
-            onPress={() => router.push('/(app)/competitions')}
-          >
-            <Text style={styles.linkButtonText}>Open My Competitions</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  }
-
   if (!competitionId) {
+    if (loading) {
+      return (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={theme.colors.accent} />
+        </View>
+      );
+    }
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <Text style={styles.sectionTitle}>My selections</Text>
+        <Text style={styles.viewOnlySubtitle}>View only – your picks ordered by race time</Text>
+        {mySelectionsList.length === 0 ? (
+          <Text style={styles.muted}>No selections yet. Make your picks from the home screen when entries are open.</Text>
+        ) : (
+          mySelectionsList.map((item, index) => (
+            <View key={`${item.raceTimeUtc}-${item.runnerName}-${index}`} style={styles.viewOnlyCard}>
+              <Text style={styles.viewOnlyCardTitle}>
+                {item.meeting} • {new Date(item.raceTimeUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+              </Text>
+              <Text style={styles.viewOnlyCardSelection}>{item.runnerName}</Text>
+            </View>
+          ))
+        )}
+      </ScrollView>
+    );
+  }
+
+  if (loading && raceDays.length === 0) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={theme.colors.accent} />
@@ -176,6 +202,12 @@ export default function SelectionsScreen() {
         ))}
       </ScrollView>
 
+      {selectionsClosed && races.length > 0 && (
+        <View style={styles.closedBanner}>
+          <Text style={styles.closedBannerText}>Selections are closed for this race day (1 hour before first race). View only.</Text>
+        </View>
+      )}
+
       {races.length === 0 && (
         <Text style={styles.muted}>No races loaded for this day. Race data is updated daily.</Text>
       )}
@@ -192,8 +224,10 @@ export default function SelectionsScreen() {
               style={[
                 styles.runnerRow,
                 selections[race.id]?.runnerId === r.id && styles.runnerRowSelected,
+                selectionsClosed && styles.runnerRowReadOnly,
               ]}
-              onPress={() => setSelection(race.id, r.id, r.name, r.oddsDecimal)}
+              onPress={() => !selectionsClosed && setSelection(race.id, r.id, r.name, r.oddsDecimal)}
+              disabled={selectionsClosed}
             >
               <Text style={styles.runnerName}>{r.name}</Text>
               <Text style={styles.runnerOdds}>{r.oddsDecimal.toFixed(2)}</Text>
@@ -202,7 +236,7 @@ export default function SelectionsScreen() {
         </View>
       ))}
 
-      {races.length > 0 && (
+      {races.length > 0 && !selectionsClosed && (
         <TouchableOpacity
           style={[styles.saveButton, saving && styles.buttonDisabled]}
           onPress={saveSelections}
@@ -241,6 +275,32 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     marginBottom: theme.spacing.sm,
   },
+  viewOnlySubtitle: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 13,
+    color: theme.colors.textMuted,
+    marginBottom: theme.spacing.lg,
+  },
+  viewOnlyCard: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.md,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  viewOnlyCardTitle: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.xs,
+  },
+  viewOnlyCardSelection: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 18,
+    color: theme.colors.text,
+    fontWeight: '600',
+  },
   dateRow: { marginBottom: theme.spacing.lg, flexGrow: 0 },
   dateChip: {
     paddingHorizontal: theme.spacing.md,
@@ -257,6 +317,19 @@ const styles = StyleSheet.create({
   },
   dateChipText: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textSecondary },
   dateChipTextActive: { color: theme.colors.accent },
+  closedBanner: {
+    backgroundColor: 'rgba(185, 28, 28, 0.15)',
+    borderWidth: 1,
+    borderColor: '#b91c1c',
+    borderRadius: theme.radius.sm,
+    padding: theme.spacing.sm,
+    marginBottom: theme.spacing.md,
+  },
+  closedBannerText: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 13,
+    color: '#b91c1c',
+  },
   muted: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textMuted, marginBottom: theme.spacing.lg },
   raceCard: {
     backgroundColor: theme.colors.surface,
@@ -282,6 +355,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.accent,
   },
+  runnerRowReadOnly: { opacity: 0.9 },
   runnerName: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.text },
   runnerOdds: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.accent },
   saveButton: {

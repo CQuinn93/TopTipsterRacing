@@ -1,18 +1,15 @@
+import 'dotenv/config';
+
 /**
- * Fetch race results from RapidAPI and update DB: races (Winner, Place 1–4) and horses (sp).
- * Run 30 minutes after each race start; if result is blank, cron can retry after 10 minutes.
+ * Fetch race results from RapidAPI and update DB: horses (position, sp, is_fav, pos_points, sp_points), races (is_finished).
+ * Run 20 minutes after each race start; if result is blank, cron can retry after 10 minutes.
  *
  * Logic:
- * 1. Get from DB the latest race where scheduled_time_utc + 30 min < now and winner_horse_id is null.
+ * 1. Get from DB the latest race where scheduled_time_utc + 20 min < now and is_finished = false.
  * 2. GET /race/{api_race_id}. If no horses/positions, exit (retry later).
- * 3. Count runners where non_runner === '0'. Check title for "Handicap".
- * 4. Place rules:
- *    - Handicap & >= 16: 1,2,3,4
- *    - Handicap & < 16: 1,2,3
- *    - Not Handicap & >= 15: 1,2,3
- *    - Not Handicap & 8–14: 1,2
- *    - Not Handicap & 4–7: 1
- * 5. Update races (winner_horse_id, place1–4), horses (sp), and race_days.races[].results for the app.
+ * 3. Update horses: position, sp, is_fav. pos_points, sp_points only for placed positions (based on handicap + runner count).
+ * 4. Replace non-runner selections: users who picked a horse that became non-runner get FAV instead.
+ * 5. Update races: is_finished = true.
  *
  * Env: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY
  */
@@ -28,7 +25,7 @@ const API_HEADERS: Record<string, string> = {
   'x-rapidapi-host': 'horse-racing.p.rapidapi.com',
 };
 
-const MINUTES_AFTER_RACE = 30;
+const MINUTES_AFTER_RACE = 20;
 
 type HorseResult = {
   id_horse?: string;
@@ -43,12 +40,6 @@ type RaceDetailResponse = {
   title?: string;
 };
 
-function positionLabel(position: number): 'won' | 'place' | 'lost' {
-  if (position === 1) return 'won';
-  if (position === 2 || position === 3) return 'place';
-  return 'lost';
-}
-
 async function fetchRaceDetail(idRace: string): Promise<RaceDetailResponse> {
   const url = `${API_BASE}/race/${idRace}`;
   const res = await fetch(url, { headers: API_HEADERS });
@@ -56,7 +47,7 @@ async function fetchRaceDetail(idRace: string): Promise<RaceDetailResponse> {
   return res.json();
 }
 
-/** Returns how many placed positions we store (1–4) from the place rules. */
+/** Returns placed positions (1–4) for this race type. Only horses in these positions get points. */
 function getPlacedPositions(isHandicap: boolean, totalRunners: number): number[] {
   if (isHandicap) {
     return totalRunners >= 16 ? [1, 2, 3, 4] : [1, 2, 3];
@@ -86,14 +77,14 @@ async function main() {
   const { data: raceRows } = await supabase
     .from('races')
     .select('id, race_day_id, api_race_id, name')
-    .is('winner_horse_id', null)
+    .eq('is_finished', false)
     .lt('scheduled_time_utc', after.toISOString())
     .order('scheduled_time_utc', { ascending: false })
     .limit(1);
 
   const raceRow = raceRows?.[0];
   if (!raceRow) {
-    console.log('No race due for results (scheduled 30+ min ago, no winner yet).');
+    console.log('No race due for results (scheduled 30+ min ago, no unfinished races).');
     return;
   }
 
@@ -111,15 +102,11 @@ async function main() {
   const validHorses = horses.filter((h) => String(h.non_runner ?? '0') === '0');
   const totalRunners = validHorses.length;
 
-  const hasPositions = validHorses.some((h) => h.position != null && h.position !== '' && h.position !== 'ur');
+  const hasPositions = validHorses.some((h) => h.position != null && String(h.position).trim() !== '');
   if (!hasPositions || totalRunners === 0) {
     console.log('No confirmed positions yet (retry in 10 min).');
     return;
   }
-
-  const title = (detail?.title ?? raceRow.name ?? '').toLowerCase();
-  const isHandicap = title.includes('handicap');
-  const placedPositions = getPlacedPositions(isHandicap, totalRunners);
 
   const { data: horseRows } = await supabase
     .from('horses')
@@ -139,83 +126,167 @@ async function main() {
     return byName.get((h.horse ?? '').trim().toLowerCase())?.id ?? null;
   };
 
-  const byPosition = new Map<number, { horseId: string; sp: number }>();
-  const resultByApiIdOrName = new Map<string, { position: number; positionLabel: 'won' | 'place' | 'lost'; sp: number }>();
+  type HorseUpdate = { horseId: string; position: number | null; resultCode: string | null; sp: number };
+  const horsesToUpdate: HorseUpdate[] = [];
+  const spByHorseId = new Map<string, number>();
 
   for (const h of validHorses) {
-    const posStr = h.position;
-    if (posStr === 'ur' || posStr === undefined || posStr === '') continue;
+    const posStr = String(h.position ?? '').trim().toLowerCase();
+    if (posStr === '') continue;
     const position = parseInt(posStr, 10);
-    if (!Number.isFinite(position)) continue;
+    const isNumeric = Number.isFinite(position);
+    const resultCode = isNumeric ? null : posStr;
     const sp = h.sp != null ? parseFloat(String(h.sp)) : 0;
     const horseId = getHorseId(h);
-    const key = (h.id_horse ?? h.horse ?? '').toString();
-    const keyName = (h.horse ?? '').trim().toLowerCase();
     if (horseId) {
-      const entry = { position, positionLabel: positionLabel(position), sp: Number.isFinite(sp) ? sp : 0 };
-      if (key) resultByApiIdOrName.set(key, entry);
-      resultByApiIdOrName.set(keyName, entry);
-      if (placedPositions.includes(position)) {
-        byPosition.set(position, { horseId, sp: Number.isFinite(sp) ? sp : 0 });
-      }
+      horsesToUpdate.push({
+        horseId,
+        position: isNumeric ? position : null,
+        resultCode,
+        sp: Number.isFinite(sp) ? sp : 0,
+      });
+      if (isNumeric) spByHorseId.set(horseId, Number.isFinite(sp) ? sp : 0);
     }
   }
 
-  const winnerId = byPosition.get(1)?.horseId ?? null;
-  const place1Id = byPosition.get(1)?.horseId ?? null;
-  const place2Id = byPosition.get(2)?.horseId ?? null;
-  const place3Id = byPosition.get(3)?.horseId ?? null;
-  const place4Id = byPosition.get(4)?.horseId ?? null;
+  const minSp = Math.min(...spByHorseId.values(), Infinity);
+  const favHorseIds = minSp !== Infinity ? [...spByHorseId.entries()].filter(([, s]) => s === minSp).map(([id]) => id) : [];
+
+  const title = (detail?.title ?? raceRow.name ?? '').toLowerCase();
+  const isHandicap = title.includes('handicap');
+  const placedPositions = getPlacedPositions(isHandicap, totalRunners);
+  console.log(`Placed positions for this race: ${placedPositions.join(', ')} (handicap=${isHandicap}, runners=${totalRunners})`);
+
+  const now = new Date().toISOString();
+
+  // Fetch points_system for sp_points: Standard (flat) + Bonus (odds range)
+  type PointsRow = { min_decimal: string | number; max_decimal: string | number; points: number; type: string };
+  let pointsRows: PointsRow[] = [];
+  const { data: pointsData } = await supabase.from('points_system').select('min_decimal, max_decimal, points, type');
+  if (pointsData?.length) pointsRows = pointsData as PointsRow[];
+
+  function lookupRangePoints(sp: number, type: 'standard_win' | 'standard_place' | 'bonus_win' | 'bonus_place'): number {
+    const rows = pointsRows.filter((r) => r.type === type);
+    for (const r of rows) {
+      const min = Number(r.min_decimal);
+      const max = Number(r.max_decimal);
+      if (Number.isFinite(min) && Number.isFinite(max) && sp >= min && sp <= max) return Number(r.points);
+    }
+    return 0;
+  }
+
+  function getPosPoints(position: number): number | null {
+    if (pointsRows.length === 0) return null;
+    const standardType = position === 1 ? 'standard_win' : 'standard_place';
+    const pts = lookupRangePoints(0, standardType);
+    return pts > 0 ? pts : (position === 1 ? 5 : 1);
+  }
+
+  function getSpPoints(sp: number, position: number): number | null {
+    if (pointsRows.length === 0) return null;
+    const standardType = position === 1 ? 'standard_win' : 'standard_place';
+    const bonusType = position === 1 ? 'bonus_win' : 'bonus_place';
+    const standard = lookupRangePoints(sp, standardType);
+    const bonus = lookupRangePoints(sp, bonusType);
+    return standard + bonus;
+  }
+
+  // Clear is_fav for all horses in the race
+  await supabase.from('horses').update({ is_fav: false, updated_at: now }).eq('race_id', raceRow.id);
+
+  // Update each horse: position, result_code, sp, is_fav, pos_points, sp_points
+  // Only horses in placed positions get points. f/u/pu get position=null, result_code set.
+  for (const { horseId, position, resultCode, sp } of horsesToUpdate) {
+    const isFav = favHorseIds.includes(horseId);
+    const isPlaced = position != null && placedPositions.includes(position);
+    const payload: Record<string, unknown> = {
+      position: position ?? null,
+      result_code: resultCode ?? null,
+      sp,
+      is_fav: isFav,
+      updated_at: now,
+    };
+    if (isPlaced && position != null) {
+      const spPoints = getSpPoints(sp, position);
+      const posPoints = getPosPoints(position);
+      if (spPoints != null) payload.sp_points = spPoints;
+      if (posPoints != null) payload.pos_points = posPoints;
+    } else {
+      payload.pos_points = 0;
+      payload.sp_points = 0;
+    }
+    await supabase.from('horses').update(payload).eq('id', horseId);
+  }
 
   await supabase
     .from('races')
-    .update({
-      winner_horse_id: winnerId,
-      place1_horse_id: place1Id,
-      place2_horse_id: place2Id,
-      place3_horse_id: place3Id,
-      place4_horse_id: place4Id,
-      updated_at: new Date().toISOString(),
-    })
+    .update({ is_finished: true, updated_at: now })
     .eq('id', raceRow.id);
 
-  for (const h of validHorses) {
-    const posStr = h.position;
-    if (posStr === 'ur' || posStr === undefined) continue;
-    const position = parseInt(posStr, 10);
-    if (!Number.isFinite(position)) continue;
-    const sp = h.sp != null ? parseFloat(String(h.sp)) : null;
-    const horseId = getHorseId(h);
-    if (horseId && sp != null && Number.isFinite(sp)) {
-      await supabase.from('horses').update({ sp, updated_at: new Date().toISOString() }).eq('id', horseId);
-    }
-  }
+  // Replace non-runner selections: users who picked a horse that became non-runner get FAV instead.
+  const nonRunners = horses.filter((h) => String(h.non_runner ?? '0') !== '0');
+  const nonRunnerIds = new Set(nonRunners.map((h) => String(h.id_horse ?? '').trim()).filter(Boolean));
+  const nonRunnerNames = new Set(nonRunners.map((h) => (h.horse ?? '').trim().toLowerCase()).filter(Boolean));
 
-  const { data: raceDay } = await supabase
-    .from('race_days')
-    .select('id, races')
-    .eq('id', raceRow.race_day_id)
-    .single();
-
-  if (raceDay?.races && Array.isArray(raceDay.races)) {
-    const races = raceDay.races as Array<{
-      id: string;
-      runners?: Array<{ id: string; name?: string }>;
-      results?: Record<string, unknown>;
-    }>;
-    const updated = races.map((r) => {
-      if (r.id !== raceRow.api_race_id) return r;
-      const results: Record<string, { position: number; positionLabel: 'won' | 'place' | 'lost'; sp: number }> = {};
-      for (const run of r.runners ?? []) {
-        const entry = resultByApiIdOrName.get(run.id) ?? resultByApiIdOrName.get((run.name ?? '').trim().toLowerCase());
-        if (entry) results[run.id] = entry;
-      }
-      return { ...r, results: Object.keys(results).length ? results : undefined };
-    });
-    await supabase
+  if (nonRunnerIds.size > 0 || nonRunnerNames.size > 0) {
+    const { data: raceDay } = await supabase
       .from('race_days')
-      .update({ races: updated, updated_at: new Date().toISOString() })
-      .eq('id', raceRow.race_day_id);
+      .select('race_date')
+      .eq('id', raceRow.race_day_id)
+      .single();
+
+    if (raceDay?.race_date) {
+      const { data: crdRows } = await supabase
+        .from('competition_race_days')
+        .select('competition_id')
+        .eq('race_day_id', raceRow.race_day_id);
+      const compIds = [...new Set((crdRows ?? []).map((r: { competition_id: string }) => r.competition_id))];
+
+      if (compIds.length > 0) {
+        const { data: selRows } = await supabase
+          .from('daily_selections')
+          .select('id, user_id, competition_id, race_date, selections')
+          .eq('race_date', raceDay.race_date)
+          .in('competition_id', compIds);
+
+        const apiRaceId = raceRow.api_race_id;
+        const FAV_SELECTION = { runnerId: 'FAV', runnerName: 'FAV', oddsDecimal: 0 };
+        const toUpsert: Array<{ id: string; competition_id: string; user_id: string; race_date: string; selections: Record<string, unknown>; updated_at: string }> = [];
+
+        for (const row of selRows ?? []) {
+          const sel = (row.selections ?? {}) as Record<string, { runnerId?: string; runnerName?: string; oddsDecimal?: number }>;
+          const raceSel = sel[apiRaceId];
+          if (!raceSel) continue;
+
+          const runnerId = String(raceSel.runnerId ?? '').trim();
+          const runnerName = (raceSel.runnerName ?? '').trim().toLowerCase();
+          const isNonRunner =
+            (runnerId && nonRunnerIds.has(runnerId)) || (runnerName && nonRunnerNames.has(runnerName));
+
+          if (isNonRunner) {
+            const next = { ...sel, [apiRaceId]: FAV_SELECTION };
+            toUpsert.push({
+              id: row.id,
+              competition_id: row.competition_id,
+              user_id: row.user_id,
+              race_date: row.race_date,
+              selections: next,
+              updated_at: now,
+            });
+          }
+        }
+
+        if (toUpsert.length > 0) {
+          for (const u of toUpsert) {
+            await supabase
+              .from('daily_selections')
+              .update({ selections: u.selections, updated_at: u.updated_at })
+              .eq('id', u.id);
+          }
+          console.log(`Replaced ${toUpsert.length} non-runner selection(s) with FAV`);
+        }
+      }
+    }
   }
 
   console.log('Updated results for race', raceRow.api_race_id);

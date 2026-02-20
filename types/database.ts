@@ -130,7 +130,6 @@ export interface Database {
           course: string;
           race_date: string;
           first_race_utc: string;
-          races: Json;
           created_at: string;
           updated_at: string;
         };
@@ -139,7 +138,6 @@ export interface Database {
           course: string;
           race_date: string;
           first_race_utc: string;
-          races: Json;
           created_at?: string;
           updated_at?: string;
         };
@@ -148,7 +146,6 @@ export interface Database {
           course?: string;
           race_date?: string;
           first_race_utc?: string;
-          races?: Json;
           created_at?: string;
           updated_at?: string;
         };
