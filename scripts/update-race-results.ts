@@ -2,22 +2,24 @@ import 'dotenv/config';
 
 /**
  * Fetch race results from RapidAPI and update DB: horses (position, sp, is_fav, pos_points, sp_points), races (is_finished).
- * Run 20 minutes after each race start; if result is blank, cron can retry after 10 minutes.
+ * Uses RAPIDAPI_KEY_UPDATE_RESULTS (separate key from pull-races).
+ *
+ * Cron: every 30 min from 13:30 to 21:00. Processes up to 6 races where scheduled_time_utc + 15 min < now and is_finished = false.
+ * Each such race gets one API call; if results not ready yet, logs and continues. Max 6 API calls per run.
  *
  * Logic:
- * 1. Get from DB the latest race where scheduled_time_utc + 20 min < now and is_finished = false.
- * 2. GET /race/{api_race_id}. If no horses/positions, exit (retry later).
- * 3. Update horses: position, sp, is_fav. pos_points, sp_points only for placed positions (based on handicap + runner count).
- * 4. Replace non-runner selections: users who picked a horse that became non-runner get FAV instead.
- * 5. Update races: is_finished = true.
+ * 1. Select races where scheduled_time_utc + 15 min < now AND is_finished = false.
+ * 2. For each race: GET /race/{api_race_id}.
+ * 3. If results ready: update horses, mark race is_finished, replace non-runner selections.
+ * 4. If not ready: log "No results currently, will check on next run" and continue.
  *
- * Env: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY
+ * Env: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY_UPDATE_RESULTS
  */
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY =
   process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_KEY;
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY_UPDATE_RESULTS ?? process.env.RAPIDAPI_KEY;
 
 const API_BASE = 'https://horse-racing.p.rapidapi.com';
 const API_HEADERS: Record<string, string> = {
@@ -25,7 +27,7 @@ const API_HEADERS: Record<string, string> = {
   'x-rapidapi-host': 'horse-racing.p.rapidapi.com',
 };
 
-const MINUTES_AFTER_RACE = 20;
+const MINUTES_AFTER_RACE = 15;
 
 type HorseResult = {
   id_horse?: string;
@@ -58,44 +60,16 @@ function getPlacedPositions(isHandicap: boolean, totalRunners: number): number[]
   return [];
 }
 
-async function main() {
-  if (!SUPABASE_URL || !SUPABASE_KEY) {
-    console.error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY');
-    process.exit(1);
-  }
-  if (!RAPIDAPI_KEY) {
-    console.error('Set RAPIDAPI_KEY');
-    process.exit(1);
-  }
+type RaceRow = { id: string; race_day_id: string; api_race_id: string; name: string };
 
-  const { createClient } = await import('@supabase/supabase-js');
-  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-  const after = new Date();
-  after.setMinutes(after.getMinutes() - MINUTES_AFTER_RACE);
-
-  const { data: raceRows } = await supabase
-    .from('races')
-    .select('id, race_day_id, api_race_id, name')
-    .eq('is_finished', false)
-    .lt('scheduled_time_utc', after.toISOString())
-    .order('scheduled_time_utc', { ascending: false })
-    .limit(1);
-
-  const raceRow = raceRows?.[0];
-  if (!raceRow) {
-    console.log('No race due for results (scheduled 30+ min ago, no unfinished races).');
-    return;
-  }
-
-  console.log('Processing race:', raceRow.name, raceRow.api_race_id);
-
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min_decimal: string | number; max_decimal: string | number; points: number; type: string }[]): Promise<boolean> {
   let detail: RaceDetailResponse;
   try {
     detail = await fetchRaceDetail(raceRow.api_race_id);
   } catch (e) {
-    console.error('API fetch failed (retry in 10 min):', e);
-    process.exit(1);
+    console.error(`API fetch failed for ${raceRow.api_race_id}:`, e);
+    return false;
   }
 
   const horses = detail?.horses ?? [];
@@ -104,8 +78,8 @@ async function main() {
 
   const hasPositions = validHorses.some((h) => h.position != null && String(h.position).trim() !== '');
   if (!hasPositions || totalRunners === 0) {
-    console.log('No confirmed positions yet (retry in 10 min).');
-    return;
+    console.log(`  ${raceRow.name} (${raceRow.api_race_id}): No results currently, will check on next run.`);
+    return false;
   }
 
   const { data: horseRows } = await supabase
@@ -155,15 +129,9 @@ async function main() {
   const title = (detail?.title ?? raceRow.name ?? '').toLowerCase();
   const isHandicap = title.includes('handicap');
   const placedPositions = getPlacedPositions(isHandicap, totalRunners);
-  console.log(`Placed positions for this race: ${placedPositions.join(', ')} (handicap=${isHandicap}, runners=${totalRunners})`);
+  console.log(`  Placed positions: ${placedPositions.join(', ')} (handicap=${isHandicap}, runners=${totalRunners})`);
 
   const now = new Date().toISOString();
-
-  // Fetch points_system for sp_points: Standard (flat) + Bonus (odds range)
-  type PointsRow = { min_decimal: string | number; max_decimal: string | number; points: number; type: string };
-  let pointsRows: PointsRow[] = [];
-  const { data: pointsData } = await supabase.from('points_system').select('min_decimal, max_decimal, points, type');
-  if (pointsData?.length) pointsRows = pointsData as PointsRow[];
 
   function lookupRangePoints(sp: number, type: 'standard_win' | 'standard_place' | 'bonus_win' | 'bonus_place'): number {
     const rows = pointsRows.filter((r) => r.type === type);
@@ -289,8 +257,55 @@ async function main() {
     }
   }
 
-  console.log('Updated results for race', raceRow.api_race_id);
-  console.log('Done');
+  console.log(`  Updated results for race ${raceRow.api_race_id}`);
+  return true;
+}
+
+async function main() {
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    console.error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY');
+    process.exit(1);
+  }
+  if (!RAPIDAPI_KEY) {
+    console.error('Set RAPIDAPI_KEY_UPDATE_RESULTS or RAPIDAPI_KEY in .env (no spaces around =)');
+    process.exit(1);
+  }
+
+  const { createClient } = await import('@supabase/supabase-js');
+  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const after = new Date();
+  after.setMinutes(after.getMinutes() - MINUTES_AFTER_RACE);
+
+  const { data: raceRows } = await supabase
+    .from('races')
+    .select('id, race_day_id, api_race_id, name')
+    .eq('is_finished', false)
+    .lt('scheduled_time_utc', after.toISOString())
+    .order('scheduled_time_utc', { ascending: true })
+    .limit(3);
+
+  const races = (raceRows ?? []) as RaceRow[];
+  if (races.length === 0) {
+    console.log('No races due for results (scheduled_time_utc + 15 min < now, is_finished = false).');
+    return;
+  }
+
+  console.log(`Found ${races.length} race(s) due for results.`);
+
+  type PointsRow = { min_decimal: string | number; max_decimal: string | number; points: number; type: string };
+  let pointsRows: PointsRow[] = [];
+  const { data: pointsData } = await supabase.from('points_system').select('min_decimal, max_decimal, points, type');
+  if (pointsData?.length) pointsRows = pointsData as PointsRow[];
+
+  let updated = 0;
+  for (const race of races) {
+    console.log(`Processing: ${race.name} (${race.api_race_id})`);
+    const ok = await processOneRace(supabase, race, pointsRows);
+    if (ok) updated++;
+  }
+
+  console.log(`Done. Updated ${updated} of ${races.length} race(s).`);
 }
 
 main().catch((e) => {

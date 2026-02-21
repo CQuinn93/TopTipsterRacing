@@ -1,12 +1,16 @@
 /**
  * Pull race data from RapidAPI Horse Racing into Supabase.
- * Run at 5PM (day before) to pull the following day's racing.
+ * Uses RAPIDAPI_KEY_PULL_RACES (separate key from update-race-results).
+ *
+ * Cron: every 30 min from 13:00 to 19:00 (14 runs). Once race data exists for the day,
+ * later runs exit after a quick DB check with no API calls.
  *
  * Flow:
- * 1) DB: Find competitions where tomorrow is in [festival_start_date, festival_end_date]; get their course (one per competition).
- * 2) API: One call GET /racecards?date=tomorrow; filter by those courses.
- * 3) API: One call per race GET /race/{id} for runner details (with delay).
- * 4) DB: One bulk upload – upsert race_days, insert races, insert horses, upsert competition_race_days.
+ * 1) DB: Find competitions where tomorrow is in [festival_start_date, festival_end_date]; get their course(s).
+ * 2) DB: Check race_days for target date – if every course already has a meeting for that day, exit (no API calls).
+ * 3) API: One call GET /racecards?date=tomorrow; filter by courses that still need data.
+ * 4) API: One call per race GET /race/{id} for runner details (with delay).
+ * 5) DB: Upsert race_days, insert races, insert horses, upsert competition_race_days, set app_config.
  *
  * Rate limit: 10 requests/min, 50/day (free tier). Delay 6s = 10/min (fastest safe); override RACE_FETCH_DELAY_MS.
  */
@@ -17,7 +21,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY =
   process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_KEY;
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY_PULL_RACES;
 
 /** Delay in ms between each GET /race/{id} call. 10/min limit → 6s min spacing; 6s = fastest within limit. */
 const DEFAULT_RACE_FETCH_DELAY_MS = 6_000;
@@ -101,7 +105,7 @@ async function main() {
     process.exit(1);
   }
   if (!RAPIDAPI_KEY) {
-    console.error('Set RAPIDAPI_KEY for horse-racing.p.rapidapi.com');
+    console.error('Set RAPIDAPI_KEY_PULL_RACES for horse-racing.p.rapidapi.com');
     process.exit(1);
   }
 
@@ -138,7 +142,24 @@ async function main() {
   console.log('Target date:', targetDate);
   console.log('Courses from DB:', courses.join(', '));
 
-  // 2) API: One call for racecards
+  // 2) DB: Check which courses already have a race_day for target date (same matching as API filter)
+  const { data: existingRaceDays } = await supabase
+    .from('race_days')
+    .select('course')
+    .eq('race_date', targetDate);
+
+  const existingList = (existingRaceDays ?? []) as { course: string }[];
+  const hasDataForCourse = (compCourse: string): boolean =>
+    existingList.some((r) => courseMatches(r.course ?? '', compCourse));
+
+  const coursesToFetch = courses.filter((c) => !hasDataForCourse(c));
+  if (coursesToFetch.length === 0) {
+    console.log('All courses already have race data for', targetDate, '- skipping API.');
+    return;
+  }
+  console.log('Courses needing data:', coursesToFetch.join(', '));
+
+  // 3) API: One call for racecards
   let racecards: RacecardItem[];
   try {
     racecards = await fetchRacecards(targetDate);
@@ -147,9 +168,9 @@ async function main() {
     return;
   }
 
-  // Filter to races we care about (any of our courses)
+  // Filter to races we care about (only courses that still need data)
   const allFiltered: { course: string; card: RacecardItem }[] = [];
-  for (const course of courses) {
+  for (const course of coursesToFetch) {
     for (const card of racecards) {
       if (courseMatches(card.course, course)) allFiltered.push({ course: card.course, card });
     }
@@ -353,6 +374,22 @@ async function main() {
 
   if (competitionRaceDaysToUpsert.length > 0) {
     await supabase.from('competition_race_days').upsert(competitionRaceDaysToUpsert, { onConflict: 'competition_id,race_day_id' });
+  }
+
+  // Set app_config: 50 min before first race (for selections bulk refresh)
+  const allFirstRaceUtc = [...byCourse.values()].map((d) => d.firstRaceUtc).filter(Boolean);
+  const earliestFirst = allFirstRaceUtc.length ? allFirstRaceUtc.reduce((a, b) => (a < b ? a : b)) : null;
+  if (earliestFirst) {
+    const refreshAt = new Date(new Date(earliestFirst).getTime() - 50 * 60 * 1000).toISOString();
+    const { error } = await supabase.from('app_config').upsert(
+      { key: 'selections_refresh_after_utc', value: { utc: refreshAt }, updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    );
+    if (error) {
+      console.warn('  app_config update skipped (run migration 023 if needed):', error.message);
+    } else {
+      console.log('  selections_refresh_after_utc:', refreshAt);
+    }
   }
 
   const totalRaces = racesToInsert.length;
