@@ -1,6 +1,8 @@
 /**
- * Fetch races the user has selections in, grouped by meeting (course), for the Results section.
- * Each race is a template: race name, time, user's selection, places 1–4, full result, and placed positions.
+ * Fetch races for the user's competitions, grouped by meeting (course), for the Results section.
+ * Includes ALL races from linked race days – when the user has no selection (e.g. locked/FAV backfill
+ * not yet run), we show "FAV" and "Awaiting results". Each race is a template: race name, time,
+ * user's selection, places 1–4, full result, and placed positions.
  */
 import type { Race, RaceResult } from '@/types/races';
 import { fetchRaceDaysForCompetition } from './raceDaysForCompetition';
@@ -91,7 +93,7 @@ export async function fetchResultsTemplateForUser(
     for (const [raceId, v] of Object.entries(sel)) {
       if (v?.runnerName != null) out[raceId] = v.runnerName;
     }
-    if (Object.keys(out).length > 0) selectionsByCompDate.set(`${row.competition_id}:${row.race_date}`, out);
+    selectionsByCompDate.set(`${row.competition_id}:${row.race_date}`, out);
   }
 
   const byCourse = new Map<string, RaceResultTemplate[]>();
@@ -105,8 +107,7 @@ export async function fetchResultsTemplateForUser(
       const course = d.course ?? 'Meeting';
 
       for (const race of races) {
-        const userSelection = userSelections[race.id];
-        if (userSelection == null) continue;
+        const userSelection = userSelections[race.id] ?? 'FAV';
 
         const { place1, place2, place3, place4 } = getPlaceNames(race);
         const results = race.results ?? {};

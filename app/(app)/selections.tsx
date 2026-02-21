@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -26,6 +26,14 @@ import { theme } from '@/constants/theme';
 import type { Race } from '@/types/races';
 
 const SELECTION_CLOSE_HOURS_BEFORE_FIRST = 1;
+
+function formatDayDate(raceDate: string): string {
+  const d = new Date(raceDate + 'T12:00:00');
+  const day = d.toLocaleDateString(undefined, { weekday: 'short' });
+  const date = d.getDate();
+  const suffix = date === 1 || date === 21 || date === 31 ? 'st' : date === 2 || date === 22 ? 'nd' : date === 3 || date === 23 ? 'rd' : 'th';
+  return `${day} ${date}${suffix}`;
+}
 
 function isSelectionClosedForDay(firstRaceUtc: string): boolean {
   const deadline = new Date(firstRaceUtc).getTime() - SELECTION_CLOSE_HOURS_BEFORE_FIRST * 60 * 60 * 1000;
@@ -60,6 +68,11 @@ export default function SelectionsScreen() {
   } | null>(null);
   const [selectionsBulk, setSelectionsBulk] = useState<SelectionsBulkData | null>(null);
   const [refreshingMySelections, setRefreshingMySelections] = useState(false);
+  const cameFromRaceDayRef = useRef(false);
+
+  useEffect(() => {
+    if (competitionId) cameFromRaceDayRef.current = true;
+  }, [competitionId]);
 
   const refreshMySelections = async () => {
     if (!userId || competitionId) return;
@@ -98,6 +111,8 @@ export default function SelectionsScreen() {
 
   useEffect(() => {
     if (!userId || competitionId) return;
+    const forceRefresh = cameFromRaceDayRef.current;
+    cameFromRaceDayRef.current = false;
     (async () => {
       setLoading(true);
       const { data: parts } = await supabase
@@ -107,7 +122,7 @@ export default function SelectionsScreen() {
       const compIds = (parts ?? []).map((p: { competition_id: string }) => p.competition_id);
       const { data: comps } = await supabase.from('competitions').select('id, name').in('id', compIds);
       const compNames = new Map((comps ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
-      const bulk = await getSelectionsBulk(supabase, userId, compIds);
+      const bulk = await getSelectionsBulk(supabase, userId, compIds, forceRefresh);
       setSelectionsBulk(bulk);
       const list = computeMySelectionsFromBulk(bulk, userId, compNames);
       setMySelectionsList(list);
@@ -180,7 +195,9 @@ export default function SelectionsScreen() {
       if (error) throw error;
       Alert.alert('Saved', 'Your selections have been saved.');
     } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save');
+      const msg = e instanceof Error ? e.message : 'Failed to save';
+      const isLocked = /locked|1 hour|first race/i.test(msg);
+      Alert.alert(isLocked ? 'Selections locked' : 'Error', isLocked ? 'Selections are locked – less than 1 hour until the first race.' : msg);
     } finally {
       setSaving(false);
     }
@@ -207,6 +224,18 @@ export default function SelectionsScreen() {
   const filteredList = selectedCompetitionFilter
     ? mySelectionsList.filter((i) => i.competitionId === selectedCompetitionFilter)
     : mySelectionsList;
+
+  const groupedByDay = filteredList.reduce(
+    (acc, item) => {
+      const key = `${item.meeting}-${item.raceDate}`;
+      if (!acc[key]) acc[key] = { meeting: item.meeting, raceDate: item.raceDate, items: [] };
+      const existing = acc[key].items.find((i) => i.raceId === item.raceId);
+      if (!existing) acc[key].items.push(item);
+      return acc;
+    },
+    {} as Record<string, { meeting: string; raceDate: string; items: MySelectionItem[] }>
+  );
+  const dayGroups = Object.values(groupedByDay).sort((a, b) => b.raceDate.localeCompare(a.raceDate));
 
   if (!competitionId) {
     if (loading) {
@@ -235,7 +264,7 @@ export default function SelectionsScreen() {
           {hasMultipleCompetitions && (
             <View style={styles.competitionFilterRow}>
               <Text style={styles.filterLabel}>Competition:</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterChips}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterChips} contentContainerStyle={styles.filterChipsContent}>
                 <TouchableOpacity
                   style={[styles.filterChip, !selectedCompetitionFilter && styles.filterChipActive]}
                   onPress={() => setSelectedCompetitionFilter(null)}
@@ -267,43 +296,52 @@ export default function SelectionsScreen() {
           ) : filteredList.length === 0 ? (
             <Text style={styles.muted}>No selections for this competition.</Text>
           ) : (
-            filteredList.map((item, index) => (
-              <TouchableOpacity
-                key={`${item.competitionId}-${item.raceId}-${item.raceDate}-${index}`}
-                style={styles.viewOnlyCard}
-                onPress={() => handleCardPress(item)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.viewOnlyCardContent}>
-                  <View style={styles.viewOnlyCardLeft}>
-                    <Text style={styles.viewOnlyCardTitle}>
-                      {item.meeting} • {new Date(item.raceTimeUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                    <Text style={styles.viewOnlyCardSelection}>{item.runnerName}</Text>
-                  </View>
-                  {item.positionLabel && (
-                    <View
-                      style={[
-                        styles.wplBadge,
-                        item.positionLabel === 'won' && styles.wplWon,
-                        item.positionLabel === 'place' && styles.wplPlace,
-                        item.positionLabel === 'lost' && styles.wplLost,
-                      ]}
+            dayGroups.map((group) => (
+              <View key={`${group.meeting}-${group.raceDate}`} style={styles.dayGroup}>
+                <Text style={styles.dayGroupTitle}>
+                  {group.meeting} • {formatDayDate(group.raceDate)}
+                </Text>
+                {group.items
+                  .sort((a, b) => a.raceTimeUtc.localeCompare(b.raceTimeUtc))
+                  .map((item, index) => (
+                    <TouchableOpacity
+                      key={`${item.competitionId}-${item.raceId}-${item.raceDate}-${index}`}
+                      style={styles.viewOnlyCard}
+                      onPress={() => handleCardPress(item)}
+                      activeOpacity={0.7}
                     >
-                      <Text
-                        style={[
-                          styles.wplBadgeText,
-                          item.positionLabel === 'won' && styles.wplWonText,
-                          item.positionLabel === 'place' && styles.wplPlaceText,
-                          item.positionLabel === 'lost' && styles.wplLostText,
-                        ]}
-                      >
-                        {item.positionLabel === 'won' ? 'Win' : item.positionLabel === 'place' ? 'Place' : 'Loss'}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </TouchableOpacity>
+                      <View style={styles.viewOnlyCardContent}>
+                        <View style={styles.viewOnlyCardLeft}>
+                          <Text style={styles.viewOnlyCardTitle}>
+                            {item.meeting} • {new Date(item.raceTimeUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                          </Text>
+                          <Text style={styles.viewOnlyCardSelection}>{item.runnerName}</Text>
+                        </View>
+                        {item.positionLabel && (
+                          <View
+                            style={[
+                              styles.wplBadge,
+                              item.positionLabel === 'won' && styles.wplWon,
+                              item.positionLabel === 'place' && styles.wplPlace,
+                              item.positionLabel === 'lost' && styles.wplLost,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.wplBadgeText,
+                                item.positionLabel === 'won' && styles.wplWonText,
+                                item.positionLabel === 'place' && styles.wplPlaceText,
+                                item.positionLabel === 'lost' && styles.wplLostText,
+                              ]}
+                            >
+                              {item.positionLabel === 'won' ? 'Win' : item.positionLabel === 'place' ? 'Place' : 'Loss'}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+              </View>
             ))
           )}
         </ScrollView>
@@ -455,12 +493,13 @@ const styles = StyleSheet.create({
     color: theme.colors.textMuted,
   },
   filterChips: { flex: 1 },
+  filterChipsContent: { paddingVertical: theme.spacing.xs },
   filterChip: {
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.sm,
     borderRadius: theme.radius.full,
     backgroundColor: theme.colors.surface,
-    marginRight: theme.spacing.xs,
+    marginRight: theme.spacing.sm,
     borderWidth: 1,
     borderColor: theme.colors.border,
   },
@@ -468,8 +507,19 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.accentMuted,
     borderColor: theme.colors.accent,
   },
-  filterChipText: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary },
+  filterChipText: { fontFamily: theme.fontFamily.regular, fontSize: 15, color: theme.colors.textSecondary },
   filterChipTextActive: { color: theme.colors.accent },
+  dayGroup: {
+    marginBottom: theme.spacing.xl,
+  },
+  dayGroupTitle: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.text,
+    marginBottom: theme.spacing.sm,
+    marginTop: theme.spacing.sm,
+  },
   viewOnlyCard: {
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.sm,
@@ -567,8 +617,8 @@ const styles = StyleSheet.create({
   modalCloseText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.accent },
   dateRow: { marginBottom: theme.spacing.lg, flexGrow: 0 },
   dateChip: {
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
     borderRadius: theme.radius.full,
     backgroundColor: theme.colors.surface,
     marginRight: theme.spacing.sm,
@@ -579,7 +629,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.accentMuted,
     borderColor: theme.colors.accent,
   },
-  dateChipText: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textSecondary },
+  dateChipText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.textSecondary },
   dateChipTextActive: { color: theme.colors.accent },
   closedBanner: {
     backgroundColor: 'rgba(185, 28, 28, 0.15)',

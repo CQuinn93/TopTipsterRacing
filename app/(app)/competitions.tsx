@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
+import { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { theme } from '@/constants/theme';
+import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
+import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
 
 type UserCompetition = {
   competition_id: string;
@@ -14,6 +16,20 @@ type UserCompetition = {
   display_name: string;
   position: number | null; // 1-based rank in that competition, null if no scores yet
 };
+
+function getCompetitionDisplayStatus(startDate: string, endDate: string): 'upcoming' | 'live' | 'complete' | null {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today < startDate) return 'upcoming';
+  if (today >= startDate && today <= endDate) return 'live';
+  return 'complete';
+}
+
+function isCompletedMoreThanOneDay(endDate: string): boolean {
+  if (!endDate) return false;
+  const end = new Date(endDate + 'T23:59:59').getTime();
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  return Date.now() > end + oneDayMs;
+}
 
 type PendingCompetition = {
   competition_id: string;
@@ -27,9 +43,16 @@ export default function MyCompetitionsScreen() {
   const [list, setList] = useState<UserCompetition[]>([]);
   const [pendingList, setPendingList] = useState<PendingCompetition[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [newlyApprovedNames, setNewlyApprovedNames] = useState<string[]>([]);
+  const pendingListRef = useRef<PendingCompetition[]>([]);
+
+  useEffect(() => {
+    pendingListRef.current = pendingList;
+  }, [pendingList]);
 
   const load = async () => {
     if (!userId) return;
+    const prevPendingIds = new Set(pendingListRef.current.map((c) => c.competition_id));
     setRefreshing(true);
     try {
       const [participantsRes, pendingRes] = await Promise.all([
@@ -47,6 +70,7 @@ export default function MyCompetitionsScreen() {
 
       if (!participantsRes.data?.length) {
         setList([]);
+        setNewlyApprovedNames([]);
       } else {
         const compIds = (participantsRes.data as { competition_id: string }[]).map((p) => p.competition_id);
         const displayNameByComp = new Map(
@@ -54,18 +78,24 @@ export default function MyCompetitionsScreen() {
         );
         const { data: comps, error: compsError } = await supabase
           .from('competitions')
-          .select('id, name, status, festival_start_date, festival_end_date')
+          .select('id, name, festival_start_date, festival_end_date')
           .in('id', compIds);
         if (compsError) throw compsError;
-        const joined: UserCompetition[] = (comps ?? []).map((c) => ({
-          competition_id: c.id,
-          name: c.name,
-          status: c.status,
-          festival_start_date: c.festival_start_date,
-          festival_end_date: c.festival_end_date,
-          display_name: displayNameByComp.get(c.id) ?? '',
-          position: null,
-        }));
+        const joined: UserCompetition[] = (comps ?? [])
+          .filter((c) => !isCompletedMoreThanOneDay(c.festival_end_date))
+          .map((c) => {
+            const displayStatus = getCompetitionDisplayStatus(c.festival_start_date, c.festival_end_date);
+            const statusLabel = displayStatus === 'upcoming' ? 'Upcoming' : displayStatus === 'live' ? 'Live' : 'Complete';
+            return {
+              competition_id: c.id,
+              name: c.name,
+              status: statusLabel,
+              festival_start_date: c.festival_start_date,
+              festival_end_date: c.festival_end_date,
+              display_name: displayNameByComp.get(c.id) ?? '',
+              position: null,
+            };
+          });
 
         if (joined.length > 0 && compIds.length > 0) {
           const { data: allSelections } = await supabase
@@ -93,6 +123,8 @@ export default function MyCompetitionsScreen() {
           }
         }
         setList(joined);
+        const newlyApproved = joined.filter((c) => prevPendingIds.has(c.competition_id));
+        setNewlyApprovedNames(newlyApproved.length > 0 ? newlyApproved.map((c) => c.name) : []);
       }
 
       if (pendingRes.error || !pendingRes.data?.length) {
@@ -126,6 +158,24 @@ export default function MyCompetitionsScreen() {
   useEffect(() => {
     load();
   }, [userId]);
+
+  useEffect(() => {
+    if (newlyApprovedNames.length === 0 || !userId) return;
+    const message =
+      newlyApprovedNames.length === 1
+        ? `${newlyApprovedNames[0]} entry has been approved.`
+        : `${newlyApprovedNames.join(', ')} entries have been approved.`;
+    Alert.alert('Approved', message, [
+      {
+        text: 'OK',
+        onPress: () => {
+          setNewlyApprovedNames([]);
+          clearAvailableRacesCache(userId);
+          clearSelectionsBulkCache(userId);
+        },
+      },
+    ]);
+  }, [newlyApprovedNames, userId]);
 
   return (
     <ScrollView

@@ -26,7 +26,15 @@ type SelectionRow = {
   selections: Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }> | null;
 };
 
-type RaceDayWithRaces = { id: string; race_date: string; course: string; races: Race[] };
+type RaceDayWithRaces = { id: string; race_date: string; course: string; first_race_utc?: string; races: Race[] };
+
+const SELECTION_CLOSE_HOURS_BEFORE_FIRST = 1;
+
+function isDeadlinePassed(firstRaceUtc: string | undefined, raceDate: string): boolean {
+  const utc = firstRaceUtc ?? `${raceDate}T12:00:00.000Z`;
+  const deadlineMs = new Date(utc).getTime() - SELECTION_CLOSE_HOURS_BEFORE_FIRST * 60 * 60 * 1000;
+  return Date.now() >= deadlineMs;
+}
 
 export async function fetchMySelectionsView(
   supabase: Parameters<typeof fetchRaceDaysForCompetition>[0],
@@ -45,37 +53,51 @@ export async function fetchMySelectionsView(
     .eq('user_id', userId)
     .in('competition_id', competitionIds);
 
-  const rows = (selectionRows ?? []) as SelectionRow[];
+  const selectionByCompDate = new Map<string, Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }>>();
+  for (const row of (selectionRows ?? []) as SelectionRow[]) {
+    selectionByCompDate.set(`${row.competition_id}:${row.race_date}`, row.selections ?? {});
+  }
+
   const items: MySelectionItem[] = [];
 
-  for (const row of rows) {
-    const selections = row.selections ?? {};
-    if (Object.keys(selections).length === 0) continue;
+  for (const compId of competitionIds) {
+    const days = (await fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, first_race_utc, races')) as RaceDayWithRaces[];
+    const competitionName = names.get(compId) ?? 'Competition';
 
-    const days = await fetchRaceDaysForCompetition(supabase, row.competition_id, 'id, race_date, course, races');
-    const day = days.find((d: { race_date: string }) => d.race_date === row.race_date) as RaceDayWithRaces | undefined;
-    if (!day?.races?.length) continue;
+    for (const day of days) {
+      const selections = selectionByCompDate.get(`${compId}:${day.race_date}`) ?? {};
+      const deadlinePassed = isDeadlinePassed(day.first_race_utc, day.race_date);
+      const course = day.course ?? 'Meeting';
+      const races = day.races ?? [];
 
-    const course = day.course ?? 'Meeting';
-    const competitionName = names.get(row.competition_id) ?? 'Competition';
+      for (const race of races) {
+        const sel = selections[race.id];
+        let runnerName: string;
+        let runnerId: string;
+        if (sel?.runnerName) {
+          runnerName = sel.runnerName;
+          runnerId = sel.runnerId ?? '';
+        } else if (deadlinePassed) {
+          runnerName = 'FAV';
+          runnerId = 'FAV';
+        } else {
+          continue;
+        }
 
-    for (const [raceId, sel] of Object.entries(selections)) {
-      const race = day.races.find((r) => r.id === raceId);
-      if (!race) continue;
-      const result = race.results?.[sel.runnerId ?? ''] as RaceResult | undefined;
-      const positionLabel = result?.positionLabel;
-      items.push({
-        meeting: course,
-        raceTimeUtc: race.scheduledTimeUtc,
-        runnerName: sel.runnerName ?? '—',
-        competitionId: row.competition_id,
-        competitionName,
-        raceId,
-        raceDate: row.race_date,
-        raceName: race.name ?? 'Race',
-        runnerId: sel.runnerId ?? '',
-        positionLabel,
-      });
+        const result = race.results?.[runnerId] as RaceResult | undefined;
+        items.push({
+          meeting: course,
+          raceTimeUtc: race.scheduledTimeUtc,
+          runnerName,
+          competitionId: compId,
+          competitionName,
+          raceId: race.id,
+          raceDate: day.race_date,
+          raceName: race.name ?? 'Race',
+          runnerId,
+          positionLabel: result?.positionLabel,
+        });
+      }
     }
   }
 
@@ -85,6 +107,8 @@ export async function fetchMySelectionsView(
 
 /**
  * Compute MySelectionItem[] from preloaded bulk data (no DB calls).
+ * Includes races where the user has made a selection, or where the deadline has passed
+ * (shows FAV so they're aware of who they're on).
  */
 export function computeMySelectionsFromBulk(
   bulk: SelectionsBulkData,
@@ -92,35 +116,48 @@ export function computeMySelectionsFromBulk(
   compNames: Map<string, string>
 ): MySelectionItem[] {
   const items: MySelectionItem[] = [];
-  const userRows = bulk.selections.filter((r) => r.user_id === userId);
 
-  for (const row of userRows) {
-    const selections = row.selections ?? {};
-    if (Object.keys(selections).length === 0) continue;
+  for (const compId of bulk.competitionIds) {
+    const days = bulk.raceDaysByComp[compId] ?? [];
+    const competitionName = compNames.get(compId) ?? 'Competition';
 
-    const days = bulk.raceDaysByComp[row.competition_id] ?? [];
-    const day = days.find((d) => d.race_date === row.race_date);
-    if (!day?.races?.length) continue;
+    for (const day of days) {
+      const userRow = bulk.selections.find(
+        (r) => r.user_id === userId && r.competition_id === compId && r.race_date === day.race_date
+      );
+      const selections = userRow?.selections ?? {};
+      const deadlinePassed = isDeadlinePassed(day.first_race_utc, day.race_date);
+      const course = day.course ?? 'Meeting';
+      const races = day.races ?? [];
 
-    const course = day.course ?? 'Meeting';
-    const competitionName = compNames.get(row.competition_id) ?? 'Competition';
+      for (const race of races) {
+        const sel = selections[race.id];
+        let runnerName: string;
+        let runnerId: string;
+        if (sel?.runnerName) {
+          runnerName = sel.runnerName;
+          runnerId = sel.runnerId ?? '';
+        } else if (deadlinePassed) {
+          runnerName = 'FAV';
+          runnerId = 'FAV';
+        } else {
+          continue;
+        }
 
-    for (const [raceId, sel] of Object.entries(selections)) {
-      const race = day.races.find((r) => r.id === raceId);
-      if (!race) continue;
-      const result = race.results?.[sel.runnerId ?? ''] as RaceResult | undefined;
-      items.push({
-        meeting: course,
-        raceTimeUtc: race.scheduledTimeUtc,
-        runnerName: sel.runnerName ?? '—',
-        competitionId: row.competition_id,
-        competitionName,
-        raceId,
-        raceDate: row.race_date,
-        raceName: race.name ?? 'Race',
-        runnerId: sel.runnerId ?? '',
-        positionLabel: result?.positionLabel,
-      });
+        const result = race.results?.[runnerId] as RaceResult | undefined;
+        items.push({
+          meeting: course,
+          raceTimeUtc: race.scheduledTimeUtc,
+          runnerName,
+          competitionId: compId,
+          competitionName,
+          raceId: race.id,
+          raceDate: day.race_date,
+          raceName: race.name ?? 'Race',
+          runnerId,
+          positionLabel: result?.positionLabel,
+        });
+      }
     }
   }
 

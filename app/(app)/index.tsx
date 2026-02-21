@@ -1,12 +1,17 @@
-import { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Modal, Pressable } from 'react-native';
+import { useEffect, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { theme } from '@/constants/theme';
-import { fetchAvailableRacesForUser, type AvailableRaceDay } from '@/lib/availableRacesForUser';
-import { fetchResultsTemplateForUser, type MeetingResults, type RaceResultTemplate } from '@/lib/resultsTemplateForUser';
-import type { Database } from '@/types/database';
+import { getAvailableRacesForUser } from '@/lib/availableRacesCache';
+import { getLatestResultsForUser } from '@/lib/latestResultsCache';
+import { useForceRefresh } from '@/contexts/ForceRefreshContext';
+import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
+import type { MeetingResults, RaceResultTemplate } from '@/lib/resultsTemplateForUser';
+import type { ParticipationRow } from '@/lib/availableRacesCache';
 
 const SELECTION_CLOSE_HOURS_BEFORE_FIRST = 1;
 
@@ -30,11 +35,9 @@ function formatTimeUntilDeadline(firstRaceUtc: string): string {
   return 'Closing soon';
 }
 
-type Participant = Database['public']['Tables']['competition_participants']['Row'];
-
 export default function HomeScreen() {
   const { userId } = useAuth();
-  const [participations, setParticipations] = useState<Participant[]>([]);
+  const [participations, setParticipations] = useState<ParticipationRow[]>([]);
   const [availableRaces, setAvailableRaces] = useState<AvailableRaceDay[]>([]);
   const [meetingResults, setMeetingResults] = useState<MeetingResults[]>([]);
   const [selectedMeetingCourse, setSelectedMeetingCourse] = useState<string | null>(null);
@@ -42,40 +45,54 @@ export default function HomeScreen() {
   const [meetingDropdownOpen, setMeetingDropdownOpen] = useState(false);
   const [showFullResult, setShowFullResult] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshingResults, setRefreshingResults] = useState(false);
+  const [lockingId, setLockingId] = useState<string | null>(null);
 
-  const load = async () => {
-    if (!userId) return;
-    setRefreshing(true);
-    try {
-      const { data: partData } = await supabase
-        .from('competition_participants')
-        .select('id, competition_id, display_name')
-        .eq('user_id', userId);
-      if (partData) setParticipations(partData);
-
-      if (partData?.length) {
-        const compIds = partData.map((p) => p.competition_id);
-        const { data: comps } = await supabase.from('competitions').select('id, name').in('id', compIds);
-        const compByName = new Map((comps ?? []).map((c) => [c.id, c.name]));
-        const [available, template] = await Promise.all([
-          fetchAvailableRacesForUser(supabase, userId, compIds, compByName),
-          fetchResultsTemplateForUser(supabase, userId, compIds),
-        ]);
-        setAvailableRaces(available);
-        setMeetingResults(template);
-      } else {
-        setAvailableRaces([]);
-        setMeetingResults([]);
-        setSelectedMeetingCourse(null);
+  const load = useCallback(
+    async (forceRefresh = false) => {
+      if (!userId) return;
+      setRefreshing(true);
+      try {
+        const { participations, availableRaces } = await getAvailableRacesForUser(supabase, userId, forceRefresh);
+        setParticipations(participations);
+        setAvailableRaces(availableRaces);
+        if (participations.length === 0) {
+          setMeetingResults([]);
+          setSelectedMeetingCourse(null);
+        } else {
+          const compIds = participations.map((p) => p.competition_id);
+          const results = await getLatestResultsForUser(supabase, userId, compIds, forceRefresh);
+          setMeetingResults(results);
+        }
+      } finally {
+        setRefreshing(false);
       }
-    } finally {
-      setRefreshing(false);
-    }
-  };
+    },
+    [userId]
+  );
 
+  const refreshResults = useCallback(async () => {
+    if (!userId || participations.length === 0) return;
+    setRefreshingResults(true);
+    try {
+      const compIds = participations.map((p) => p.competition_id);
+      const results = await getLatestResultsForUser(supabase, userId, compIds, true);
+      setMeetingResults(results);
+    } finally {
+      setRefreshingResults(false);
+    }
+  }, [userId, participations]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (userId) load(false);
+    }, [userId, load])
+  );
+
+  const { homeTrigger } = useForceRefresh();
   useEffect(() => {
-    load();
-  }, [userId]);
+    if (userId && homeTrigger > 0) load(true);
+  }, [userId, homeTrigger, load]);
 
   useEffect(() => {
     if (meetingResults.length === 0) return;
@@ -103,13 +120,28 @@ export default function HomeScreen() {
 
   const hasJoinedAny = participations.length > 0;
 
+  const handleLockIn = async (item: AvailableRaceDay) => {
+    if (!userId || item.isLocked || !item.hasAllPicks) return;
+    setLockingId(`${item.competitionId}-${item.raceDate}`);
+    try {
+      const { data, error } = await supabase.rpc('lock_selections', {
+        p_competition_id: item.competitionId,
+        p_race_date: item.raceDate,
+      });
+      const result = data as { success?: boolean; error?: string } | null;
+      if (error || !result?.success) {
+        Alert.alert('Error', result?.error ?? error?.message ?? 'Failed to lock');
+        return;
+      }
+      await load(true);
+    } finally {
+      setLockingId(null);
+    }
+  };
+
   return (
     <View style={styles.wrapper}>
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} tintColor={theme.colors.accent} />}
-      >
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         <Text style={styles.title}>Cheltenham Top Tipster</Text>
         <Text style={styles.subtitle}>Make your daily picks and climb the leaderboard</Text>
 
@@ -130,16 +162,19 @@ export default function HomeScreen() {
           )}
           {availableRaces.map((item) => {
             const closed = isSelectionClosed(item.firstRaceUtc);
+            const cardKey = `${item.competitionId}-${item.raceDate}`;
+            const isLocking = lockingId === cardKey;
             return (
               <TouchableOpacity
-                key={`${item.competitionId}-${item.raceDate}`}
+                key={cardKey}
                 style={[styles.card, closed && styles.cardClosed]}
                 onPress={() =>
-                  closed
+                  closed || item.isLocked
                     ? router.push('/(app)/selections')
                     : router.push({ pathname: '/(app)/selections', params: { competitionId: item.competitionId, raceDate: item.raceDate } })
                 }
                 activeOpacity={0.8}
+                disabled={isLocking}
               >
                 <View style={styles.cardRow}>
                   <View style={styles.cardLeft}>
@@ -149,16 +184,39 @@ export default function HomeScreen() {
                     </Text>
                     {closed ? (
                       <Text style={styles.cardStatusClosed}>Selections now closed. Go to "My selections" to view.</Text>
+                    ) : item.isLocked ? (
+                      <Text style={styles.cardStatus}>Locked – tap to view others&apos; picks</Text>
+                    ) : item.hasAllPicks ? (
+                      <Text style={styles.cardStatus}>All picks made – lock in to view others</Text>
                     ) : (
                       <Text style={styles.cardStatus}>
                         {item.pendingCount} race{item.pendingCount !== 1 ? 's' : ''} to pick – tap to make selections
                       </Text>
                     )}
                   </View>
-                  {!closed && (
+                  {!closed && !item.isLocked && (
                     <View style={styles.cardRight}>
-                      <Text style={styles.entriesOpenLabel}>Entries open</Text>
-                      <Text style={styles.entriesOpenTime}>{formatTimeUntilDeadline(item.firstRaceUtc)}</Text>
+                      {item.hasAllPicks ? (
+                        <TouchableOpacity
+                          style={[styles.lockInButton, isLocking && styles.lockInButtonDisabled]}
+                          onPress={(e) => {
+                            e?.stopPropagation?.();
+                            handleLockIn(item);
+                          }}
+                          disabled={isLocking}
+                        >
+                          {isLocking ? (
+                            <ActivityIndicator size="small" color={theme.colors.black} />
+                          ) : (
+                            <Text style={styles.lockInButtonText}>Lock in</Text>
+                          )}
+                        </TouchableOpacity>
+                      ) : (
+                        <>
+                          <Text style={styles.entriesOpenLabel}>Entries open</Text>
+                          <Text style={styles.entriesOpenTime}>{formatTimeUntilDeadline(item.firstRaceUtc)}</Text>
+                        </>
+                      )}
                     </View>
                   )}
                 </View>
@@ -170,7 +228,20 @@ export default function HomeScreen() {
         {/* Section 2: Results */}
         {hasJoinedAny && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Results</Text>
+            <View style={styles.resultsSectionHeader}>
+              <Text style={[styles.sectionTitle, styles.resultsSectionTitle]}>Results</Text>
+              <TouchableOpacity
+                style={styles.refreshResultsButton}
+                onPress={refreshResults}
+                disabled={refreshingResults}
+              >
+                {refreshingResults ? (
+                  <ActivityIndicator size="small" color={theme.colors.accent} />
+                ) : (
+                  <Ionicons name="refresh" size={20} color={theme.colors.accent} />
+                )}
+              </TouchableOpacity>
+            </View>
             {meetingResults.length === 0 ? (
               <Text style={styles.cardMeta}>Make selections to see results here</Text>
             ) : (
@@ -323,6 +394,18 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     marginBottom: theme.spacing.md,
   },
+  resultsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing.md,
+  },
+  resultsSectionTitle: {
+    marginBottom: 0,
+  },
+  refreshResultsButton: {
+    padding: theme.spacing.sm,
+  },
   card: {
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.md,
@@ -356,6 +439,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: theme.colors.textMuted,
     marginTop: 2,
+  },
+  lockInButton: {
+    backgroundColor: theme.colors.accent,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: theme.radius.sm,
+  },
+  lockInButtonDisabled: { opacity: 0.7 },
+  lockInButtonText: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 13,
+    color: theme.colors.black,
+    fontWeight: '600',
   },
   cardTitle: {
     fontFamily: theme.fontFamily.regular,

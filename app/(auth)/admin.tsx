@@ -56,6 +56,18 @@ function parseYYYYMMDD(s: string): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+/** Earliest selectable festival start date: 2 days from today (race data pulls day before). */
+function getMinStartDate(): Date {
+  const d = new Date();
+  d.setDate(d.getDate() + 2);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function getMinStartDateStr(): string {
+  return formatDateToYYYYMMDD(getMinStartDate());
+}
+
 type PendingRequest = {
   id: string;
   competition_id: string;
@@ -68,7 +80,6 @@ type PendingRequest = {
 type Competition = {
   id: string;
   name: string;
-  status: string;
 };
 
 type AdminSelectionRow = {
@@ -110,7 +121,7 @@ export default function AdminScreen() {
     try {
       const [pendingRes, compsRes] = await Promise.all([
         supabase.rpc('admin_list_pending', { p_admin_code: ADMIN_CODE }),
-        supabase.from('competitions').select('id, name, status').order('name'),
+        supabase.from('competitions').select('id, name').order('name'),
       ]);
       if (pendingRes.error) throw pendingRes.error;
       if (compsRes.error) throw compsRes.error;
@@ -240,6 +251,11 @@ export default function AdminScreen() {
     const end = newEndDate.trim() || null;
     if (!start || !end) {
       Alert.alert('Error', 'Please enter festival start and end dates (YYYY-MM-DD).');
+      return;
+    }
+    const minStart = getMinStartDateStr();
+    if (start < minStart) {
+      Alert.alert('Error', `Start date must be at least 2 days ahead (${minStart}). Race data is pulled the day before.`);
       return;
     }
     const course = newCourse.trim();
@@ -375,22 +391,33 @@ export default function AdminScreen() {
             onChangeText={setNewName}
             editable={!createLoading}
           />
-          <Text style={styles.formLabel}>Festival start date</Text>
+          <Text style={styles.formLabel}>Festival start date (min 2 days ahead – race data pulls the day before)</Text>
           {Platform.OS === 'web' ? (
-            <TextInput
-              style={styles.input}
-              placeholder="YYYY-MM-DD (e.g. 2027-03-10)"
-              placeholderTextColor={theme.colors.textMuted}
+            <input
+              type="date"
+              min={getMinStartDateStr()}
               value={newStartDate}
-              onChangeText={setNewStartDate}
-              editable={!createLoading}
+              onChange={(e) => setNewStartDate(e.target.value)}
+              disabled={createLoading}
+              style={{
+                fontFamily: theme.fontFamily.input,
+                fontSize: 16,
+                color: theme.colors.text,
+                backgroundColor: theme.colors.surface,
+                border: `1px solid ${theme.colors.border}`,
+                borderRadius: 8,
+                padding: 12,
+                width: '100%',
+              }}
             />
           ) : (
             <TouchableOpacity
               style={[styles.input, styles.coursePickerTrigger]}
               onPress={() => {
                 if (createLoading) return;
-                setDatePickerTempDate(parseYYYYMMDD(newStartDate) || new Date());
+                const parsed = parseYYYYMMDD(newStartDate);
+                const minDate = getMinStartDate();
+                setDatePickerTempDate(parsed && parsed >= minDate ? parsed : minDate);
                 setDatePickerOpen('start');
               }}
               disabled={createLoading}
@@ -403,20 +430,32 @@ export default function AdminScreen() {
           )}
           <Text style={styles.formLabel}>Festival end date</Text>
           {Platform.OS === 'web' ? (
-            <TextInput
-              style={styles.input}
-              placeholder="YYYY-MM-DD (e.g. 2027-03-14)"
-              placeholderTextColor={theme.colors.textMuted}
+            <input
+              type="date"
+              min={newStartDate || getMinStartDateStr()}
               value={newEndDate}
-              onChangeText={setNewEndDate}
-              editable={!createLoading}
+              onChange={(e) => setNewEndDate(e.target.value)}
+              disabled={createLoading}
+              style={{
+                fontFamily: theme.fontFamily.input,
+                fontSize: 16,
+                color: theme.colors.text,
+                backgroundColor: theme.colors.surface,
+                border: `1px solid ${theme.colors.border}`,
+                borderRadius: 8,
+                padding: 12,
+                width: '100%',
+              }}
             />
           ) : (
             <TouchableOpacity
               style={[styles.input, styles.coursePickerTrigger]}
               onPress={() => {
                 if (createLoading) return;
-                setDatePickerTempDate(parseYYYYMMDD(newEndDate) || new Date());
+                const startDate = parseYYYYMMDD(newStartDate) || getMinStartDate();
+                const parsed = parseYYYYMMDD(newEndDate);
+                const minEnd = startDate;
+                setDatePickerTempDate(parsed && parsed >= minEnd ? parsed : minEnd);
                 setDatePickerOpen('end');
               }}
               disabled={createLoading}
@@ -433,7 +472,7 @@ export default function AdminScreen() {
                 <Pressable style={styles.datePickerModalContent} onPress={(e) => e.stopPropagation()}>
                   <View style={styles.modalHeader}>
                     <Text style={styles.modalTitle}>
-                      {datePickerOpen === 'start' ? 'Select start date' : 'Select end date'}
+                      {datePickerOpen === 'start' ? 'Select start date (min 2 days ahead)' : 'Select end date'}
                     </Text>
                     <View style={styles.datePickerActions}>
                       <TouchableOpacity
@@ -451,7 +490,8 @@ export default function AdminScreen() {
                   <DateTimePicker
                     value={datePickerTempDate}
                     mode="date"
-                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    display={Platform.OS === 'ios' ? 'inline' : 'calendar'}
+                    minimumDate={datePickerOpen === 'start' ? getMinStartDate() : parseYYYYMMDD(newStartDate) || getMinStartDate()}
                     onChange={(_, d) => d && setDatePickerTempDate(d)}
                   />
                 </Pressable>

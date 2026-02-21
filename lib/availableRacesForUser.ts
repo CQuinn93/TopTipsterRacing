@@ -14,6 +14,14 @@ export type AvailableRaceDay = {
   pendingCount: number;
   /** First race start time (ISO). Deadline for selections = firstRaceUtc - 1 hour */
   firstRaceUtc: string;
+  /** Last race start time (ISO). Used for cache invalidation. */
+  lastRaceUtc: string;
+  /** User has made all picks for this day */
+  hasAllPicks: boolean;
+  /** User has locked in (early lock or past deadline) */
+  isLocked: boolean;
+  /** daily_selections id for lock RPC */
+  selectionId: string | null;
 };
 
 export async function fetchAvailableRacesForUser(
@@ -35,21 +43,45 @@ export async function fetchAvailableRacesForUser(
 
   const { data: selectionsRows } = await supabase
     .from('daily_selections')
-    .select('competition_id, race_date, selections')
+    .select('id, competition_id, race_date, selections, locked_at')
     .eq('user_id', userId)
     .in('competition_id', competitionIds);
 
-  const selectionsByCompDate = new Map<string, Record<string, unknown>>();
-  for (const row of (selectionsRows ?? []) as { competition_id: string; race_date: string; selections: Record<string, unknown> | null }[]) {
-    selectionsByCompDate.set(`${row.competition_id}:${row.race_date}`, row.selections ?? {});
+  type SelRow = {
+    id: string;
+    competition_id: string;
+    race_date: string;
+    selections: Record<string, unknown> | null;
+    locked_at: string | null;
+  };
+  const selectionsByCompDate = new Map<string, { selections: Record<string, unknown>; locked_at: string | null; id: string }>();
+  for (const row of (selectionsRows ?? []) as SelRow[]) {
+    selectionsByCompDate.set(`${row.competition_id}:${row.race_date}`, {
+      selections: row.selections ?? {},
+      locked_at: row.locked_at,
+      id: row.id,
+    });
   }
 
   const result: AvailableRaceDay[] = [];
   for (const { compId, compName, day } of allRaceDays) {
-    const selections = selectionsByCompDate.get(`${compId}:${day.race_date}`) ?? {};
-    const pendingCount = (day.races ?? []).filter((r) => !(r.id in selections)).length;
     const firstRaceUtc = day.first_race_utc ?? `${day.race_date}T12:00:00.000Z`;
-    if (pendingCount > 0) {
+    const races = day.races ?? [];
+    const lastRaceUtc =
+      races.length > 0
+        ? races.reduce((max, r) => (r.scheduledTimeUtc > max ? r.scheduledTimeUtc : max), races[0].scheduledTimeUtc)
+        : firstRaceUtc;
+    const sel = selectionsByCompDate.get(`${compId}:${day.race_date}`);
+    const selections = sel?.selections ?? {};
+    const lockedAt = sel?.locked_at ?? null;
+    const selectionId = sel?.id ?? null;
+    const pendingCount = races.filter((r) => !(r.id in selections)).length;
+    const hasAllPicks = pendingCount === 0;
+    const deadlineMs = new Date(firstRaceUtc).getTime() - 60 * 60 * 1000;
+    const beforeDeadline = Date.now() < deadlineMs;
+    const isLocked = lockedAt != null || !beforeDeadline;
+
+    if (beforeDeadline) {
       result.push({
         competitionId: compId,
         competitionName: compName,
@@ -58,6 +90,10 @@ export async function fetchAvailableRacesForUser(
         raceDayId: day.id,
         pendingCount,
         firstRaceUtc,
+        lastRaceUtc,
+        hasAllPicks,
+        isLocked,
+        selectionId,
       });
     }
   }

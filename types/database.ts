@@ -9,7 +9,6 @@ export interface Database {
         Row: {
           id: string;
           name: string;
-          status: CompetitionStatus;
           festival_start_date: string;
           festival_end_date: string;
           selection_open_utc: string;
@@ -21,7 +20,6 @@ export interface Database {
         Insert: {
           id?: string;
           name: string;
-          status?: CompetitionStatus;
           festival_start_date: string;
           festival_end_date: string;
           selection_open_utc: string;
@@ -33,7 +31,6 @@ export interface Database {
         Update: {
           id?: string;
           name?: string;
-          status?: CompetitionStatus;
           festival_start_date?: string;
           festival_end_date?: string;
           selection_open_utc?: string;
@@ -104,6 +101,7 @@ export interface Database {
           selections: Json;
           submitted_at: string;
           updated_at: string;
+          locked_at: string | null;
         };
         Insert: {
           id?: string;
@@ -113,6 +111,7 @@ export interface Database {
           selections: Json;
           submitted_at?: string;
           updated_at?: string;
+          locked_at?: string | null;
         };
         Update: {
           id?: string;
@@ -122,6 +121,7 @@ export interface Database {
           selections?: Json;
           submitted_at?: string;
           updated_at?: string;
+          locked_at?: string | null;
         };
       };
       race_days: {

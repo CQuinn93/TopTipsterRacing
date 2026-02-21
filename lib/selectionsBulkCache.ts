@@ -1,18 +1,18 @@
 /**
  * Bulk cache for selections: daily_selections + participants + race days.
- * Cached in AsyncStorage with timestamp; valid when cache_timestamp >= refresh_after_utc.
- * refresh_after_utc comes from app_config (set by pull-races = 50 min before first race).
+ * Cache is retained until 1 day after the event (last race day) has finished.
+ * Only cleared when meeting is over for more than 1 day.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Race } from '@/types/races';
 import { fetchRaceDaysForCompetition } from './raceDaysForCompetition';
 
 const CACHE_KEY_PREFIX = 'selections_bulk_';
-const CONFIG_CACHE_KEY = 'selections_refresh_after_utc';
 
 export type SelectionsBulkData = {
   timestamp: string;
-  refreshAfterUtc: string | null;
+  /** Latest race_date (YYYY-MM-DD) across all competitions - event end date. */
+  eventEndDate: string | null;
   competitionIds: string[];
   selections: Array<{
     competition_id: string;
@@ -30,7 +30,7 @@ export type SelectionsBulkData = {
 
 type CachedPayload = {
   timestamp: string;
-  refreshAfterUtc: string | null;
+  eventEndDate: string | null;
   data: SelectionsBulkData;
 };
 
@@ -38,40 +38,12 @@ function cacheKey(userId: string): string {
   return `${CACHE_KEY_PREFIX}${userId}`;
 }
 
-/** Fetch refresh_after_utc from app_config. Returns null if not set or fetch fails. */
-export async function getRefreshAfterUtc(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any
-): Promise<string | null> {
-  try {
-    const cached = await AsyncStorage.getItem(CONFIG_CACHE_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached) as { utc: string | null; fetchedAt: string };
-      const age = Date.now() - new Date(parsed.fetchedAt).getTime();
-      if (age < 60 * 60 * 1000) return parsed.utc ?? null;
-    }
-    const { data } = await supabase.from('app_config').select('value').eq('key', 'selections_refresh_after_utc').maybeSingle();
-    const utc = (data?.value?.utc ?? null) as string | null;
-    await AsyncStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify({ utc, fetchedAt: new Date().toISOString() }));
-    return utc;
-  } catch {
-    return null;
-  }
-}
-
-/** Check if cached data is valid (fetched at or after refresh cutoff). */
-function isCacheValid(cache: CachedPayload, refreshAfterUtc: string | null): boolean {
-  if (!refreshAfterUtc) return false;
-  return new Date(cache.timestamp).getTime() >= new Date(refreshAfterUtc).getTime();
-}
-
-/** Check if we should use cache: we're past the cutoff and have valid cache. */
-function shouldUseCache(cache: CachedPayload | null, refreshAfterUtc: string | null, nowUtc: string): boolean {
-  if (!cache || !refreshAfterUtc) return false;
-  const cutoff = new Date(refreshAfterUtc).getTime();
-  const now = new Date(nowUtc).getTime();
-  if (now < cutoff) return false;
-  return isCacheValid(cache, refreshAfterUtc);
+/** Clear cache only when event ended more than 1 day ago. Returns true if cache was cleared. */
+function shouldClearCache(eventEndDate: string | null): boolean {
+  if (!eventEndDate) return false;
+  const end = new Date(eventEndDate + 'T23:59:59');
+  const clearAfter = end.getTime() + 24 * 60 * 60 * 1000;
+  return Date.now() >= clearAfter;
 }
 
 /**
@@ -88,7 +60,7 @@ export async function getSelectionsBulk(
   if (!competitionIds.length) {
     return {
       timestamp: new Date().toISOString(),
-      refreshAfterUtc: null,
+      eventEndDate: null,
       competitionIds: [],
       selections: [],
       participants: [],
@@ -96,14 +68,16 @@ export async function getSelectionsBulk(
     };
   }
 
-  const refreshAfterUtc = await getRefreshAfterUtc(supabase);
   const key = cacheKey(userId);
-  let cached: CachedPayload | null = null;
   if (!forceRefresh) {
     const raw = await AsyncStorage.getItem(key);
-    cached = raw ? (JSON.parse(raw) as CachedPayload) : null;
-    if (shouldUseCache(cached, refreshAfterUtc, new Date().toISOString())) {
-      return cached!.data;
+    if (raw) {
+      const cached = JSON.parse(raw) as CachedPayload;
+      if (shouldClearCache(cached.data.eventEndDate ?? cached.eventEndDate ?? null)) {
+        await AsyncStorage.removeItem(key);
+      } else {
+        return cached.data;
+      }
     }
   }
 
@@ -121,14 +95,18 @@ export async function getSelectionsBulk(
   const participants = (partRows ?? []) as SelectionsBulkData['participants'];
 
   const raceDaysByComp: Record<string, SelectionsBulkData['raceDaysByComp'][string]> = {};
+  let eventEndDate: string | null = null;
   for (const compId of competitionIds) {
     const days = await fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, first_race_utc, races');
     raceDaysByComp[compId] = days as SelectionsBulkData['raceDaysByComp'][string];
+    for (const d of days as { race_date: string }[]) {
+      if (!eventEndDate || d.race_date > eventEndDate) eventEndDate = d.race_date;
+    }
   }
 
   const bulk: SelectionsBulkData = {
     timestamp: new Date().toISOString(),
-    refreshAfterUtc,
+    eventEndDate,
     competitionIds,
     selections,
     participants,
@@ -137,10 +115,17 @@ export async function getSelectionsBulk(
 
   const toStore: CachedPayload = {
     timestamp: bulk.timestamp,
-    refreshAfterUtc: bulk.refreshAfterUtc,
+    eventEndDate: bulk.eventEndDate,
     data: bulk,
   };
   await AsyncStorage.setItem(key, JSON.stringify(toStore));
 
   return bulk;
+}
+
+/** Clear selections bulk cache. Call after user saves or locks selections. */
+export async function clearSelectionsBulkCache(userId: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(cacheKey(userId));
+  } catch {}
 }

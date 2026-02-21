@@ -4,15 +4,24 @@ import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { theme } from '@/constants/theme';
 import { getOrCreateTabletCode, clearTabletCodeCache } from '@/lib/tabletCode';
+import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
+import { clearLatestResultsCache } from '@/lib/latestResultsCache';
+import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
 
-async function doSignOut(signOut: () => Promise<void>) {
+async function doSignOut(signOut: () => Promise<void>, userId: string | null) {
   await clearTabletCodeCache();
+  if (userId) {
+    await clearAvailableRacesCache(userId);
+    await clearLatestResultsCache(userId);
+    await clearSelectionsBulkCache(userId);
+  }
   await signOut();
   router.replace('/(auth)/login');
 }
 
 export default function AccountScreen() {
   const { session, signOut } = useAuth();
+  const userId = session?.user?.id ?? null;
   const [tabletCode, setTabletCode] = useState<string | null>(null);
   const [codeLoading, setCodeLoading] = useState(true);
 
@@ -27,7 +36,7 @@ export default function AccountScreen() {
   const handleSignOut = () => {
     if (Platform.OS === 'web') {
       if (window.confirm('Are you sure you want to sign out?')) {
-        doSignOut(signOut);
+        doSignOut(signOut, userId);
       }
       return;
     }
@@ -36,7 +45,7 @@ export default function AccountScreen() {
       {
         text: 'Sign out',
         style: 'destructive',
-        onPress: () => doSignOut(signOut),
+        onPress: () => doSignOut(signOut, userId),
       },
     ]);
   };

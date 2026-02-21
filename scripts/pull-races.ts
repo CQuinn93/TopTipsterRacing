@@ -95,7 +95,7 @@ function delay(ms: number): Promise<void> {
 
 function getTargetDate(): string {
   const d = new Date();
-  d.setDate(d.getDate() + 1);
+  d.setDate(d.getDate());
   return d.toISOString().slice(0, 10);
 }
 
