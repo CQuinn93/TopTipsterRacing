@@ -4,12 +4,16 @@ name: Race data
 
 on:
   schedule:
-    # Pull tomorrow's racing at 5PM UTC (day before; races usually up by ~5PM)
-    - cron: '0 17 * * *'
-    # Update results: every 20 min (30 min after race + retry 10 min if blank)
-    - cron: '*/20 * * * *'
-    # Remove race_days older than 5 days, daily at 18:00 UTC
-    - cron: '0 18 * * *'
+    # Pull races: 15:00–19:00 every 60 mins
+    - cron: '0 15-19 * * *'
+
+    # Update results: 13:30–21:00 every 30 mins
+    - cron: '30 13-20 * * *'
+    - cron: '0 14-21 * * *'
+
+    # Remove old races: Sunday 18:00 UTC
+    - cron: '0 18 * * 0'
+
   workflow_dispatch:
 
 jobs:
