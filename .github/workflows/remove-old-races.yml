@@ -1,14 +1,14 @@
-# Pull following day's race data. Runs at 5PM UTC (and manually).
-# Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY
-name: Pull races
+# Remove race data older than 5 days. Runs Sunday 18:00 UTC (and manually).
+# Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY
+name: Remove old races
 
 on:
   schedule:
-    - cron: '0 17 * * *'
+    - cron: '0 18 * * 0'
   workflow_dispatch:
 
 jobs:
-  pull:
+  remove-old:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,9 +17,8 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
-      - name: Pull races (following day)
-        run: npx tsx scripts/pull-races.ts
+      - name: Remove races older than 5 days
+        run: npx tsx scripts/remove-old-races.ts
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}

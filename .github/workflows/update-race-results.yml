@@ -1,14 +1,15 @@
-# Pull following day's race data. Runs at 5PM UTC (and manually).
+# Update race results. Runs every 30 mins 13:30–21:00 UTC (and manually).
 # Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY
-name: Pull races
+name: Update race results
 
 on:
   schedule:
-    - cron: '0 17 * * *'
+    - cron: '30 13-20 * * *'
+    - cron: '0 14-21 * * *'
   workflow_dispatch:
 
 jobs:
-  pull:
+  results:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,8 +18,8 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
-      - name: Pull races (following day)
-        run: npx tsx scripts/pull-races.ts
+      - name: Update race results
+        run: npx tsx scripts/update-race-results.ts
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
