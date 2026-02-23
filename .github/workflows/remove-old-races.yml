@@ -1,5 +1,5 @@
 # Remove race data older than 5 days. Runs Sunday 18:00 UTC (and manually).
-# Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY
+# GitHub Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY
 name: Remove old races
 
 on:

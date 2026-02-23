@@ -1,5 +1,5 @@
 # Update race results. Runs every 30 mins 13:30–21:00 UTC (and manually).
-# Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY
+# GitHub Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY_UPDATE_RESULTS
 name: Update race results
 
 on:
@@ -23,4 +23,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY_UPDATE_RESULTS}}
+          RAPIDAPI_KEY_UPDATE_RESULTS: ${{ secrets.RAPIDAPI_KEY_UPDATE_RESULTS }}
