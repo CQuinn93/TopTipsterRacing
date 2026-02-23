@@ -16,10 +16,9 @@ import 'dotenv/config';
  * Env: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY_UPDATE_RESULTS
  */
 
-const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL;
-const SUPABASE_KEY =
-  process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_KEY;
-const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY_UPDATE_RESULTS ?? process.env.RAPIDAPI_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY_UPDATE_RESULTS;
 
 const API_BASE = 'https://horse-racing.p.rapidapi.com';
 const API_HEADERS: Record<string, string> = {
@@ -262,12 +261,19 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
 }
 
 async function main() {
+  // Debug: log env presence (never log secret values)
+  console.log('[update-race-results] Env check:', {
+    SUPABASE_URL: SUPABASE_URL ? `set (${SUPABASE_URL.length} chars)` : 'MISSING',
+    SUPABASE_SERVICE_KEY: SUPABASE_KEY ? 'set' : 'MISSING',
+    RAPIDAPI_KEY_UPDATE_RESULTS: RAPIDAPI_KEY ? 'set' : 'MISSING',
+  });
+
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     console.error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY');
     process.exit(1);
   }
   if (!RAPIDAPI_KEY) {
-    console.error('Set RAPIDAPI_KEY_UPDATE_RESULTS or RAPIDAPI_KEY in .env (no spaces around =)');
+    console.error('Set RAPIDAPI_KEY_UPDATE_RESULTS');
     process.exit(1);
   }
 

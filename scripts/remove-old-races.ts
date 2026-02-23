@@ -7,11 +7,16 @@
  * Run daily (e.g. after pull-races or on a separate schedule).
  */
 
-const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL;
-const SUPABASE_KEY =
-  process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 async function main() {
+  // Debug: log env presence (never log secret values)
+  console.log('[remove-old-races] Env check:', {
+    SUPABASE_URL: SUPABASE_URL ? `set (${SUPABASE_URL.length} chars)` : 'MISSING',
+    SUPABASE_SERVICE_KEY: SUPABASE_KEY ? 'set' : 'MISSING',
+  });
+
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     console.error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY');
     process.exit(1);

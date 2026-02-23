@@ -18,9 +18,8 @@
 import 'dotenv/config';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.EXPO_PUBLIC_SUPABASE_URL;
-const SUPABASE_KEY =
-  process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.EXPO_PUBLIC_SUPABASE_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY_PULL_RACES;
 
 /** Delay in ms between each GET /race/{id} call. 10/min limit → 6s min spacing; 6s = fastest within limit. */
@@ -95,13 +94,20 @@ function delay(ms: number): Promise<void> {
 
 function getTargetDate(): string {
   const d = new Date();
-  d.setDate(d.getDate());
+  d.setDate(d.getDate() + 1);
   return d.toISOString().slice(0, 10);
 }
 
 async function main() {
+  // Debug: log env presence (never log secret values)
+  console.log('[pull-races] Env check:', {
+    SUPABASE_URL: SUPABASE_URL ? `set (${SUPABASE_URL.length} chars)` : 'MISSING',
+    SUPABASE_SERVICE_KEY: SUPABASE_KEY ? 'set' : 'MISSING',
+    RAPIDAPI_KEY_PULL_RACES: RAPIDAPI_KEY ? 'set' : 'MISSING',
+  });
+
   if (!SUPABASE_URL || !SUPABASE_KEY) {
-    console.error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY (or SUPABASE_SERVICE_ROLE_KEY)');
+    console.error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY');
     process.exit(1);
   }
   if (!RAPIDAPI_KEY) {
@@ -113,6 +119,7 @@ async function main() {
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
   const targetDate = getTargetDate();
+  console.log('[pull-races] Target date:', targetDate);
 
   // 1) DB: Competitions where target date is in [festival_start_date, festival_end_date]; get their course (one per competition)
   const { data: comps } = await supabase
