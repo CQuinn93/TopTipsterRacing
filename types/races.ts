@@ -31,6 +31,7 @@ export interface Runner {
   name: string;
   oddsDecimal: number;
   number?: number;
+  jockey?: string;
 }
 
 /**

@@ -6,6 +6,7 @@ import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { theme } from '@/constants/theme';
+import { displayHorseName } from '@/lib/displayHorseName';
 import { getAvailableRacesForUser } from '@/lib/availableRacesCache';
 import { getLatestResultsForUser } from '@/lib/latestResultsCache';
 import { useForceRefresh } from '@/contexts/ForceRefreshContext';
@@ -328,7 +329,7 @@ export default function HomeScreen() {
                                   >
                                     <Text style={styles.placesTableLabel}>{r.label}</Text>
                                     <Text style={styles.placesTableValue}>
-                                      {r.name} (SP {r.sp})
+                                      {displayHorseName(r.name)} (SP {r.sp})
                                     </Text>
                                   </View>
                                 ))}
@@ -343,7 +344,7 @@ export default function HomeScreen() {
                               </Text>
                             </TouchableOpacity>
                           )}
-                          <Text style={styles.yourSelection}>Your selection is {selectedRace.userSelection}</Text>
+                          <Text style={styles.yourSelection}>Your selection is {displayHorseName(selectedRace.userSelection)}</Text>
                         </View>
                       );
                     })()}

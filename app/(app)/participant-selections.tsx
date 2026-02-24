@@ -12,6 +12,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { theme } from '@/constants/theme';
+import { displayHorseName } from '@/lib/displayHorseName';
 import { getLeaderboardBulkCache } from '@/lib/leaderboardBulkCache';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
 import { getCached, setCached } from '@/lib/selectionsCache';
@@ -210,7 +211,7 @@ export default function ParticipantSelectionsScreen() {
                       >
                         <View style={styles.selectionLeft}>
                           <Text style={styles.raceNameSmall}>{race.name}</Text>
-                          <Text style={styles.pickName}>{pick?.runnerName ?? 'No selection'}</Text>
+                          <Text style={styles.pickName}>{pick ? displayHorseName(pick.runnerName) : 'No selection'}</Text>
                         </View>
                         <View style={styles.selectionRight}>
                           <Text
@@ -244,7 +245,7 @@ export default function ParticipantSelectionsScreen() {
           <Pressable style={styles.modalBox} onPress={(e) => e.stopPropagation()}>
             {breakdownModal && (
               <>
-                <Text style={styles.modalTitle}>{breakdownModal.runnerName}</Text>
+                <Text style={styles.modalTitle}>{displayHorseName(breakdownModal.runnerName)}</Text>
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>Odds</Text>
                   <Text style={styles.breakdownValue}>{breakdownModal.oddsDecimal.toFixed(2)}</Text>

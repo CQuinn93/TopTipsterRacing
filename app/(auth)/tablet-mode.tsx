@@ -16,6 +16,7 @@ import {
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { theme } from '@/constants/theme';
+import { displayHorseName } from '@/lib/displayHorseName';
 import type { Race } from '@/types/races';
 
 type TabletData = {
@@ -308,7 +309,7 @@ export default function TabletModeScreen() {
               style={[styles.runnerRow, selectionsToUse[race.id]?.runnerId === r.id && styles.runnerRowSelected]}
               onPress={() => setSelection(race.id, r.id, r.name, r.oddsDecimal)}
             >
-              <Text style={styles.runnerName}>{r.name}</Text>
+              <Text style={styles.runnerName}>{displayHorseName(r.name)}</Text>
               <Text style={styles.runnerOdds}>{r.oddsDecimal.toFixed(2)}</Text>
             </TouchableOpacity>
           ))}

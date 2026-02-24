@@ -11,6 +11,7 @@ export type MySelectionItem = {
   meeting: string;
   raceTimeUtc: string;
   runnerName: string;
+  jockey?: string;
   competitionId: string;
   competitionName: string;
   raceId: string;
@@ -84,11 +85,13 @@ export async function fetchMySelectionsView(
           continue;
         }
 
+        const runner = race.runners?.find((r: { id: string }) => r.id === runnerId) as { jockey?: string } | undefined;
         const result = race.results?.[runnerId] as RaceResult | undefined;
         items.push({
           meeting: course,
           raceTimeUtc: race.scheduledTimeUtc,
           runnerName,
+          jockey: runner?.jockey,
           competitionId: compId,
           competitionName,
           raceId: race.id,
@@ -144,11 +147,13 @@ export function computeMySelectionsFromBulk(
           continue;
         }
 
+        const runner = race.runners?.find((r: { id: string }) => r.id === runnerId) as { jockey?: string } | undefined;
         const result = race.results?.[runnerId] as RaceResult | undefined;
         items.push({
           meeting: course,
           raceTimeUtc: race.scheduledTimeUtc,
           runnerName,
+          jockey: runner?.jockey,
           competitionId: compId,
           competitionName,
           raceId: race.id,

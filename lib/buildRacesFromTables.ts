@@ -18,6 +18,7 @@ type HorseRow = {
   race_id: string;
   api_horse_id: string;
   name: string;
+  jockey: string | null;
   odds_decimal: number | null;
   number: string | null;
   position?: number | null;
@@ -38,6 +39,7 @@ function buildRace(race: RaceRow, horses: HorseRow[]): Race {
     name: h.name,
     oddsDecimal: h.odds_decimal != null && Number.isFinite(h.odds_decimal) ? h.odds_decimal : 0,
     number: h.number != null ? parseInt(h.number, 10) : undefined,
+    jockey: h.jockey ?? undefined,
   }));
   runners.push({ id: 'FAV', name: 'FAV', oddsDecimal: 0 });
 
@@ -93,7 +95,7 @@ export async function buildRacesForRaceDays(
   }
 
   const raceIds = races.map((r) => r.id);
-  let horseSelect = 'race_id, api_horse_id, name, odds_decimal, number, sp, position, result_code';
+  let horseSelect = 'race_id, api_horse_id, name, jockey, odds_decimal, number, sp, position, result_code';
   let { data: horseRows, error: horsesError } = await supabase
     .from('horses')
     .select(horseSelect)

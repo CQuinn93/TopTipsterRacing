@@ -1,6 +1,18 @@
 import { useRef } from 'react';
 import { Pressable, Alert } from 'react-native';
-import { Tabs } from 'expo-router';
+import { Tabs, useRouter } from 'expo-router';
+
+function SelectionsTabButton(props: React.ComponentProps<typeof Pressable>) {
+  const router = useRouter();
+  return (
+    <Pressable
+      {...props}
+      onPress={() => {
+        router.replace('/(app)/selections');
+      }}
+    />
+  );
+}
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
@@ -75,6 +87,7 @@ function AppTabs() {
         options={{
           title: 'My selections',
           tabBarIcon: ({ color, size }) => <Ionicons name="list" size={size} color={color} />,
+          tabBarButton: (props) => <SelectionsTabButton {...props} />,
         }}
       />
       <Tabs.Screen

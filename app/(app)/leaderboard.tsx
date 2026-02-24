@@ -7,8 +7,10 @@ import {
   TouchableOpacity,
   ScrollView,
   useWindowDimensions,
+  Animated,
 } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { theme } from '@/constants/theme';
@@ -29,54 +31,29 @@ type LeaderboardRow = {
   rank_odds: number;
 };
 
-type ViewMode = 'overall' | 'daily' | 'highest_odds';
-
 const POINTS_PER_ODDS = 10; // round(oddsDecimal * 10) per selection
-const WIDTH_TOTAL_ONLY = 260;   // below this: show only # Name Total
-const WIDTH_LONG_LABELS = 500;  // above this: "Day 1" etc.; below: "D1" etc.
-const WIDTH_WIDE_SCREEN = 768;  // above this: double column widths (web/tablet)
-const CUTOFF_HOUR_1PM = 13;     // daily leaderboard only fetches after 1PM, once per day
+
+const RANK_COLORS = {
+  1: theme.colors.accent,
+  2: '#eab308',
+  3: '#06b6d4',
+} as const;
 
 export default function LeaderboardScreen() {
   const { width: screenWidth } = useWindowDimensions();
   const { userId } = useAuth();
+  const router = useRouter();
   const params = useLocalSearchParams<{ competitionId?: string }>();
   const competitionId = params.competitionId as string | undefined;
 
-  const showTotalOnly = screenWidth < WIDTH_TOTAL_ONLY;
-  const useLongDayLabels = screenWidth >= WIDTH_LONG_LABELS;
-  const isWideScreen = screenWidth >= WIDTH_WIDE_SCREEN;
-  const dayHeaders = useLongDayLabels ? ['Day 1', 'Day 2', 'Day 3', 'Day 4'] : ['D1', 'D2', 'D3', 'D4'];
-
-  const [competitions, setCompetitions] = useState<{ id: string; name: string }[]>([]);
   const [selectedId, setSelectedId] = useState<string | undefined>(competitionId);
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
-  const [raceDates, setRaceDates] = useState<string[]>([]); // [Day1 date, Day2, ...] up to 4
-  const [viewMode, setViewMode] = useState<ViewMode>('overall');
-  const [selectedDayIndex, setSelectedDayIndex] = useState(0); // 0 = Day 1
+  const [raceDates, setRaceDates] = useState<string[]>([]);
+  const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const lastFetchedAfter1PMDateRef = useRef<string | null>(null); // YYYY-MM-DD when we last fetched after 1PM
-
-  useEffect(() => {
-    if (!userId) return;
-    (async () => {
-      const { data: parts } = await supabase
-        .from('competition_participants')
-        .select('competition_id')
-        .eq('user_id', userId);
-      if (!parts?.length) return;
-      const compIds = (parts as { competition_id: string }[]).map((p) => p.competition_id);
-      const { data: comps } = await supabase
-        .from('competitions')
-        .select('id, name, festival_start_date')
-        .in('id', compIds)
-        .order('festival_start_date', { ascending: false });
-      if (comps?.length) {
-        setCompetitions(comps.map((c) => ({ id: c.id, name: c.name })));
-        if (!selectedId) setSelectedId(comps[0].id);
-      }
-    })();
-  }, [userId]);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     if (competitionId) setSelectedId(competitionId);
@@ -85,16 +62,6 @@ export default function LeaderboardScreen() {
   const loadLeaderboard = async () => {
     if (!selectedId) return;
     const now = new Date();
-    const isAfter1PM = now.getHours() >= CUTOFF_HOUR_1PM;
-    const todayStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
-    if (!isAfter1PM) {
-      setRefreshing(false);
-      return;
-    }
-    if (lastFetchedAfter1PMDateRef.current === todayStr) {
-      setRefreshing(false);
-      return;
-    }
     setRefreshing(true);
     try {
       const [raceDaysData, partsRes, selectionsRes] = await Promise.all([
@@ -216,9 +183,7 @@ export default function LeaderboardScreen() {
 
       list.sort((a, b) => b.total - a.total);
       setRows(list);
-      if (now.getHours() >= CUTOFF_HOUR_1PM) {
-        lastFetchedAfter1PMDateRef.current = now.toISOString().slice(0, 10);
-      }
+      setLastUpdated(now.toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) + ', ' + now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }));
     } finally {
       setRefreshing(false);
     }
@@ -227,6 +192,16 @@ export default function LeaderboardScreen() {
   useEffect(() => {
     loadLeaderboard();
   }, [selectedId]);
+
+  useEffect(() => {
+    const loop = () => {
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+      ]).start(() => loop());
+    };
+    loop();
+  }, [pulseAnim]);
 
   useEffect(() => {
     if (rows.length === 0) return;
@@ -242,18 +217,6 @@ export default function LeaderboardScreen() {
     });
   }, [selectedDayIndex]);
 
-  const getSortedRows = (): LeaderboardRow[] => {
-    if (viewMode === 'overall') return [...rows].sort((a, b) => a.rank_overall - b.rank_overall);
-    if (viewMode === 'daily') return [...rows].sort((a, b) => a.rank_daily - b.rank_daily);
-    return [...rows].sort((a, b) => a.rank_odds - b.rank_odds);
-  };
-
-  const getRank = (r: LeaderboardRow) => {
-    if (viewMode === 'overall') return r.rank_overall;
-    if (viewMode === 'daily') return r.rank_daily;
-    return r.rank_odds;
-  };
-
   const openParticipantSelections = (row: LeaderboardRow) => {
     if (!selectedId) return;
     router.push({
@@ -266,60 +229,10 @@ export default function LeaderboardScreen() {
     });
   };
 
-  const sortedRows = getSortedRows();
+  const listRows = [...rows].sort((a, b) => a.rank_overall - b.rank_overall);
+  const getDailyPoints = (r: LeaderboardRow) => [r.day1, r.day2, r.day3, r.day4][selectedDayIndex] ?? 0;
 
-  const renderRow = ({ item }: { item: LeaderboardRow }) => {
-    const rank = getRank(item);
-    return (
-      <TouchableOpacity
-        style={[styles.row, item.user_id === userId && styles.rowHighlight]}
-        onPress={() => openParticipantSelections(item)}
-        activeOpacity={0.7}
-      >
-        <Text style={cellStyles.rank}>{rank}</Text>
-        <Text style={cellStyles.name} numberOfLines={1}>{item.display_name}</Text>
-        {viewMode === 'overall' && (
-          <>
-            {!showTotalOnly && (
-              <>
-                <Text style={cellStyles.num}>{item.day1}</Text>
-                <Text style={cellStyles.num}>{item.day2}</Text>
-                <Text style={cellStyles.num}>{item.day3}</Text>
-                <Text style={cellStyles.num}>{item.day4}</Text>
-              </>
-            )}
-            <Text style={cellStyles.total}>{item.total}</Text>
-          </>
-        )}
-        {viewMode === 'daily' && (
-          <Text style={cellStyles.points}>
-            {([item.day1, item.day2, item.day3, item.day4][selectedDayIndex] ?? 0)} pts
-          </Text>
-        )}
-        {viewMode === 'highest_odds' && (
-          <Text style={cellStyles.odds}>{item.max_odds > 0 ? item.max_odds.toFixed(2) : '—'}</Text>
-        )}
-      </TouchableOpacity>
-    );
-  };
-
-  const dayLabels = raceDates.map((d, i) => `Day ${i + 1}`);
-
-  const contentWidth = screenWidth - 2 * PADDING_H;
-  const colMultiplier = isWideScreen ? 2 : 1;
-  const cellStyles = {
-    rank: [styles.rankCell, { width: 32 * colMultiplier }],
-    name: [styles.nameCell, { width: 96 * colMultiplier }],
-    num: [styles.numCell, { width: 48 * colMultiplier }],
-    dayHeader: [styles.dayHeaderCell, { width: 58 * colMultiplier }],
-    total: [styles.totalCell, { width: 52 * colMultiplier }],
-    points: [styles.pointsCell, { width: 76 * colMultiplier }],
-    odds: [styles.oddsCell, { width: 76 * colMultiplier }],
-  };
-
-  const now = new Date();
-  const isAfter1PM = now.getHours() >= CUTOFF_HOUR_1PM;
-  const showAfter1PMMessage = !isAfter1PM && rows.length === 0 && selectedId;
+  const contentWidth = Math.min(screenWidth - 2 * PADDING_H, 500);
 
   return (
     <View style={styles.container}>
@@ -332,97 +245,134 @@ export default function LeaderboardScreen() {
         showsVerticalScrollIndicator={true}
       >
         <View style={[styles.centeredContent, { width: screenWidth }]}>
-          <View style={styles.topSpacer} />
-          {competitions.length > 1 && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={[styles.compList, { width: contentWidth }]}
-              contentContainerStyle={styles.compListContent}
-            >
-              {competitions.map((c) => (
-                <TouchableOpacity
-                  key={c.id}
-                  style={[styles.compChip, selectedId === c.id && styles.compChipActive]}
-                  onPress={() => setSelectedId(c.id)}
-                >
-                  <Text style={[styles.compChipText, selectedId === c.id && styles.compChipTextActive]} numberOfLines={1}>
-                    {c.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
-
-          <View style={[styles.viewModeRow, { width: contentWidth }]}>
-            <TouchableOpacity
-              style={[styles.viewModeChip, styles.viewModeChipEqual, viewMode === 'overall' && styles.viewModeChipActive]}
-              onPress={() => setViewMode('overall')}
-            >
-              <Text style={[styles.viewModeChipText, viewMode === 'overall' && styles.viewModeChipTextActive]}>Overall</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.viewModeChip, styles.viewModeChipEqual, viewMode === 'daily' && styles.viewModeChipActive]}
-              onPress={() => setViewMode('daily')}
-            >
-              <Text style={[styles.viewModeChipText, viewMode === 'daily' && styles.viewModeChipTextActive]}>Daily</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.viewModeChip, styles.viewModeChipEqual, viewMode === 'highest_odds' && styles.viewModeChipActive]}
-              onPress={() => setViewMode('highest_odds')}
-            >
-              <Text style={[styles.viewModeChipText, viewMode === 'highest_odds' && styles.viewModeChipTextActive]}>Highest Odds</Text>
-            </TouchableOpacity>
+          <View style={styles.headerBlock}>
+            <Text style={styles.rankTitle}>Rank</Text>
+            {lastUpdated && (
+              <Text style={styles.lastUpdated}>Last updated: {lastUpdated}</Text>
+            )}
           </View>
 
-          {viewMode === 'daily' && (
-            <View style={[styles.dayFilterWrap, { width: contentWidth }]}>
-              <View style={styles.dayFilterRow}>
-                {(['Day 1', 'Day 2', 'Day 3', 'Day 4'] as const).map((label, i) => (
-                  <TouchableOpacity
-                    key={label}
-                    style={[styles.dayChip, styles.dayChipEqual, selectedDayIndex === i && styles.dayChipActive]}
-                    onPress={() => setSelectedDayIndex(i)}
-                  >
-                    <Text style={[styles.dayChipText, selectedDayIndex === i && styles.dayChipTextActive]}>{label}</Text>
-                  </TouchableOpacity>
-                ))}
+          {rows.length > 0 && (
+              <View style={[styles.listWrap, { width: contentWidth }]}>
+                {listRows.map((item) => {
+                  const rank = item.rank_overall;
+                  const isExpanded = expandedUserId === item.user_id;
+                  const isTopDaily = item.rank_daily === 1;
+                  const isTopSp = item.rank_odds === 1;
+                  const circleColor = rank <= 3 ? RANK_COLORS[rank as 1 | 2 | 3] : theme.colors.border;
+                  const rankNum = String(rank).padStart(2, '0');
+
+                  return (
+                    <View key={item.user_id} style={styles.listRowWrap}>
+                      {isTopSp ? (
+                        <View style={styles.listRowPulseWrap}>
+                          <TouchableOpacity
+                            style={[
+                              styles.listRow,
+                              item.user_id === userId && styles.rowHighlight,
+                              isTopDaily && styles.listRowGreenOutline,
+                            ]}
+                            onPress={() => setExpandedUserId(isExpanded ? null : item.user_id)}
+                            activeOpacity={0.7}
+                          >
+                            <View style={[styles.rankCircle, { backgroundColor: circleColor }]}>
+                              <Text style={[styles.rankCircleText, rank > 3 && styles.rankCircleTextMuted]}>{rankNum}</Text>
+                            </View>
+                            <View style={styles.listRowCenter}>
+                              <Text style={styles.listRowName} numberOfLines={1}>{item.display_name}</Text>
+                              {!isExpanded && (
+                                <Text style={styles.listRowTotal}>{item.total} pts</Text>
+                              )}
+                              {isExpanded && (
+                                <View style={styles.expandedStats}>
+                                  <View style={styles.expandedStat}>
+                                    <Ionicons name="calendar-outline" size={18} color={theme.colors.textMuted} />
+                                    <Text style={styles.expandedStatValue}>{getDailyPoints(item)}</Text>
+                                    <Text style={styles.expandedStatLabel}>Daily</Text>
+                                  </View>
+                                  <View style={styles.expandedStat}>
+                                    <Ionicons name="trophy-outline" size={18} color={theme.colors.textMuted} />
+                                    <Text style={styles.expandedStatValue}>{item.total}</Text>
+                                    <Text style={styles.expandedStatLabel}>Overall</Text>
+                                  </View>
+                                  <View style={styles.expandedStat}>
+                                    <Ionicons name="flash-outline" size={18} color={theme.colors.textMuted} />
+                                    <Text style={styles.expandedStatValue}>{item.max_odds > 0 ? item.max_odds.toFixed(2) : '—'}</Text>
+                                    <Text style={styles.expandedStatLabel}>Best SP</Text>
+                                  </View>
+                                </View>
+                              )}
+                            </View>
+                            {!isExpanded && (
+                              <Text style={styles.listRowTotalRight}>{item.total}</Text>
+                            )}
+                          </TouchableOpacity>
+                          <Animated.View
+                            pointerEvents="none"
+                            style={[
+                              StyleSheet.absoluteFill,
+                              styles.pulseBorderOverlay,
+                              { opacity: pulseAnim },
+                            ]}
+                          />
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          style={[
+                            styles.listRow,
+                            item.user_id === userId && styles.rowHighlight,
+                            isTopDaily && styles.listRowGreenOutline,
+                          ]}
+                          onPress={() => setExpandedUserId(isExpanded ? null : item.user_id)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={[styles.rankCircle, { backgroundColor: circleColor }]}>
+                            <Text style={[styles.rankCircleText, rank > 3 && styles.rankCircleTextMuted]}>{rankNum}</Text>
+                          </View>
+                          <View style={styles.listRowCenter}>
+                            <Text style={styles.listRowName} numberOfLines={1}>{item.display_name}</Text>
+                            {!isExpanded && (
+                              <Text style={styles.listRowTotal}>{item.total} pts</Text>
+                            )}
+                            {isExpanded && (
+                              <View style={styles.expandedStats}>
+                                <View style={styles.expandedStat}>
+                                  <Ionicons name="calendar-outline" size={18} color={theme.colors.textMuted} />
+                                  <Text style={styles.expandedStatValue}>{getDailyPoints(item)}</Text>
+                                  <Text style={styles.expandedStatLabel}>Daily</Text>
+                                </View>
+                                <View style={styles.expandedStat}>
+                                  <Ionicons name="trophy-outline" size={18} color={theme.colors.textMuted} />
+                                  <Text style={styles.expandedStatValue}>{item.total}</Text>
+                                  <Text style={styles.expandedStatLabel}>Overall</Text>
+                                </View>
+                                <View style={styles.expandedStat}>
+                                  <Ionicons name="flash-outline" size={18} color={theme.colors.textMuted} />
+                                  <Text style={styles.expandedStatValue}>{item.max_odds > 0 ? item.max_odds.toFixed(2) : '—'}</Text>
+                                  <Text style={styles.expandedStatLabel}>Best SP</Text>
+                                </View>
+                              </View>
+                            )}
+                          </View>
+                          {!isExpanded && (
+                            <Text style={styles.listRowTotalRight}>{item.total}</Text>
+                          )}
+                        </TouchableOpacity>
+                      )}
+                      {isExpanded && (
+                        <TouchableOpacity
+                          style={styles.seeSelectionsButton}
+                          onPress={() => openParticipantSelections(item)}
+                        >
+                          <Text style={styles.seeSelectionsButtonText}>See selections</Text>
+                          <Ionicons name="chevron-forward" size={18} color={theme.colors.accent} />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })}
               </View>
-            </View>
           )}
-
-          {showAfter1PMMessage && (
-            <Text style={styles.after1PMMessage}>Leaderboard updates after 1 PM.</Text>
-          )}
-
-          <View style={[styles.tableWrap, { width: contentWidth }]}>
-            <View style={styles.table}>
-              {viewMode === 'overall' && (
-                <View style={styles.headerRow}>
-                  <Text style={cellStyles.rank}>#</Text>
-                  <Text style={cellStyles.name}>Name</Text>
-                  {!showTotalOnly && dayHeaders.map((h, i) => (
-                    <Text key={i} style={useLongDayLabels ? cellStyles.dayHeader : cellStyles.num}>{h}</Text>
-                  ))}
-                  <Text style={cellStyles.total}>Total</Text>
-                </View>
-              )}
-              {(viewMode === 'daily' || viewMode === 'highest_odds') && (
-                <View style={styles.headerRow}>
-                  <Text style={cellStyles.rank}>#</Text>
-                  <Text style={cellStyles.name}>Name</Text>
-                  <Text style={viewMode === 'daily' ? cellStyles.points : cellStyles.odds}>
-                    {viewMode === 'daily' ? 'Points' : 'Best SP'}
-                  </Text>
-                </View>
-              )}
-              {sortedRows.map((item) => (
-                <View key={item.user_id}>
-                  {renderRow({ item })}
-                </View>
-              ))}
-            </View>
-          </View>
         </View>
       </ScrollView>
     </View>
@@ -436,89 +386,110 @@ const styles = StyleSheet.create({
   outerScroll: { flex: 1 },
   outerScrollContent: { paddingBottom: theme.spacing.xxl },
   centeredContent: { alignSelf: 'center', alignItems: 'center' },
-  topSpacer: { height: theme.spacing.md },
-  compList: { maxHeight: 48, marginBottom: theme.spacing.sm },
-  compListContent: { paddingHorizontal: 0, gap: theme.spacing.sm },
-  compChip: {
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.radius.full,
-    backgroundColor: theme.colors.surface,
-    marginRight: theme.spacing.sm,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  compChipActive: { backgroundColor: theme.colors.accentMuted, borderColor: theme.colors.accent },
-  compChipText: { fontFamily: theme.fontFamily.regular, fontSize: 15, color: theme.colors.textSecondary },
-  compChipTextActive: { color: theme.colors.accent },
-  viewModeRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 0,
-    marginBottom: theme.spacing.sm,
-    gap: theme.spacing.sm,
-  },
-  viewModeChip: {
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.radius.sm,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  viewModeChipEqual: { flex: 1 },
-  viewModeChipActive: { backgroundColor: theme.colors.accentMuted, borderColor: theme.colors.accent },
-  viewModeChipText: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textSecondary },
-  viewModeChipTextActive: { color: theme.colors.accent },
-  dayFilterWrap: { marginBottom: theme.spacing.sm },
-  dayFilterEmpty: { fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.textMuted },
-  dayFilterRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 0,
-    marginBottom: 0,
-    gap: theme.spacing.sm,
-  },
-  dayChip: {
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: theme.spacing.xs,
-    borderRadius: theme.radius.sm,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  dayChipEqual: { flex: 1 },
-  dayChipActive: { borderColor: theme.colors.accent },
-  after1PMMessage: {
+  headerBlock: { width: '100%', paddingHorizontal: PADDING_H, marginBottom: theme.spacing.sm },
+  rankTitle: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
+    fontSize: 28,
+    fontWeight: '700',
+    color: theme.colors.accent,
+  },
+  lastUpdated: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 13,
     color: theme.colors.textMuted,
-    marginBottom: theme.spacing.sm,
-    textAlign: 'center',
-  },
-  dayChipText: { fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.textSecondary },
-  dayChipTextActive: { color: theme.colors.accent },
-  tableWrap: {},
-  table: { paddingHorizontal: 0 },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: theme.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-    marginBottom: theme.spacing.xs,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: theme.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
+    marginTop: theme.spacing.xs,
   },
   rowHighlight: { backgroundColor: theme.colors.accentMuted },
-  rankCell: { width: 32, fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.text },
-  nameCell: { width: 96, fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.text },
-  numCell: { width: 48, fontFamily: theme.fontFamily.regular, fontSize: 15, color: theme.colors.textMuted, textAlign: 'right' },
-  dayHeaderCell: { width: 58, fontFamily: theme.fontFamily.regular, fontSize: 15, color: theme.colors.textMuted, textAlign: 'right' },
-  totalCell: { width: 52, fontFamily: theme.fontFamily.regular, fontSize: 15, fontWeight: '600', color: theme.colors.accent, textAlign: 'right' },
-  pointsCell: { width: 76, fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.accent, textAlign: 'right' },
-  oddsCell: { width: 76, fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.accent, textAlign: 'right' },
+  listWrap: { paddingHorizontal: PADDING_H },
+  listRowWrap: { marginBottom: theme.spacing.sm },
+  listRowPulseWrap: {
+    position: 'relative',
+    borderRadius: theme.radius.md,
+  },
+  pulseBorderOverlay: {
+    borderRadius: theme.radius.md,
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+    backgroundColor: 'transparent',
+  },
+  listRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.md,
+    padding: theme.spacing.md,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  listRowGreenOutline: { borderColor: theme.colors.accent },
+  rankCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing.md,
+  },
+  rankCircleText: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 15,
+    fontWeight: '700',
+    color: theme.colors.black,
+  },
+  rankCircleTextMuted: { color: theme.colors.textMuted },
+  listRowCenter: { flex: 1 },
+  listRowName: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.text,
+  },
+  listRowTotal: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 13,
+    color: theme.colors.textMuted,
+    marginTop: 2,
+  },
+  listRowTotalRight: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.accent,
+  },
+  expandedStats: {
+    flexDirection: 'row',
+    flex: 1,
+    justifyContent: 'space-around',
+    marginTop: theme.spacing.sm,
+    paddingTop: theme.spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+  },
+  expandedStat: { alignItems: 'center' },
+  expandedStatValue: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.colors.text,
+  },
+  expandedStatLabel: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 11,
+    color: theme.colors.textMuted,
+    marginTop: 2,
+  },
+  seeSelectionsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: theme.spacing.sm,
+    gap: theme.spacing.xs,
+    marginTop: theme.spacing.xs,
+  },
+  seeSelectionsButtonText: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 14,
+    color: theme.colors.accent,
+    fontWeight: '600',
+  },
 });
