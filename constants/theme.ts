@@ -18,6 +18,10 @@ export const theme = {
     error: '#ef4444', //red 100%
     white: '#ffffff', //white 100%
     black: '#000000', //black 100%
+    /** Accent for tab bar / tablet code strip (unified bar look). */
+    barAccent: '#a855f7', // purple-500
+    /** Status card (competition status). */
+    statusAccent: '#eab308', // yellow-500
   },
   spacing: {
     xs: 4,

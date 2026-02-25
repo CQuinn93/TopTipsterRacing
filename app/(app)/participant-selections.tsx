@@ -17,10 +17,8 @@ import { getLeaderboardBulkCache } from '@/lib/leaderboardBulkCache';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
 import { getCached, setCached } from '@/lib/selectionsCache';
 import type { Race } from '@/types/races';
-
-const POINTS_PER_ODDS = 10;
-/** Position points when results are available from API (won/place/lost). */
-const POSITION_POINTS = { won: 10, place: 5, lost: 0 } as const;
+import { POINTS_PER_ODDS, POSITION_POINTS, placeLabel } from '@/lib/appUtils';
+import type { RaceResult } from '@/types/races';
 
 type RaceDayRow = {
   id: string;
@@ -145,7 +143,27 @@ export default function ParticipantSelectionsScreen() {
     })();
   }, [competitionId, participantUserId]);
 
-  const placeLabel = (p?: 'won' | 'place' | 'lost') => (p === 'won' ? 'Won' : p === 'place' ? 'Place' : p === 'lost' ? 'Lost' : '—');
+  /** Resolve result for pick (handles FAV = horse with lowest SP). */
+  const getResultForPick = (race: Race, runnerId: string): RaceResult | null => {
+    const results = race.results ?? {};
+    if (runnerId === 'FAV') {
+      const favId = Object.entries(results).reduce<string | null>((best, [id, r]) => {
+        const sp = (r as RaceResult)?.sp ?? Infinity;
+        return !best || sp < ((results[best] as RaceResult)?.sp ?? Infinity) ? id : best;
+      }, null);
+      return favId ? (results[favId] as RaceResult) : null;
+    }
+    return (results[runnerId] as RaceResult) ?? null;
+  };
+
+  /** Use DB points (pos_points + sp_points) when available, else position points from appUtils. */
+  const pointsFromResult = (result: RaceResult | null): number => {
+    if (result != null && (result.pos_points != null || result.sp_points != null)) {
+      return (result.pos_points ?? 0) + (result.sp_points ?? 0);
+    }
+    if (result?.positionLabel != null) return POSITION_POINTS[result.positionLabel];
+    return 0;
+  };
 
   if (loading && raceDays.length === 0) {
     return (
@@ -174,9 +192,8 @@ export default function ParticipantSelectionsScreen() {
           const dayPoints = races.reduce((sum, race) => {
             const pick = selections[race.id];
             if (!pick) return sum;
-            const result = (race as Race).results?.[pick.runnerId];
-            const posPts = result ? POSITION_POINTS[result.positionLabel] : (pick.positionPoints ?? 0);
-            return sum + (pick.oddsPoints ?? 0) + posPts;
+            const result = getResultForPick(race as Race, pick.runnerId);
+            return sum + pointsFromResult(result);
           }, 0);
           return (
             <View key={day.id} style={styles.dayCard}>
@@ -189,10 +206,13 @@ export default function ParticipantSelectionsScreen() {
                 <>
                   {races.map((race) => {
                     const pick = selections[race.id];
-                    const result = pick ? (race as Race).results?.[pick.runnerId] : null;
+                    const result = pick ? getResultForPick(race as Race, pick.runnerId) : null;
                     const position = result?.positionLabel ?? pick?.position;
-                    const positionPoints = result ? POSITION_POINTS[result.positionLabel] : (pick?.positionPoints ?? 0);
-                    const pts = pick ? (pick.oddsPoints ?? 0) + positionPoints : 0;
+                    const pts = pick ? pointsFromResult(result) : 0;
+                    const dbPos = result != null && (result.pos_points != null || result.sp_points != null)
+                      ? (result.pos_points ?? 0)
+                      : (result ? POSITION_POINTS[result.positionLabel] : null);
+                    const dbSp = result != null && result.sp_points != null ? result.sp_points : null;
                     return (
                       <TouchableOpacity
                         key={race.id}
@@ -202,8 +222,8 @@ export default function ParticipantSelectionsScreen() {
                             ? setBreakdownModal({
                                 runnerName: pick.runnerName,
                                 oddsDecimal: pick.oddsDecimal,
-                                positionPoints: result ? POSITION_POINTS[result.positionLabel] : (pick.positionPoints ?? null),
-                                oddsPoints: pick.oddsPoints ?? Math.round(pick.oddsDecimal * POINTS_PER_ODDS),
+                                positionPoints: dbPos,
+                                oddsPoints: dbSp ?? (pick.oddsPoints ?? Math.round(pick.oddsDecimal * POINTS_PER_ODDS)),
                               })
                             : undefined
                         }

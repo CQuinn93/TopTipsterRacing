@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabase';
 import { theme } from '@/constants/theme';
 import { setLeaderboardBulkCache } from '@/lib/leaderboardBulkCache';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
+import type { Race, RaceResult } from '@/types/races';
 
 type LeaderboardRow = {
   display_name: string;
@@ -30,8 +31,6 @@ type LeaderboardRow = {
   rank_daily: number;
   rank_odds: number;
 };
-
-const POINTS_PER_ODDS = 10; // round(oddsDecimal * 10) per selection
 
 const RANK_COLORS = {
   1: theme.colors.accent,
@@ -118,6 +117,15 @@ export default function LeaderboardScreen() {
       const dateToIndex: Record<string, number> = {};
       orderedDates.forEach((d, i) => { dateToIndex[d] = i; });
 
+      // Lookup race by (race_date, race_id) so we can use DB points (pos_points + sp_points) from points_system
+      const raceByDateAndId = new Map<string, Race>();
+      for (const d of raceDaysRows.slice(0, 4)) {
+        const races = (d.races ?? []) as Race[];
+        for (const r of races) {
+          raceByDateAndId.set(`${d.race_date}:${r.id}`, r);
+        }
+      }
+
       const pointsByUserDay: Record<string, number[]> = {};
       const maxOddsByUser: Record<string, number> = {};
       for (const p of parts) {
@@ -126,19 +134,34 @@ export default function LeaderboardScreen() {
       }
 
       for (const s of selectionsRes.data ?? []) {
-        const row = s as { user_id: string; race_date: string; selections: Record<string, { oddsDecimal?: number }> | null };
+        const row = s as { user_id: string; race_date: string; selections: Record<string, { runnerId?: string; oddsDecimal?: number }> | null };
         const sel = row.selections;
         if (!sel) continue;
         const uid = row.user_id;
         const dayIdx = dateToIndex[row.race_date];
         if (dayIdx === undefined) continue;
         let dayPoints = 0;
-        for (const v of Object.values(sel)) {
-          if (v?.oddsDecimal) {
-            const pts = Math.round(v.oddsDecimal * POINTS_PER_ODDS);
-            dayPoints += pts;
-            if (v.oddsDecimal > (maxOddsByUser[uid] ?? 0)) maxOddsByUser[uid] = v.oddsDecimal;
+        for (const [raceId, v] of Object.entries(sel)) {
+          if (!v) continue;
+          if (typeof v.oddsDecimal === 'number' && v.oddsDecimal > (maxOddsByUser[uid] ?? 0)) maxOddsByUser[uid] = v.oddsDecimal;
+          const race = raceByDateAndId.get(`${row.race_date}:${raceId}`);
+          let result: RaceResult | undefined;
+          if (race?.results) {
+            const runnerId = v.runnerId ?? '';
+            if (runnerId === 'FAV') {
+              const favId = Object.entries(race.results).reduce<string | null>((best, [id, r]) => {
+                const sp = r?.sp ?? Infinity;
+                return !best || sp < ((race.results?.[best] as RaceResult)?.sp ?? Infinity) ? id : best;
+              }, null);
+              result = favId ? (race.results[favId] as RaceResult) : undefined;
+            } else {
+              result = race.results[runnerId] as RaceResult | undefined;
+            }
           }
+          const pts = result != null && (result.pos_points != null || result.sp_points != null)
+            ? (result.pos_points ?? 0) + (result.sp_points ?? 0)
+            : 0;
+          dayPoints += pts;
         }
         pointsByUserDay[uid][dayIdx] = (pointsByUserDay[uid]?.[dayIdx] ?? 0) + dayPoints;
       }
@@ -262,6 +285,42 @@ export default function LeaderboardScreen() {
                   const circleColor = rank <= 3 ? RANK_COLORS[rank as 1 | 2 | 3] : theme.colors.border;
                   const rankNum = String(rank).padStart(2, '0');
 
+                  const rowContent = (
+                    <>
+                      <View style={[styles.rankCircle, { backgroundColor: circleColor }]}>
+                        <Text style={[styles.rankCircleText, rank > 3 && styles.rankCircleTextMuted]}>{rankNum}</Text>
+                      </View>
+                      <View style={styles.listRowCenter}>
+                        <Text style={styles.listRowName} numberOfLines={1}>{item.display_name}</Text>
+                        {!isExpanded && (
+                          <Text style={styles.listRowTotal}>{item.total} pts</Text>
+                        )}
+                        {isExpanded && (
+                          <View style={styles.expandedStats}>
+                            <View style={styles.expandedStat}>
+                              <Ionicons name="calendar-outline" size={18} color={theme.colors.textMuted} />
+                              <Text style={styles.expandedStatValue}>{getDailyPoints(item)}</Text>
+                              <Text style={styles.expandedStatLabel}>Daily</Text>
+                            </View>
+                            <View style={styles.expandedStat}>
+                              <Ionicons name="trophy-outline" size={18} color={theme.colors.textMuted} />
+                              <Text style={styles.expandedStatValue}>{item.total}</Text>
+                              <Text style={styles.expandedStatLabel}>Overall</Text>
+                            </View>
+                            <View style={styles.expandedStat}>
+                              <Ionicons name="flash-outline" size={18} color={theme.colors.textMuted} />
+                              <Text style={styles.expandedStatValue}>{item.max_odds > 0 ? item.max_odds.toFixed(2) : '—'}</Text>
+                              <Text style={styles.expandedStatLabel}>Best SP</Text>
+                            </View>
+                          </View>
+                        )}
+                      </View>
+                      {!isExpanded && (
+                        <Text style={styles.listRowTotalRight}>{item.total}</Text>
+                      )}
+                    </>
+                  );
+
                   return (
                     <View key={item.user_id} style={styles.listRowWrap}>
                       {isTopSp ? (
@@ -275,37 +334,7 @@ export default function LeaderboardScreen() {
                             onPress={() => setExpandedUserId(isExpanded ? null : item.user_id)}
                             activeOpacity={0.7}
                           >
-                            <View style={[styles.rankCircle, { backgroundColor: circleColor }]}>
-                              <Text style={[styles.rankCircleText, rank > 3 && styles.rankCircleTextMuted]}>{rankNum}</Text>
-                            </View>
-                            <View style={styles.listRowCenter}>
-                              <Text style={styles.listRowName} numberOfLines={1}>{item.display_name}</Text>
-                              {!isExpanded && (
-                                <Text style={styles.listRowTotal}>{item.total} pts</Text>
-                              )}
-                              {isExpanded && (
-                                <View style={styles.expandedStats}>
-                                  <View style={styles.expandedStat}>
-                                    <Ionicons name="calendar-outline" size={18} color={theme.colors.textMuted} />
-                                    <Text style={styles.expandedStatValue}>{getDailyPoints(item)}</Text>
-                                    <Text style={styles.expandedStatLabel}>Daily</Text>
-                                  </View>
-                                  <View style={styles.expandedStat}>
-                                    <Ionicons name="trophy-outline" size={18} color={theme.colors.textMuted} />
-                                    <Text style={styles.expandedStatValue}>{item.total}</Text>
-                                    <Text style={styles.expandedStatLabel}>Overall</Text>
-                                  </View>
-                                  <View style={styles.expandedStat}>
-                                    <Ionicons name="flash-outline" size={18} color={theme.colors.textMuted} />
-                                    <Text style={styles.expandedStatValue}>{item.max_odds > 0 ? item.max_odds.toFixed(2) : '—'}</Text>
-                                    <Text style={styles.expandedStatLabel}>Best SP</Text>
-                                  </View>
-                                </View>
-                              )}
-                            </View>
-                            {!isExpanded && (
-                              <Text style={styles.listRowTotalRight}>{item.total}</Text>
-                            )}
+                            {rowContent}
                           </TouchableOpacity>
                           <Animated.View
                             pointerEvents="none"
@@ -326,37 +355,7 @@ export default function LeaderboardScreen() {
                           onPress={() => setExpandedUserId(isExpanded ? null : item.user_id)}
                           activeOpacity={0.7}
                         >
-                          <View style={[styles.rankCircle, { backgroundColor: circleColor }]}>
-                            <Text style={[styles.rankCircleText, rank > 3 && styles.rankCircleTextMuted]}>{rankNum}</Text>
-                          </View>
-                          <View style={styles.listRowCenter}>
-                            <Text style={styles.listRowName} numberOfLines={1}>{item.display_name}</Text>
-                            {!isExpanded && (
-                              <Text style={styles.listRowTotal}>{item.total} pts</Text>
-                            )}
-                            {isExpanded && (
-                              <View style={styles.expandedStats}>
-                                <View style={styles.expandedStat}>
-                                  <Ionicons name="calendar-outline" size={18} color={theme.colors.textMuted} />
-                                  <Text style={styles.expandedStatValue}>{getDailyPoints(item)}</Text>
-                                  <Text style={styles.expandedStatLabel}>Daily</Text>
-                                </View>
-                                <View style={styles.expandedStat}>
-                                  <Ionicons name="trophy-outline" size={18} color={theme.colors.textMuted} />
-                                  <Text style={styles.expandedStatValue}>{item.total}</Text>
-                                  <Text style={styles.expandedStatLabel}>Overall</Text>
-                                </View>
-                                <View style={styles.expandedStat}>
-                                  <Ionicons name="flash-outline" size={18} color={theme.colors.textMuted} />
-                                  <Text style={styles.expandedStatValue}>{item.max_odds > 0 ? item.max_odds.toFixed(2) : '—'}</Text>
-                                  <Text style={styles.expandedStatLabel}>Best SP</Text>
-                                </View>
-                              </View>
-                            )}
-                          </View>
-                          {!isExpanded && (
-                            <Text style={styles.listRowTotalRight}>{item.total}</Text>
-                          )}
+                          {rowContent}
                         </TouchableOpacity>
                       )}
                       {isExpanded && (

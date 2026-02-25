@@ -1,6 +1,7 @@
 /**
  * Result for a runner after a race (from update-race-results script / API).
  * Either position (numeric place) or resultCode (f/u/pu/ur etc) is set.
+ * pos_points + sp_points come from points_system table (script writes to horses).
  */
 export interface RaceResult {
   /** Numeric place 1,2,3... null when resultCode is set. */
@@ -9,6 +10,10 @@ export interface RaceResult {
   sp: number;
   /** Non-numeric finish: f (fall), u (unseated), pu (pulled up), ur, etc. */
   resultCode?: string;
+  /** Position points from points_system (e.g. 5 win, 1 place). */
+  pos_points?: number;
+  /** SP bonus points from points_system (standard + bonus by odds range). */
+  sp_points?: number;
 }
 
 /**

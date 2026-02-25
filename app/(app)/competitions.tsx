@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { theme } from '@/constants/theme';
 import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
 import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
+import { getCompetitionDisplayStatus, isCompletedMoreThanOneDay } from '@/lib/appUtils';
 
 type UserCompetition = {
   competition_id: string;
@@ -16,20 +17,6 @@ type UserCompetition = {
   display_name: string;
   position: number | null; // 1-based rank in that competition, null if no scores yet
 };
-
-function getCompetitionDisplayStatus(startDate: string, endDate: string): 'upcoming' | 'live' | 'complete' | null {
-  const today = new Date().toISOString().slice(0, 10);
-  if (today < startDate) return 'upcoming';
-  if (today >= startDate && today <= endDate) return 'live';
-  return 'complete';
-}
-
-function isCompletedMoreThanOneDay(endDate: string): boolean {
-  if (!endDate) return false;
-  const end = new Date(endDate + 'T23:59:59').getTime();
-  const oneDayMs = 24 * 60 * 60 * 1000;
-  return Date.now() > end + oneDayMs;
-}
 
 type PendingCompetition = {
   competition_id: string;
@@ -98,6 +85,8 @@ export default function MyCompetitionsScreen() {
           });
 
         if (joined.length > 0 && compIds.length > 0) {
+          // Use daily_selections only (no race-days fetch) to minimise egress. Position here is
+          // approximate (odds-based); leaderboard uses full DB points (pos_points + sp_points).
           const { data: allSelections } = await supabase
             .from('daily_selections')
             .select('competition_id, user_id, selections')
@@ -111,7 +100,7 @@ export default function MyCompetitionsScreen() {
             const uid = row.user_id as string;
             let sum = 0;
             for (const v of Object.values(sel)) {
-              if (v?.oddsDecimal) sum += Math.round(v.oddsDecimal * 10);
+              if (v?.oddsDecimal != null) sum += Math.round(v.oddsDecimal * 10);
             }
             totalByCompUser[compId][uid] = (totalByCompUser[compId][uid] ?? 0) + sum;
           }
@@ -210,7 +199,7 @@ export default function MyCompetitionsScreen() {
       {list.length > 0 && <Text style={styles.sectionTitle}>Your competitions</Text>}
 
       {list.length === 0 && pendingList.length === 0 ? (
-        <Text style={styles.muted}>You haven't joined any competitions yet. Use an access code to join one.</Text>
+        <Text style={styles.emptyMessage}>You're not part of any competitions yet. Press the button below to enter one.</Text>
       ) : list.length === 0 ? null : (
         list.map((c) => (
           <TouchableOpacity
@@ -239,81 +228,85 @@ export default function MyCompetitionsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
-  content: { padding: theme.spacing.lg, paddingBottom: theme.spacing.xxl },
+  content: { padding: theme.spacing.md, paddingBottom: theme.spacing.xxl },
   title: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 24,
+    fontSize: 20,
     color: theme.colors.text,
     marginBottom: theme.spacing.xs,
   },
   subtitle: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
+    fontSize: 13,
     color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.lg,
+    marginBottom: theme.spacing.sm,
   },
   primaryButton: {
     backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.md,
-    paddingVertical: theme.spacing.md,
+    borderRadius: theme.radius.sm,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
     alignItems: 'center',
-    marginBottom: theme.spacing.xl,
+    marginBottom: theme.spacing.lg,
   },
   primaryButtonText: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 16,
+    fontSize: 14,
     color: theme.colors.black,
     fontWeight: '600',
   },
   sectionTitle: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 18,
+    fontSize: 15,
     color: theme.colors.accent,
-    marginTop: theme.spacing.lg,
+    marginTop: theme.spacing.md,
     marginBottom: theme.spacing.xs,
   },
   sectionSubtitle: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
+    fontSize: 11,
     color: theme.colors.textMuted,
-    marginBottom: theme.spacing.sm,
+    marginBottom: theme.spacing.xs,
   },
   cardPending: {
     opacity: 0.9,
   },
   pendingBadge: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
+    fontSize: 11,
     color: theme.colors.textMuted,
-    marginTop: theme.spacing.xs,
+    marginTop: 2,
     fontStyle: 'italic',
   },
-  muted: {
+  emptyMessage: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
+    fontSize: 13,
     color: theme.colors.textMuted,
+    textAlign: 'center',
+    marginTop: theme.spacing.sm,
   },
   card: {
     backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.md,
-    marginBottom: theme.spacing.md,
+    borderRadius: theme.radius.sm,
+    padding: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
     borderWidth: 1,
     borderColor: theme.colors.border,
   },
   cardTitle: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 18,
+    fontSize: 15,
     color: theme.colors.text,
   },
-  cardMeta: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textMuted, marginTop: 4 },
-  cardFooter: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.md, marginTop: 4, flexWrap: 'wrap' },
-  cardStatus: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.accent },
-  cardPosition: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary },
+  cardMeta: { fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textMuted, marginTop: 2 },
+  cardFooter: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm, marginTop: 2, flexWrap: 'wrap' },
+  cardStatus: { fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.accent },
+  cardPosition: { fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textSecondary },
   tapHint: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
+    fontSize: 11,
     color: theme.colors.textMuted,
-    marginTop: theme.spacing.sm,
+    marginTop: theme.spacing.xs,
   },
 });

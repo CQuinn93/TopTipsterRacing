@@ -26,21 +26,7 @@ import { getSelectionsBulk, type SelectionsBulkData } from '@/lib/selectionsBulk
 import { theme } from '@/constants/theme';
 import { displayHorseName } from '@/lib/displayHorseName';
 import type { Race } from '@/types/races';
-
-const SELECTION_CLOSE_HOURS_BEFORE_FIRST = 1;
-
-function formatDayDate(raceDate: string): string {
-  const d = new Date(raceDate + 'T12:00:00');
-  const day = d.toLocaleDateString(undefined, { weekday: 'short' });
-  const date = d.getDate();
-  const suffix = date === 1 || date === 21 || date === 31 ? 'st' : date === 2 || date === 22 ? 'nd' : date === 3 || date === 23 ? 'rd' : 'th';
-  return `${day} ${date}${suffix}`;
-}
-
-function isSelectionClosedForDay(firstRaceUtc: string): boolean {
-  const deadline = new Date(firstRaceUtc).getTime() - SELECTION_CLOSE_HOURS_BEFORE_FIRST * 60 * 60 * 1000;
-  return Date.now() >= deadline;
-}
+import { formatDayDate, isSelectionClosed } from '@/lib/appUtils';
 
 type RaceDay = {
   id: string;
@@ -96,25 +82,7 @@ export default function SelectionsScreen() {
     setRefreshingMySelections(false);
   };
 
-  useEffect(() => {
-    if (!userId) return;
-    (async () => {
-      const { data: parts } = await supabase
-        .from('competition_participants')
-        .select('competition_id')
-        .eq('user_id', userId);
-      if (!parts?.length) {
-        setUserCompetitions([]);
-        return;
-      }
-      const { data: comps } = await supabase
-        .from('competitions')
-        .select('id, name')
-        .in('id', parts.map((p) => p.competition_id));
-      setUserCompetitions(comps ?? []);
-    })();
-  }, [userId]);
-
+  // When no competitionId: load userCompetitions and bulk in one go (single participants + competitions fetch).
   useEffect(() => {
     if (!userId || competitionId) return;
     const forceRefresh = cameFromRaceDayRef.current;
@@ -125,13 +93,21 @@ export default function SelectionsScreen() {
         .from('competition_participants')
         .select('competition_id')
         .eq('user_id', userId);
-      const compIds = (parts ?? []).map((p: { competition_id: string }) => p.competition_id);
+      if (!parts?.length) {
+        setUserCompetitions([]);
+        setSelectionsBulk(null);
+        setMySelectionsList([]);
+        setLoading(false);
+        return;
+      }
+      const compIds = (parts as { competition_id: string }[]).map((p) => p.competition_id);
       const { data: comps } = await supabase.from('competitions').select('id, name').in('id', compIds);
-      const compNames = new Map((comps ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
+      const compList = comps ?? [];
+      setUserCompetitions(compList);
+      const compNames = new Map((compList as { id: string; name: string }[]).map((c) => [c.id, c.name]));
       const bulk = await getSelectionsBulk(supabase, userId, compIds, forceRefresh);
       setSelectionsBulk(bulk);
-      const list = computeMySelectionsFromBulk(bulk, userId, compNames);
-      setMySelectionsList(list);
+      setMySelectionsList(computeMySelectionsFromBulk(bulk, userId, compNames));
       setLoading(false);
     })();
   }, [userId, competitionId]);
@@ -182,7 +158,7 @@ export default function SelectionsScreen() {
   const selectedDate = currentRaceDay?.race_date ?? null;
   const currentRaces = currentRaceDay?.races ?? [];
   const selectedRace = currentRaces[selectedRaceIndex] ?? currentRaces[0];
-  const selectionsClosed = currentRaceDay ? isSelectionClosedForDay(currentRaceDay.first_race_utc) : false;
+  const selectionsClosed = currentRaceDay ? isSelectionClosed(currentRaceDay.first_race_utc) : false;
 
   useEffect(() => {
     setSelectedRaceIndex(0);
@@ -791,32 +767,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: theme.colors.textMuted,
   },
-  viewOnlyCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.sm,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.sm,
-    marginBottom: theme.spacing.xs,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  viewOnlyCardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  viewOnlyCardLeft: { flex: 1 },
-  viewOnlyCardTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-  },
-  viewOnlyCardSelection: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 15,
-    color: theme.colors.text,
-    fontWeight: '600',
-  },
   wplBadge: {
     paddingHorizontal: theme.spacing.sm,
     paddingVertical: 2,
@@ -1038,13 +988,6 @@ const styles = StyleSheet.create({
     color: '#b91c1c',
   },
   muted: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textMuted, marginBottom: theme.spacing.lg },
-  saveButton: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.md,
-    paddingVertical: theme.spacing.md,
-    alignItems: 'center',
-    marginTop: theme.spacing.lg,
-  },
   buttonDisabled: { opacity: 0.7 },
   saveButtonText: {
     fontFamily: theme.fontFamily.regular,

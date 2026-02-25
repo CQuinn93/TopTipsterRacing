@@ -98,9 +98,14 @@ export async function fetchResultsTemplateForUser(
 
   const byCourse = new Map<string, RaceResultTemplate[]>();
 
-  for (const compId of competitionIds) {
-    const days = await fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, races');
-    for (const d of days as RaceDayRow[]) {
+  const daysPerComp = await Promise.all(
+    competitionIds.map((compId) =>
+      fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, races')
+    )
+  );
+  competitionIds.forEach((compId, i) => {
+    const days = daysPerComp[i] as RaceDayRow[];
+    for (const d of days) {
       const key = `${compId}:${d.race_date}`;
       const userSelections = selectionsByCompDate.get(key) ?? {};
       const races = d.races ?? [];
@@ -167,7 +172,7 @@ export async function fetchResultsTemplateForUser(
         if (!already) list.push(template);
       }
     }
-  }
+  });
 
   const meetings: MeetingResults[] = [];
   for (const [course, races] of byCourse.entries()) {

@@ -24,6 +24,8 @@ type HorseRow = {
   position?: number | null;
   result_code?: string | null;
   sp: number | null;
+  pos_points?: number | null;
+  sp_points?: number | null;
 };
 
 function positionLabel(position: number): 'won' | 'place' | 'lost' {
@@ -50,6 +52,8 @@ function buildRace(race: RaceRow, horses: HorseRow[]): Race {
         position: h.position,
         positionLabel: positionLabel(h.position),
         sp: h.sp != null && Number.isFinite(h.sp) ? h.sp : 0,
+        pos_points: h.pos_points != null && Number.isFinite(h.pos_points) ? h.pos_points : undefined,
+        sp_points: h.sp_points != null && Number.isFinite(h.sp_points) ? h.sp_points : undefined,
       };
     } else if (h.result_code) {
       results[h.api_horse_id] = {
@@ -95,13 +99,13 @@ export async function buildRacesForRaceDays(
   }
 
   const raceIds = races.map((r) => r.id);
-  let horseSelect = 'race_id, api_horse_id, name, jockey, odds_decimal, number, sp, position, result_code';
+  let horseSelect = 'race_id, api_horse_id, name, jockey, odds_decimal, number, sp, position, result_code, pos_points, sp_points';
   let { data: horseRows, error: horsesError } = await supabase
     .from('horses')
     .select(horseSelect)
     .in('race_id', raceIds);
 
-  if (horsesError && /result_code|does not exist/i.test(String(horsesError.message || horsesError))) {
+  if (horsesError && /result_code|pos_points|sp_points|does not exist/i.test(String(horsesError.message || horsesError))) {
     horseSelect = 'race_id, api_horse_id, name, odds_decimal, number, sp, position';
     const fallback = await supabase.from('horses').select(horseSelect).in('race_id', raceIds);
     horseRows = fallback.data;

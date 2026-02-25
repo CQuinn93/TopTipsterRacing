@@ -33,13 +33,18 @@ export async function fetchAvailableRacesForUser(
   if (!competitionIds.length) return [];
 
   const allRaceDays: { compId: string; compName: string; day: { id: string; race_date: string; course?: string; first_race_utc?: string; races: Race[] } }[] = [];
-  for (const compId of competitionIds) {
-    const days = await fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, first_race_utc, races');
+  const daysPerComp = await Promise.all(
+    competitionIds.map((compId) =>
+      fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, first_race_utc, races')
+    )
+  );
+  competitionIds.forEach((compId, i) => {
     const compName = competitionsByName.get(compId) ?? 'Competition';
-    for (const d of days as { id: string; race_date: string; course?: string; first_race_utc?: string; races: Race[] }[]) {
+    const days = daysPerComp[i] as { id: string; race_date: string; course?: string; first_race_utc?: string; races: Race[] }[];
+    for (const d of days) {
       if (d.races?.length) allRaceDays.push({ compId, compName, day: d });
     }
-  }
+  });
 
   const { data: selectionsRows } = await supabase
     .from('daily_selections')
@@ -81,21 +86,19 @@ export async function fetchAvailableRacesForUser(
     const beforeDeadline = Date.now() < deadlineMs;
     const isLocked = lockedAt != null || !beforeDeadline;
 
-    if (beforeDeadline) {
-      result.push({
-        competitionId: compId,
-        competitionName: compName,
-        course: day.course ?? 'Races',
-        raceDate: day.race_date,
-        raceDayId: day.id,
-        pendingCount,
-        firstRaceUtc,
-        lastRaceUtc,
-        hasAllPicks,
-        isLocked,
-        selectionId,
-      });
-    }
+    result.push({
+      competitionId: compId,
+      competitionName: compName,
+      course: day.course ?? 'Races',
+      raceDate: day.race_date,
+      raceDayId: day.id,
+      pendingCount,
+      firstRaceUtc,
+      lastRaceUtc,
+      hasAllPicks,
+      isLocked,
+      selectionId,
+    });
   }
   result.sort((a, b) => a.raceDate.localeCompare(b.raceDate) || a.competitionName.localeCompare(b.competitionName));
   return result;

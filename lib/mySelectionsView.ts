@@ -61,8 +61,13 @@ export async function fetchMySelectionsView(
 
   const items: MySelectionItem[] = [];
 
-  for (const compId of competitionIds) {
-    const days = (await fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, first_race_utc, races')) as RaceDayWithRaces[];
+  const daysPerComp = await Promise.all(
+    competitionIds.map((compId) =>
+      fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, first_race_utc, races')
+    )
+  );
+  competitionIds.forEach((compId, i) => {
+    const days = daysPerComp[i] as RaceDayWithRaces[];
     const competitionName = names.get(compId) ?? 'Competition';
 
     for (const day of days) {
@@ -102,7 +107,7 @@ export async function fetchMySelectionsView(
         });
       }
     }
-  }
+  });
 
   items.sort((a, b) => a.raceTimeUtc.localeCompare(b.raceTimeUtc));
   return items;

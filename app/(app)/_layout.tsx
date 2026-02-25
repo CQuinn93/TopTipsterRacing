@@ -1,6 +1,19 @@
 import { useRef } from 'react';
-import { Pressable, Alert } from 'react-native';
+import { Pressable, Alert, TouchableOpacity } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { theme } from '@/constants/theme';
+import { useSidebar } from '@/contexts/SidebarContext';
+import { AppSidebar } from '@/components/AppSidebar';
+
+function MenuHeaderButton() {
+  const { openSidebar } = useSidebar();
+  return (
+    <TouchableOpacity onPress={openSidebar} style={{ marginLeft: 12 }} hitSlop={12}>
+      <Ionicons name="menu" size={24} color={theme.colors.text} />
+    </TouchableOpacity>
+  );
+}
 
 function SelectionsTabButton(props: React.ComponentProps<typeof Pressable>) {
   const router = useRouter();
@@ -13,12 +26,11 @@ function SelectionsTabButton(props: React.ComponentProps<typeof Pressable>) {
     />
   );
 }
-import { Ionicons } from '@expo/vector-icons';
-import { theme } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { ForceRefreshProvider, useForceRefresh } from '@/contexts/ForceRefreshContext';
 import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
 import { clearLatestResultsCache } from '@/lib/latestResultsCache';
+import { SidebarProvider } from '@/contexts/SidebarContext';
 
 const HOME_TAB_HOLD_MS = 10_000;
 
@@ -69,7 +81,12 @@ function AppTabs() {
         headerStyle: { backgroundColor: theme.colors.surface },
         headerTintColor: theme.colors.text,
         headerTitleStyle: { fontFamily: theme.fontFamily.regular },
-        tabBarStyle: { backgroundColor: theme.colors.surface, borderTopColor: theme.colors.border },
+        headerLeft: () => <MenuHeaderButton />,
+        tabBarStyle: {
+          backgroundColor: theme.colors.surface,
+          borderTopWidth: 1,
+          borderTopColor: theme.colors.border,
+        },
         tabBarActiveTintColor: theme.colors.accent,
         tabBarInactiveTintColor: theme.colors.textMuted,
       }}
@@ -110,6 +127,27 @@ function AppTabs() {
         }}
       />
       <Tabs.Screen
+        name="rules"
+        options={{
+          title: 'Rules',
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="points"
+        options={{
+          title: 'Points system',
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="results"
+        options={{
+          title: 'Results',
+          href: null,
+        }}
+      />
+      <Tabs.Screen
         name="account"
         options={{
           title: 'Account',
@@ -123,7 +161,10 @@ function AppTabs() {
 export default function AppLayout() {
   return (
     <ForceRefreshProvider>
-      <AppTabs />
+      <SidebarProvider>
+        <AppTabs />
+        <AppSidebar />
+      </SidebarProvider>
     </ForceRefreshProvider>
   );
 }

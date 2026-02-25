@@ -96,13 +96,18 @@ export async function getSelectionsBulk(
 
   const raceDaysByComp: Record<string, SelectionsBulkData['raceDaysByComp'][string]> = {};
   let eventEndDate: string | null = null;
-  for (const compId of competitionIds) {
-    const days = await fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, first_race_utc, races');
-    raceDaysByComp[compId] = days as SelectionsBulkData['raceDaysByComp'][string];
+  const allDays = await Promise.all(
+    competitionIds.map((compId) =>
+      fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, first_race_utc, races')
+    )
+  );
+  competitionIds.forEach((compId, i) => {
+    const days = allDays[i] as SelectionsBulkData['raceDaysByComp'][string];
+    raceDaysByComp[compId] = days;
     for (const d of days as { race_date: string }[]) {
       if (!eventEndDate || d.race_date > eventEndDate) eventEndDate = d.race_date;
     }
-  }
+  });
 
   const bulk: SelectionsBulkData = {
     timestamp: new Date().toISOString(),
