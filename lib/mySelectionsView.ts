@@ -175,10 +175,17 @@ export function computeMySelectionsFromBulk(
   return items;
 }
 
-export type OtherUserSelection = { displayName: string; runnerName: string; isCurrentUser: boolean };
+export type OtherUserSelection = {
+  displayName: string;
+  runnerName: string;
+  runnerId: string;
+  isCurrentUser: boolean;
+  positionLabel?: 'won' | 'place' | 'lost';
+};
 
 /**
  * Compute OtherUserSelection[] from preloaded bulk data (no DB calls).
+ * Includes positionLabel (won/place/lost) when race results exist in bulk.
  */
 export function computeOtherUsersSelectionsFromBulk(
   bulk: SelectionsBulkData,
@@ -191,15 +198,23 @@ export function computeOtherUsersSelectionsFromBulk(
     bulk.participants.filter((p) => p.competition_id === competitionId).map((p) => [p.user_id, p.display_name ?? 'Unknown'])
   );
 
+  const days = bulk.raceDaysByComp[competitionId] ?? [];
+  const day = days.find((d) => d.race_date === raceDate);
+  const race = day?.races?.find((r) => r.id === raceId);
+
   const out: OtherUserSelection[] = [];
   for (const row of bulk.selections) {
     if (row.competition_id !== competitionId || row.race_date !== raceDate) continue;
-    const pick = row.selections?.[raceId]?.runnerName;
-    if (!pick) continue;
+    const sel = row.selections?.[raceId];
+    if (!sel?.runnerName) continue;
+    const runnerId = sel.runnerId ?? '';
+    const result = race?.results?.[runnerId] as { positionLabel?: 'won' | 'place' | 'lost' } | undefined;
     out.push({
       displayName: displayByUser.get(row.user_id) ?? 'Unknown',
-      runnerName: pick,
+      runnerName: sel.runnerName,
+      runnerId,
       isCurrentUser: row.user_id === currentUserId,
+      positionLabel: result?.positionLabel,
     });
   }
   out.sort((a, b) => (a.isCurrentUser ? -1 : b.isCurrentUser ? 1 : a.displayName.localeCompare(b.displayName)));
@@ -234,14 +249,16 @@ export async function fetchOtherUsersSelectionsForRace(
   const out: OtherUserSelection[] = [];
 
   for (const row of selRows ?? []) {
-    const sel = row.selections as Record<string, { runnerName?: string }> | null;
-    const pick = sel?.[raceId]?.runnerName;
-    if (!pick) continue;
+    const sel = row.selections as Record<string, { runnerName?: string; runnerId?: string }> | null;
+    const pick = sel?.[raceId];
+    if (!pick?.runnerName) continue;
     const isCurrentUser = row.user_id === currentUserId;
     out.push({
       displayName: displayByUser.get(row.user_id) ?? 'Unknown',
-      runnerName: pick,
+      runnerName: pick.runnerName,
+      runnerId: pick.runnerId ?? '',
       isCurrentUser,
+      positionLabel: undefined,
     });
   }
 

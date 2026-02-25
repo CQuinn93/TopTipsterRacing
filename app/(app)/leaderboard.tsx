@@ -30,6 +30,8 @@ type LeaderboardRow = {
   rank_overall: number;
   rank_daily: number;
   rank_odds: number;
+  /** Rank at end of previous complete day (for up/down arrow); null if no previous day. */
+  rank_prev_day: number | null;
 };
 
 const RANK_COLORS = {
@@ -46,6 +48,7 @@ export default function LeaderboardScreen() {
   const competitionId = params.competitionId as string | undefined;
 
   const [selectedId, setSelectedId] = useState<string | undefined>(competitionId);
+  const [competitionName, setCompetitionName] = useState<string>('');
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
   const [raceDates, setRaceDates] = useState<string[]>([]);
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
@@ -63,7 +66,7 @@ export default function LeaderboardScreen() {
     const now = new Date();
     setRefreshing(true);
     try {
-      const [raceDaysData, partsRes, selectionsRes] = await Promise.all([
+      const [raceDaysData, partsRes, selectionsRes, compRes] = await Promise.all([
         fetchRaceDaysForCompetition(supabase, selectedId, 'id, race_date, races'),
         supabase
           .from('competition_participants')
@@ -73,12 +76,17 @@ export default function LeaderboardScreen() {
           .from('daily_selections')
           .select('user_id, race_date, selections')
           .eq('competition_id', selectedId),
+        supabase.from('competitions').select('name').eq('id', selectedId).maybeSingle(),
       ]);
+
+      const compRow = compRes.data as { name?: string } | null;
+      setCompetitionName(compRow?.name ?? '');
 
       const parts = (partsRes.data ?? []) as { user_id: string; display_name: string }[];
       if (!parts.length) {
         setRows([]);
         setRaceDates([]);
+        setCompetitionName(compRow?.name ?? '');
         setRefreshing(false);
         return;
       }
@@ -166,6 +174,16 @@ export default function LeaderboardScreen() {
         pointsByUserDay[uid][dayIdx] = (pointsByUserDay[uid]?.[dayIdx] ?? 0) + dayPoints;
       }
 
+      // Last complete day: highest day index where every race has results (event finished)
+      let lastCompleteDayIndex = -1;
+      for (let dayIdx = 0; dayIdx < raceDaysRows.length; dayIdx++) {
+        const d = raceDaysRows[dayIdx];
+        const races = (d?.races ?? []) as Race[];
+        const allHaveResults = races.length > 0 && races.every((r) => r.results != null);
+        if (allHaveResults) lastCompleteDayIndex = dayIdx;
+        else break;
+      }
+
       const buildRow = (p: { user_id: string; display_name: string }): LeaderboardRow => {
         const d = pointsByUserDay[p.user_id] ?? [0, 0, 0, 0];
         const day1 = d[0] ?? 0;
@@ -186,6 +204,7 @@ export default function LeaderboardScreen() {
           rank_overall: 0,
           rank_daily: 0,
           rank_odds: 0,
+          rank_prev_day: null,
         };
       };
 
@@ -193,6 +212,14 @@ export default function LeaderboardScreen() {
 
       list.sort((a, b) => b.total - a.total);
       list.forEach((e, i) => { e.rank_overall = i + 1; });
+
+      // Rank at end of previous complete day (for position change arrows)
+      if (lastCompleteDayIndex >= 1) {
+        const prevDayPoints = (r: LeaderboardRow) =>
+          [r.day1, r.day2, r.day3, r.day4].slice(0, lastCompleteDayIndex).reduce((s, n) => s + n, 0);
+        const byPrev = [...list].sort((a, b) => prevDayPoints(b) - prevDayPoints(a));
+        byPrev.forEach((e, i) => { e.rank_prev_day = i + 1; });
+      }
 
       list.sort((a, b) => {
         const aDay = [a.day1, a.day2, a.day3, a.day4][selectedDayIndex] ?? 0;
@@ -268,6 +295,9 @@ export default function LeaderboardScreen() {
         showsVerticalScrollIndicator={true}
       >
         <View style={[styles.centeredContent, { width: screenWidth }]}>
+          {competitionName ? (
+            <Text style={styles.competitionHeading} numberOfLines={1}>{competitionName}</Text>
+          ) : null}
           <View style={styles.headerBlock}>
             <Text style={styles.rankTitle}>Rank</Text>
             {lastUpdated && (
@@ -290,6 +320,15 @@ export default function LeaderboardScreen() {
                       <View style={[styles.rankCircle, { backgroundColor: circleColor }]}>
                         <Text style={[styles.rankCircleText, rank > 3 && styles.rankCircleTextMuted]}>{rankNum}</Text>
                       </View>
+                      {item.rank_prev_day != null && (
+                        <View style={styles.rankChangeWrap}>
+                          {rank < item.rank_prev_day ? (
+                            <Ionicons name="chevron-up" size={16} color="#22c55e" style={styles.rankChangeIcon} />
+                          ) : rank > item.rank_prev_day ? (
+                            <Ionicons name="chevron-down" size={16} color="#ef4444" style={styles.rankChangeIcon} />
+                          ) : null}
+                        </View>
+                      )}
                       <View style={styles.listRowCenter}>
                         <Text style={styles.listRowName} numberOfLines={1}>{item.display_name}</Text>
                         {!isExpanded && (
@@ -298,17 +337,17 @@ export default function LeaderboardScreen() {
                         {isExpanded && (
                           <View style={styles.expandedStats}>
                             <View style={styles.expandedStat}>
-                              <Ionicons name="calendar-outline" size={18} color={theme.colors.textMuted} />
+                              <Ionicons name="calendar-outline" size={14} color={theme.colors.textMuted} />
                               <Text style={styles.expandedStatValue}>{getDailyPoints(item)}</Text>
                               <Text style={styles.expandedStatLabel}>Daily</Text>
                             </View>
                             <View style={styles.expandedStat}>
-                              <Ionicons name="trophy-outline" size={18} color={theme.colors.textMuted} />
+                              <Ionicons name="trophy-outline" size={14} color={theme.colors.textMuted} />
                               <Text style={styles.expandedStatValue}>{item.total}</Text>
                               <Text style={styles.expandedStatLabel}>Overall</Text>
                             </View>
                             <View style={styles.expandedStat}>
-                              <Ionicons name="flash-outline" size={18} color={theme.colors.textMuted} />
+                              <Ionicons name="flash-outline" size={14} color={theme.colors.textMuted} />
                               <Text style={styles.expandedStatValue}>{item.max_odds > 0 ? item.max_odds.toFixed(2) : '—'}</Text>
                               <Text style={styles.expandedStatLabel}>Best SP</Text>
                             </View>
@@ -364,7 +403,7 @@ export default function LeaderboardScreen() {
                           onPress={() => openParticipantSelections(item)}
                         >
                           <Text style={styles.seeSelectionsButtonText}>See selections</Text>
-                          <Ionicons name="chevron-forward" size={18} color={theme.colors.accent} />
+                          <Ionicons name="chevron-forward" size={16} color={theme.colors.accent} />
                         </TouchableOpacity>
                       )}
                     </View>
@@ -383,30 +422,39 @@ const PADDING_H = theme.spacing.sm;
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   outerScroll: { flex: 1 },
-  outerScrollContent: { paddingBottom: theme.spacing.xxl },
+  outerScrollContent: { paddingBottom: theme.spacing.lg },
   centeredContent: { alignSelf: 'center', alignItems: 'center' },
-  headerBlock: { width: '100%', paddingHorizontal: PADDING_H, marginBottom: theme.spacing.sm },
+  competitionHeading: {
+    width: '100%',
+    paddingHorizontal: PADDING_H,
+    marginBottom: theme.spacing.xs,
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 20,
+    fontWeight: '700',
+    color: theme.colors.text,
+  },
+  headerBlock: { width: '100%', paddingHorizontal: PADDING_H, marginBottom: theme.spacing.xs },
   rankTitle: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: '700',
     color: theme.colors.accent,
   },
   lastUpdated: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
+    fontSize: 11,
     color: theme.colors.textMuted,
-    marginTop: theme.spacing.xs,
+    marginTop: 2,
   },
   rowHighlight: { backgroundColor: theme.colors.accentMuted },
   listWrap: { paddingHorizontal: PADDING_H },
-  listRowWrap: { marginBottom: theme.spacing.sm },
+  listRowWrap: { marginBottom: theme.spacing.xs },
   listRowPulseWrap: {
     position: 'relative',
-    borderRadius: theme.radius.md,
+    borderRadius: theme.radius.sm,
   },
   pulseBorderOverlay: {
-    borderRadius: theme.radius.md,
+    borderRadius: theme.radius.sm,
     borderWidth: 2,
     borderColor: '#3b82f6',
     backgroundColor: 'transparent',
@@ -415,43 +463,46 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.md,
+    borderRadius: theme.radius.sm,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.sm,
     borderWidth: 2,
     borderColor: 'transparent',
   },
   listRowGreenOutline: { borderColor: theme.colors.accent },
   rankCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: theme.spacing.md,
+    marginRight: theme.spacing.sm,
   },
   rankCircleText: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 15,
+    fontSize: 12,
     fontWeight: '700',
     color: theme.colors.black,
   },
   rankCircleTextMuted: { color: theme.colors.textMuted },
+  rankChangeWrap: { marginRight: theme.spacing.xs, justifyContent: 'center' },
+  rankChangeIcon: {},
   listRowCenter: { flex: 1 },
   listRowName: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: theme.colors.text,
   },
   listRowTotal: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
+    fontSize: 11,
     color: theme.colors.textMuted,
-    marginTop: 2,
+    marginTop: 1,
   },
   listRowTotalRight: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: theme.colors.accent,
   },
@@ -459,35 +510,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flex: 1,
     justifyContent: 'space-around',
-    marginTop: theme.spacing.sm,
-    paddingTop: theme.spacing.sm,
+    marginTop: theme.spacing.xs,
+    paddingTop: theme.spacing.xs,
     borderTopWidth: 1,
     borderTopColor: theme.colors.border,
   },
   expandedStat: { alignItems: 'center' },
   expandedStatValue: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: theme.colors.text,
   },
   expandedStatLabel: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
+    fontSize: 10,
     color: theme.colors.textMuted,
-    marginTop: 2,
+    marginTop: 1,
   },
   seeSelectionsButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: theme.spacing.sm,
+    paddingVertical: theme.spacing.xs,
     gap: theme.spacing.xs,
-    marginTop: theme.spacing.xs,
+    marginTop: 2,
   },
   seeSelectionsButtonText: {
     fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
+    fontSize: 12,
     color: theme.colors.accent,
     fontWeight: '600',
   },

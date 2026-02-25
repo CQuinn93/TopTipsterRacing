@@ -26,7 +26,7 @@ import { getSelectionsBulk, type SelectionsBulkData } from '@/lib/selectionsBulk
 import { theme } from '@/constants/theme';
 import { displayHorseName } from '@/lib/displayHorseName';
 import type { Race } from '@/types/races';
-import { formatDayDate, isSelectionClosed } from '@/lib/appUtils';
+import { formatDayDate, isSelectionClosed, isCompletedMoreThanOneDay } from '@/lib/appUtils';
 
 type RaceDay = {
   id: string;
@@ -49,7 +49,9 @@ export default function SelectionsScreen() {
   const [userCompetitions, setUserCompetitions] = useState<{ id: string; name: string }[]>([]);
   const [mySelectionsList, setMySelectionsList] = useState<MySelectionItem[]>([]);
   const [courseDropdownOpen, setCourseDropdownOpen] = useState(false);
+  const [competitionDropdownOpen, setCompetitionDropdownOpen] = useState(false);
   const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
+  const [selectedCompetitionIdInList, setSelectedCompetitionIdInList] = useState<string | null>(null);
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [othersModal, setOthersModal] = useState<{
     raceName: string;
@@ -73,16 +75,23 @@ export default function SelectionsScreen() {
       .from('competition_participants')
       .select('competition_id')
       .eq('user_id', userId);
-    const compIds = (parts ?? []).map((p: { competition_id: string }) => p.competition_id);
-    const { data: comps } = await supabase.from('competitions').select('id, name').in('id', compIds);
-    const compNames = new Map((comps ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
+    const allCompIds = (parts ?? []).map((p: { competition_id: string }) => p.competition_id);
+    const { data: comps } = await supabase
+      .from('competitions')
+      .select('id, name, festival_end_date')
+      .in('id', allCompIds);
+    const ongoing = (comps ?? []).filter(
+      (c: { id: string; name: string; festival_end_date: string }) => !isCompletedMoreThanOneDay(c.festival_end_date)
+    );
+    const compIds = ongoing.map((c: { id: string }) => c.id);
+    const compNames = new Map(ongoing.map((c: { id: string; name: string }) => [c.id, c.name]));
     const bulk = await getSelectionsBulk(supabase, userId, compIds, true);
     setSelectionsBulk(bulk);
     setMySelectionsList(computeMySelectionsFromBulk(bulk, userId, compNames));
     setRefreshingMySelections(false);
   };
 
-  // When no competitionId: load userCompetitions and bulk in one go (single participants + competitions fetch).
+  // When no competitionId: load only ongoing competitions and bulk in one go.
   useEffect(() => {
     if (!userId || competitionId) return;
     const forceRefresh = cameFromRaceDayRef.current;
@@ -100,11 +109,17 @@ export default function SelectionsScreen() {
         setLoading(false);
         return;
       }
-      const compIds = (parts as { competition_id: string }[]).map((p) => p.competition_id);
-      const { data: comps } = await supabase.from('competitions').select('id, name').in('id', compIds);
-      const compList = comps ?? [];
-      setUserCompetitions(compList);
-      const compNames = new Map((compList as { id: string; name: string }[]).map((c) => [c.id, c.name]));
+      const allCompIds = (parts as { competition_id: string }[]).map((p) => p.competition_id);
+      const { data: comps } = await supabase
+        .from('competitions')
+        .select('id, name, festival_end_date')
+        .in('id', allCompIds);
+      const ongoing = (comps ?? []).filter(
+        (c: { id: string; name: string; festival_end_date: string }) => !isCompletedMoreThanOneDay(c.festival_end_date)
+      );
+      const compIds = ongoing.map((c: { id: string }) => c.id);
+      setUserCompetitions(ongoing.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })));
+      const compNames = new Map(ongoing.map((c: { id: string; name: string }) => [c.id, c.name]));
       const bulk = await getSelectionsBulk(supabase, userId, compIds, forceRefresh);
       setSelectionsBulk(bulk);
       setMySelectionsList(computeMySelectionsFromBulk(bulk, userId, compNames));
@@ -261,11 +276,27 @@ export default function SelectionsScreen() {
   const uniqueCourses = [...new Set(dayGroups.map((g) => g.meeting))];
   const effectiveCourse = selectedCourse && uniqueCourses.includes(selectedCourse) ? selectedCourse : uniqueCourses[0] ?? null;
   const courseDayGroups = dayGroups.filter((g) => g.meeting === effectiveCourse);
-  const currentGroup = courseDayGroups[selectedDayIndex] ?? courseDayGroups[0];
+  const uniqueCompIdsInCourse = [...new Set(courseDayGroups.map((g) => g.competitionId))];
+  const effectiveCompId =
+    selectedCompetitionIdInList && uniqueCompIdsInCourse.includes(selectedCompetitionIdInList)
+      ? selectedCompetitionIdInList
+      : uniqueCompIdsInCourse.length === 1
+        ? uniqueCompIdsInCourse[0]
+        : uniqueCompIdsInCourse[0] ?? null;
+  const competitionDayGroups = courseDayGroups.filter((g) => g.competitionId === effectiveCompId);
+  const currentGroup = competitionDayGroups[selectedDayIndex] ?? competitionDayGroups[0];
 
   useEffect(() => {
     setSelectedDayIndex(0);
+    if (effectiveCourse && courseDayGroups.length > 0) {
+      const compIds = [...new Set(courseDayGroups.map((g) => g.competitionId))];
+      setSelectedCompetitionIdInList((prev) => (prev && compIds.includes(prev) ? prev : compIds[0] ?? null));
+    }
   }, [effectiveCourse, courseDayGroups.length]);
+
+  useEffect(() => {
+    setSelectedDayIndex(0);
+  }, [effectiveCompId, competitionDayGroups.length]);
 
   if (!competitionId) {
     if (loading) {
@@ -301,7 +332,7 @@ export default function SelectionsScreen() {
                 style={styles.courseDropdown}
                 onPress={() => setCourseDropdownOpen(true)}
               >
-                <Text style={styles.courseDropdownText}>{effectiveCourse ?? 'Select course'}</Text>
+                <Text style={styles.courseDropdownText}>{effectiveCourse ?? 'Select meeting'}</Text>
                 <Text style={styles.courseDropdownChevron}>▼</Text>
               </TouchableOpacity>
 
@@ -324,9 +355,46 @@ export default function SelectionsScreen() {
                 </Pressable>
               </Modal>
 
-              {courseDayGroups.length >= 1 && (
+              {uniqueCompIdsInCourse.length > 1 && (
+                <>
+                  <TouchableOpacity
+                    style={styles.courseDropdown}
+                    onPress={() => setCompetitionDropdownOpen(true)}
+                  >
+                    <Text style={styles.courseDropdownText}>
+                      {competitionDayGroups[0]?.competitionName ?? 'Select competition'}
+                    </Text>
+                    <Text style={styles.courseDropdownChevron}>▼</Text>
+                  </TouchableOpacity>
+                  <Modal visible={competitionDropdownOpen} transparent animationType="fade">
+                    <Pressable style={styles.dropdownOverlay} onPress={() => setCompetitionDropdownOpen(false)}>
+                      <Pressable style={styles.dropdownContent} onPress={(e) => e.stopPropagation()}>
+                        {uniqueCompIdsInCourse.map((compId) => {
+                          const g = courseDayGroups.find((x) => x.competitionId === compId);
+                          return (
+                            <TouchableOpacity
+                              key={compId}
+                              style={[styles.dropdownOption, compId === effectiveCompId && styles.dropdownOptionActive]}
+                              onPress={() => {
+                                setSelectedCompetitionIdInList(compId);
+                                setCompetitionDropdownOpen(false);
+                              }}
+                            >
+                              <Text style={[styles.dropdownOptionText, compId === effectiveCompId && styles.dropdownOptionTextActive]}>
+                                {g?.competitionName ?? compId}
+                              </Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </Pressable>
+                    </Pressable>
+                  </Modal>
+                </>
+              )}
+
+              {competitionDayGroups.length >= 1 && (
                 <View style={styles.dayTabsRow}>
-                  {courseDayGroups.map((g, i) => (
+                  {competitionDayGroups.map((g, i) => (
                     <TouchableOpacity
                       key={`${g.competitionId}-${g.raceDate}`}
                       style={[styles.dayTab, selectedDayIndex === i && styles.dayTabActive]}
@@ -423,17 +491,64 @@ export default function SelectionsScreen() {
                   <Text style={styles.modalTitle}>{othersModal.raceName}</Text>
                   <Text style={styles.modalSubtitle}>{othersModal.meeting}</Text>
                   <Text style={styles.modalSectionLabel}>Selections in this competition</Text>
-                  {othersModal.others.map((o, i) => (
-                    <View
-                      key={`${o.displayName}-${o.runnerName}-${i}`}
-                      style={[styles.othersRow, o.isCurrentUser && styles.othersRowHighlight]}
-                    >
-                      <Text style={[styles.othersName, o.isCurrentUser && styles.othersNameBold]}>
-                        {o.displayName}{o.isCurrentUser ? ' (you)' : ''}
-                      </Text>
-                      <Text style={styles.othersPick}>{displayHorseName(o.runnerName)}</Text>
-                    </View>
-                  ))}
+                  <View style={styles.othersCardsContainer}>
+                    {othersModal.others.map((o, i) => {
+                      const fadeColors =
+                        o.positionLabel === 'won'
+                          ? [theme.colors.accent, 'rgba(34, 197, 94, 0)']
+                          : o.positionLabel === 'place'
+                            ? ['#eab308', 'rgba(234, 179, 8, 0)']
+                            : o.positionLabel === 'lost'
+                              ? [theme.colors.error, 'rgba(239, 68, 68, 0)']
+                              : null;
+                      return (
+                        <View
+                          key={`${o.displayName}-${o.runnerName}-${i}`}
+                          style={[styles.othersCard, o.isCurrentUser && styles.othersCardHighlight]}
+                        >
+                          {fadeColors && (
+                            <LinearGradient
+                              colors={fadeColors}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 0 }}
+                              style={styles.othersCardFade}
+                            />
+                          )}
+                          <View style={[styles.othersCardRow, fadeColors && { paddingLeft: 12 }]}>
+                            <View style={styles.othersCardCenter}>
+                              <Text style={[styles.othersCardName, o.isCurrentUser && styles.othersCardNameBold]} numberOfLines={1}>
+                                {o.displayName}{o.isCurrentUser ? ' (you)' : ''}
+                              </Text>
+                              <Text style={styles.othersCardPick} numberOfLines={1}>{displayHorseName(o.runnerName)}</Text>
+                            </View>
+                            {o.positionLabel ? (
+                              <View
+                                style={[
+                                  styles.wplBadge,
+                                  o.positionLabel === 'won' && styles.wplWon,
+                                  o.positionLabel === 'place' && styles.wplPlace,
+                                  o.positionLabel === 'lost' && styles.wplLost,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.wplBadgeText,
+                                    o.positionLabel === 'won' && styles.wplWonText,
+                                    o.positionLabel === 'place' && styles.wplPlaceText,
+                                    o.positionLabel === 'lost' && styles.wplLostText,
+                                  ]}
+                                >
+                                  {o.positionLabel === 'won' ? 'Win' : o.positionLabel === 'place' ? 'Place' : 'Loss'}
+                                </Text>
+                              </View>
+                            ) : (
+                              <Text style={styles.mySelectionCardPending}>—</Text>
+                            )}
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
                   <TouchableOpacity style={styles.modalClose} onPress={() => setOthersModal(null)}>
                     <Text style={styles.modalCloseText}>Close</Text>
                   </TouchableOpacity>
@@ -814,22 +929,42 @@ const styles = StyleSheet.create({
     color: theme.colors.textMuted,
     marginBottom: theme.spacing.sm,
   },
-  othersRow: {
+  othersCardsContainer: { gap: theme.spacing.xs },
+  othersCard: {
+    position: 'relative',
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.md,
     paddingVertical: theme.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
+    paddingHorizontal: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    overflow: 'hidden',
   },
-  othersRowHighlight: {
-    backgroundColor: theme.colors.accentMuted,
-    marginHorizontal: -theme.spacing.lg,
-    paddingHorizontal: theme.spacing.lg,
+  othersCardHighlight: { backgroundColor: theme.colors.accentMuted },
+  othersCardFade: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 12,
+    borderTopLeftRadius: theme.radius.md - 1,
+    borderBottomLeftRadius: theme.radius.md - 1,
   },
-  othersName: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.text },
-  othersNameBold: { fontWeight: '600' },
-  othersPick: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textSecondary },
+  othersCardRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  othersCardCenter: { flex: 1, minWidth: 0 },
+  othersCardName: { fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.text },
+  othersCardNameBold: { fontWeight: '600' },
+  othersCardPick: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    marginTop: 2,
+  },
   modalClose: {
     marginTop: theme.spacing.lg,
     paddingVertical: theme.spacing.sm,

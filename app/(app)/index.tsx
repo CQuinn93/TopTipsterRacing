@@ -233,7 +233,7 @@ export default function HomeScreen() {
       <ScrollView
         ref={scrollRef}
         style={styles.container}
-        contentContainerStyle={[styles.content, { paddingBottom: 120 }]}
+        contentContainerStyle={[styles.content, { paddingBottom: theme.spacing.lg }]}
         showsVerticalScrollIndicator={false}
       >
         {/* Welcome + tagline */}
@@ -247,6 +247,27 @@ export default function HomeScreen() {
             <Ionicons name="person-circle-outline" size={24} color={theme.colors.text} />
             <Text style={styles.accountLinkText}>Account</Text>
           </TouchableOpacity>
+        </View>
+
+        {/* Tablet mode code */}
+        <View style={styles.tabletStrip}>
+          <View style={styles.tabletCodeRow}>
+            <Text style={styles.tabletCodeLabel}>Tablet mode code</Text>
+            {codeLoading ? (
+              <ActivityIndicator size="small" color={theme.colors.textMuted} />
+            ) : tabletCode ? (
+              <Text style={styles.tabletCodeValue} selectable>{tabletCode}</Text>
+            ) : (
+              <Text style={styles.tabletCodeMuted}>—</Text>
+            )}
+            <TouchableOpacity
+              hitSlop={12}
+              onPress={() => Alert.alert('Tablet mode', TABLET_MODE_INFO)}
+              style={styles.infoBtn}
+            >
+              <Ionicons name="information-circle-outline" size={22} color={theme.colors.textMuted} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Races available: tap to scroll down to selections section */}
@@ -466,29 +487,6 @@ export default function HomeScreen() {
           </>
         )}
       </ScrollView>
-
-      {/* Fixed tablet code strip directly above nav bar */}
-      <View style={styles.tabletStrip}>
-        <View style={styles.tabletStripInner}>
-          <View style={styles.tabletCodeRow}>
-            <Text style={styles.tabletCodeLabel}>Tablet mode code</Text>
-            {codeLoading ? (
-              <ActivityIndicator size="small" color={theme.colors.textMuted} />
-            ) : tabletCode ? (
-              <Text style={styles.tabletCodeValue} selectable>{tabletCode}</Text>
-            ) : (
-              <Text style={styles.tabletCodeMuted}>—</Text>
-            )}
-            <TouchableOpacity
-              hitSlop={12}
-              onPress={() => Alert.alert('Tablet mode', TABLET_MODE_INFO)}
-              style={styles.infoBtn}
-            >
-              <Ionicons name="information-circle-outline" size={22} color={theme.colors.textMuted} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
     </View>
   );
 }
@@ -767,16 +765,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   tabletStrip: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    borderTopWidth: 2,
-    borderTopColor: theme.colors.barAccent,
-    backgroundColor: theme.colors.surface,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
+    marginBottom: theme.spacing.md,
   },
-  tabletStripInner: {},
   tabletCodeRow: {
     flexDirection: 'row',
     alignItems: 'center',
