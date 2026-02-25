@@ -2,8 +2,11 @@
  * Pull race data from RapidAPI Horse Racing into Supabase.
  * Uses RAPIDAPI_KEY_PULL_RACES (separate key from update-race-results).
  *
- * Cron: every 30 min from 13:00 to 19:00 (14 runs). Once race data exists for the day,
- * later runs exit after a quick DB check with no API calls.
+ * Schedule: run at 3pm, 6pm and 9pm UK (15:00, 18:00, 21:00 UTC = 3/6/9 GMT; 4/7/10 BST). Most racecards are available by 2pm;
+ * three runs give users time to create competitions (before 8pm UK) and still get tomorrow’s races pulled.
+ *
+ * Rule: Competitions for the following day can only be created before 8pm UK; any later and they will not
+ * get race data until the next day (enforced in admin UI).
  *
  * Flow:
  * 1) DB: Find competitions where tomorrow is in [festival_start_date, festival_end_date]; get their course(s).
@@ -21,6 +24,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY_PULL_RACES;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const PULL_RACES_NOTIFICATION_EMAIL = process.env.PULL_RACES_NOTIFICATION_EMAIL;
 
 /** Delay in ms between each GET /race/{id} call. 10/min limit → 6s min spacing; 6s = fastest within limit. */
 const DEFAULT_RACE_FETCH_DELAY_MS = 6_000;
@@ -98,6 +103,74 @@ function getTargetDate(): string {
   return d.toISOString().slice(0, 10);
 }
 
+type PullRacesReport = {
+  targetDate: string;
+  status: 'no_comps' | 'no_courses' | 'skipped_already_have_data' | 'api_error' | 'db_error' | 'success';
+  message: string;
+  coursesAdded?: string[];
+  racesAdded?: { course: string; name: string; time: string }[];
+  error?: string;
+};
+
+function reportToText(report: PullRacesReport): string {
+  const lines: string[] = [
+    `Pull Races Report – ${report.targetDate}`,
+    '',
+    `Status: ${report.status}`,
+    report.message,
+    '',
+  ];
+  if (report.coursesAdded?.length) {
+    lines.push('Courses added: ' + report.coursesAdded.join(', '));
+    lines.push('');
+  }
+  if (report.racesAdded?.length) {
+    lines.push('Races added:');
+    let lastCourse = '';
+    for (const r of report.racesAdded) {
+      if (r.course !== lastCourse) {
+        lines.push(`  ${r.course}:`);
+        lastCourse = r.course;
+      }
+      lines.push(`    - ${r.time} ${r.name}`);
+    }
+    lines.push('');
+  }
+  if (report.error) {
+    lines.push('Error: ' + report.error);
+  }
+  return lines.join('\n');
+}
+
+async function sendReportEmail(report: PullRacesReport): Promise<void> {
+  if (!RESEND_API_KEY || !PULL_RACES_NOTIFICATION_EMAIL) return;
+  const subject = `[Pull Races] ${report.targetDate} – ${report.status}`;
+  const text = reportToText(report);
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'Pull Races <onboarding@resend.dev>',
+        to: [PULL_RACES_NOTIFICATION_EMAIL],
+        subject,
+        text,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.warn('[pull-races] Email send failed:', res.status, err);
+    } else {
+      console.log('[pull-races] Report sent to', PULL_RACES_NOTIFICATION_EMAIL);
+    }
+  } catch (e) {
+    console.warn('[pull-races] Email send error:', e);
+  }
+}
+
 async function main() {
   // Debug: log env presence (never log secret values)
   console.log('[pull-races] Env check:', {
@@ -130,6 +203,11 @@ async function main() {
 
   if (!comps?.length) {
     console.log('No competitions active for', targetDate);
+    await sendReportEmail({
+      targetDate,
+      status: 'no_comps',
+      message: 'No competitions active for this date.',
+    });
     return;
   }
 
@@ -143,6 +221,11 @@ async function main() {
   const courses = [...new Set(activeCompetitions.map((r) => r.course.trim()).filter(Boolean))];
   if (courses.length === 0) {
     console.log('No courses configured for active competitions');
+    await sendReportEmail({
+      targetDate,
+      status: 'no_courses',
+      message: 'No courses configured for active competitions.',
+    });
     return;
   }
 
@@ -162,6 +245,11 @@ async function main() {
   const coursesToFetch = courses.filter((c) => !hasDataForCourse(c));
   if (coursesToFetch.length === 0) {
     console.log('All courses already have race data for', targetDate, '- skipping API.');
+    await sendReportEmail({
+      targetDate,
+      status: 'skipped_already_have_data',
+      message: `All courses (${courses.join(', ')}) already have race data for ${targetDate}. No API calls made.`,
+    });
     return;
   }
   console.log('Courses needing data:', coursesToFetch.join(', '));
@@ -172,6 +260,12 @@ async function main() {
     racecards = await fetchRacecards(targetDate);
   } catch (e) {
     console.error('fetchRacecards', targetDate, e);
+    await sendReportEmail({
+      targetDate,
+      status: 'api_error',
+      message: 'Failed to fetch racecards from API.',
+      error: e instanceof Error ? e.message : String(e),
+    });
     return;
   }
 
@@ -272,6 +366,11 @@ async function main() {
 
   if (raceDaysToUpsert.length === 0) {
     console.log('No race data to upload');
+    await sendReportEmail({
+      targetDate,
+      status: 'api_error',
+      message: 'API returned no matching races for the requested courses.',
+    });
     return;
   }
 
@@ -282,6 +381,12 @@ async function main() {
 
   if (raceDaysErr || !upsertedRaceDays?.length) {
     console.error('race_days upsert', raceDaysErr);
+    await sendReportEmail({
+      targetDate,
+      status: 'db_error',
+      message: 'Failed to upsert race_days.',
+      error: raceDaysErr?.message ?? String(raceDaysErr),
+    });
     return;
   }
 
@@ -325,6 +430,12 @@ async function main() {
 
   if (racesErr || !insertedRaces?.length) {
     console.error('races insert', racesErr);
+    await sendReportEmail({
+      targetDate,
+      status: 'db_error',
+      message: 'Failed to insert races.',
+      error: racesErr?.message ?? String(racesErr),
+    });
     return;
   }
 
@@ -401,6 +512,22 @@ async function main() {
 
   const totalRaces = racesToInsert.length;
   console.log(`  Upserted ${upsertedRaceDays.length} race day(s), ${totalRaces} races, ${horsesToInsert.length} horses`);
+  const racesAdded: { course: string; name: string; time: string }[] = [];
+  for (const [courseName, data] of byCourse.entries()) {
+    for (const r of data.racesForDb) {
+      const time = r.scheduledTimeUtc
+        ? new Date(r.scheduledTimeUtc).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })
+        : '—';
+      racesAdded.push({ course: courseName, name: r.name || 'Race', time });
+    }
+  }
+  await sendReportEmail({
+    targetDate,
+    status: 'success',
+    message: `Added ${upsertedRaceDays.length} race day(s), ${totalRaces} races, ${horsesToInsert.length} horses.`,
+    coursesAdded: raceDaysToUpsert.map((r) => r.course),
+    racesAdded,
+  });
   console.log('Done.');
 }
 

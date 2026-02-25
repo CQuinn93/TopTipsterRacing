@@ -1,6 +1,6 @@
 # Scripts for Cheltenham Top Tipster
 
-These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/horse-racing) (`horse-racing.p.rapidapi.com`). **50 requests/day** and **10 per minute** on free tier. Races for the following day are usually up by ~5PM, so we pull at **5PM the day before**.
+These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/horse-racing) (`horse-racing.p.rapidapi.com`). **50 requests/day** and **10 per minute** on free tier. Most racecards are available by 2pm; we pull at **3pm, 6pm and 9pm UK time** so users have until **8pm UK** to create competitions for the following day (after 8pm UK, creation for tomorrow is blocked and the 9pm run won’t include them). Cron is in UTC: 15:00, 18:00, 21:00 = 3pm/6pm/9pm GMT; in BST = 4pm/7pm/10pm UK.
 
 ### Request count per day (example)
 
@@ -14,7 +14,7 @@ These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/hor
 
 | Script | Purpose | When to run |
 |--------|---------|-------------|
-| **pull-races.ts** | 1) DB: Competitions where tomorrow ∈ [festival_start_date, festival_end_date]; get their **course** (one per competition). 2) API: One call GET /racecards for tomorrow; filter by those courses. 3) API: One call per race GET /race/{id} for runners (with delay). Each race gets an extra **FAV** option (SP favourite). 4) DB: One bulk upload – upsert race_days, insert races, insert horses, upsert competition_race_days. | **5PM (day before)** – cron `0 17 * * *` UTC. |
+| **pull-races.ts** | 1) DB: Competitions where tomorrow ∈ [festival_start_date, festival_end_date]; get their **course** (one per competition). 2) API: One call GET /racecards for tomorrow; filter by those courses. 3) API: One call per race GET /race/{id} for runners (with delay). Each race gets an extra **FAV** option (SP favourite). 4) DB: One bulk upload – upsert race_days, insert races, insert horses, upsert competition_race_days. | **3pm, 6pm, 9pm UK** – cron `0 15,18,21 * * *` UTC (3/6/9 GMT; 4/7/10 BST). Competitions for the following day must be created **before 8pm UK** to get races that night. |
 | **update-race-results.ts** | Gets from DB the **latest race** where `scheduled_time_utc` + 30 min < now and `is_finished = false`. Calls GET /race/{id}. If no positions yet, exits (retry in 10 min). Updates **horses**: position, sp, is_fav. Sets **races.is_finished = true**. App derives races from races + horses tables. | **30 min after each race**; retry after 10 min if blank – cron every 20 min `*/20 * * * *`. |
 | **remove-old-races.ts** | Deletes **race_days** where `race_date` is older than **5 days** (cascade deletes `races` and `horses`). Keeps DB small. | Daily, e.g. **18:00 UTC** – cron `0 18 * * *`. |
 | **backfill-fav-selections.ts** | For each race day where the selection deadline (1 hour before first race) has passed, sets any **missing** per-race selections to **FAV** for every participant. Run after deadline so users who didn't pick get the favourite. | **After deadline** – e.g. every 15 min `*/15 * * * *` or once per race day. |
@@ -38,11 +38,12 @@ These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/hor
 - **RAPIDAPI_KEY** (for pull-races and update-race-results)
 - **RACE_FETCH_DELAY_MS** (optional) – delay in ms between each GET /race/{id} in pull-races. Default 6000 (6s = 10/min, fastest). Increase if you hit rate limits.
 - **COURSE_FILTER** – ignored; courses are taken from active competitions in the DB (one course per competition).
+- **RESEND_API_KEY** (optional) – if set with **PULL_RACES_NOTIFICATION_EMAIL**, pull-races will email a short report after each run (success: courses and races added; skipped: already had data; errors: message). Sign up at [resend.com](https://resend.com), create an API key, and add both to your env or GitHub Secrets. Emails are sent from `onboarding@resend.dev` (Resend’s test sender). With the test sender, the recipient must be the same email you used to sign up at resend.com; for other addresses, verify a domain in Resend and set the `from` address in the script.
 
 ## Running locally
 
 ```bash
-# Pull tomorrow's races (5PM run)
+# Pull tomorrow's races (3pm / 6pm / 9pm runs)
 SUPABASE_URL=... SUPABASE_SERVICE_KEY=... RAPIDAPI_KEY=... npx tsx scripts/pull-races.ts
 
 # Update results for latest race due (30+ min after start)
@@ -57,9 +58,9 @@ SUPABASE_URL=... SUPABASE_SERVICE_KEY=... npx tsx scripts/backfill-fav-selection
 
 ## GitHub Actions
 
-Secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `RAPIDAPI_KEY`.
+Secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `RAPIDAPI_KEY_PULL_RACES`. Optional: `RESEND_API_KEY`, `PULL_RACES_NOTIFICATION_EMAIL` (your email) to receive a report after each pull-races run.
 
-- **17:00 UTC** – pull-races (following day).
+- **15:00, 18:00, 21:00 UTC** – pull-races (following day) = 3pm, 6pm, 9pm UK (GMT) / 4pm, 7pm, 10pm UK (BST). Competitions for tomorrow must be created before 8pm UK.
 - **Every 20 min** – update-race-results (30 min after race + retry).
 - **18:00 UTC** – remove-old-races.
 

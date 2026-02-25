@@ -56,12 +56,46 @@ function parseYYYYMMDD(s: string): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-/** Earliest selectable festival start date: 2 days from today (race data pulls day before). */
+const UK_TIMEZONE = 'Europe/London';
+
+/** Current hour (0–23) in UK time. */
+function getUKHour(): number {
+  const parts = new Date().toLocaleString('en-GB', { timeZone: UK_TIMEZONE, hour: '2-digit', hour12: false }).split(':');
+  return parseInt(parts[0], 10) || 0;
+}
+
+/** Current date string (YYYY-MM-DD) in UK time. */
+function getUKDateStr(): string {
+  const [d, m, y] = new Date().toLocaleString('en-GB', { timeZone: UK_TIMEZONE, day: '2-digit', month: '2-digit', year: 'numeric' }).split('/');
+  return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+
+/**
+ * Earliest selectable festival start date.
+ * Competitions for the following day can only be created before 8pm UK; after 8pm UK the next run is 9pm
+ * so we require start ≥ day after tomorrow. Before 8pm UK we allow start = tomorrow.
+ */
 function getMinStartDate(): Date {
-  const d = new Date();
-  d.setDate(d.getDate() + 2);
-  d.setHours(0, 0, 0, 0);
-  return d;
+  const ukDateStr = getUKDateStr();
+  const ukHour = getUKHour();
+  const tomorrow = new Date(ukDateStr + 'T12:00:00');
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const dayAfter = new Date(tomorrow);
+  dayAfter.setDate(dayAfter.getDate() + 1);
+  if (ukHour < 20) {
+    return tomorrow; // before 8pm UK: allow tomorrow
+  }
+  return dayAfter; // 8pm UK or later: require day after tomorrow
+}
+
+/** True if the competition date range includes tomorrow and it's already 8pm or later UK (creation not allowed). */
+function isCreationAfterCutoffForTomorrow(start: string, end: string): boolean {
+  const ukDateStr = getUKDateStr();
+  const tomorrow = new Date(ukDateStr + 'T12:00:00');
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = formatDateToYYYYMMDD(tomorrow);
+  if (start > tomorrowStr || end < tomorrowStr) return false; // range doesn't include tomorrow
+  return getUKHour() >= 20; // 8pm UK or later
 }
 
 function getMinStartDateStr(): string {
@@ -255,7 +289,11 @@ export default function AdminScreen() {
     }
     const minStart = getMinStartDateStr();
     if (start < minStart) {
-      Alert.alert('Error', `Start date must be at least 2 days ahead (${minStart}). Race data is pulled the day before.`);
+      Alert.alert('Error', `Start date must be ${minStart} or later. Race data is pulled the day before; competitions for tomorrow can only be created before 8pm UK.`);
+      return;
+    }
+    if (isCreationAfterCutoffForTomorrow(start, end)) {
+      Alert.alert('Error', 'Competitions for the following day can only be created before 8pm UK. Please set the start date to the day after tomorrow or try again tomorrow before 8pm UK.');
       return;
     }
     const course = newCourse.trim();
