@@ -9,7 +9,6 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -110,16 +109,6 @@ export default function ParticipantSelectionsScreen() {
           borderBottomWidth: 1,
           borderBottomColor: activeTheme.colors.border,
           position: 'relative',
-          overflow: 'hidden',
-        },
-        selectionRowFade: {
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: 12,
-          borderTopLeftRadius: 2,
-          borderBottomLeftRadius: 2,
         },
         selectionRowInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flex: 1 },
         selectionLeft: { flex: 1 },
@@ -455,14 +444,6 @@ export default function ParticipantSelectionsScreen() {
                       : (result ? POSITION_POINTS[result.positionLabel] : null);
                     /** Odds points = bonus only (sp_points). Never include position points here. */
                     const dbSpOnly = result != null && typeof result.sp_points === 'number' ? result.sp_points : null;
-                    const fadeColors =
-                      position === 'won'
-                        ? ['#22c55e', 'rgba(34, 197, 94, 0)']
-                        : position === 'place'
-                          ? ['#eab308', 'rgba(234, 179, 8, 0)']
-                          : position === 'lost'
-                            ? [activeTheme.colors.error, 'rgba(239, 68, 68, 0)']
-                            : null;
                     return (
                       <TouchableOpacity
                         key={race.id}
@@ -480,15 +461,7 @@ export default function ParticipantSelectionsScreen() {
                         disabled={!pick}
                         activeOpacity={0.7}
                       >
-                        {fadeColors != null && (
-                          <LinearGradient
-                            colors={fadeColors}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                            style={styles.selectionRowFade}
-                          />
-                        )}
-                        <View style={[styles.selectionRowInner, fadeColors != null && { paddingLeft: 12 }]}>
+                        <View style={styles.selectionRowInner}>
                           <View style={styles.selectionLeft}>
                             <Text style={styles.raceNameSmall}>{race.name}</Text>
                             <Text style={styles.pickName}>{pick ? displayHorseName(pick.runnerName) : 'No selection'}</Text>

@@ -74,8 +74,11 @@ function buildRace(race: RaceRow, horses: HorseRow[]): Race {
         sp_points: h.sp_points != null && Number.isFinite(h.sp_points) ? h.sp_points : undefined,
       };
     } else if (h.result_code) {
+      // No numeric position: PU (pulled up), U (unseated), F (fell), etc. = loss. Non-runners are
+      // excluded from results by the script and user selection is replaced with FAV.
       results[h.api_horse_id] = {
         position: null,
+        positionLabel: 'lost',
         sp: h.sp != null && Number.isFinite(h.sp) ? h.sp : 0,
         resultCode: h.result_code,
       };

@@ -215,7 +215,7 @@ export default function HomeScreen() {
 
   const styles = useMemo(
     () => {
-      const isLight = theme.colors.background === lightTheme.colors.background;
+      const isLight = String(theme.colors.background) === String(lightTheme.colors.background);
       const cardBorder = isLight ? theme.colors.white : theme.colors.border;
       const cardBorderWidth = isLight ? 2 : 1;
       return StyleSheet.create({

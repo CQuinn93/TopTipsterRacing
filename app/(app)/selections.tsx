@@ -11,7 +11,6 @@ import {
   Pressable,
   RefreshControl,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
@@ -56,7 +55,8 @@ export default function SelectionsScreen() {
   const [selectedCourse, setSelectedCourse] = useState<string | null>(null);
   const [selectedCompetitionIdInList, setSelectedCompetitionIdInList] = useState<string | null>(null);
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
-  const [othersModal, setOthersModal] = useState<{
+  const [expandedDrawer, setExpandedDrawer] = useState<{
+    cardKey: string;
     raceName: string;
     meeting: string;
     others: OtherUserSelection[];
@@ -257,13 +257,17 @@ export default function SelectionsScreen() {
     return deadlinePassed || userLocked;
   };
 
-  const handleCardPress = (item: MySelectionItem) => {
+  const handleCardPress = (item: MySelectionItem, cardKey: string) => {
     if (!userId || !selectionsBulk) return;
     if (!canViewOthersForItem(item, selectionsBulk)) {
       Alert.alert(
         "Can't view others yet",
         "Lock in your picks for this day, or wait until the entry deadline has passed (1 hour before the first race), to view other users' selections."
       );
+      return;
+    }
+    if (expandedDrawer?.cardKey === cardKey) {
+      setExpandedDrawer(null);
       return;
     }
     const others = computeOtherUsersSelectionsFromBulk(
@@ -273,7 +277,8 @@ export default function SelectionsScreen() {
       item.raceId,
       userId
     );
-    setOthersModal({
+    setExpandedDrawer({
+      cardKey,
       raceName: item.raceName,
       meeting: item.meeting,
       others,
@@ -606,6 +611,7 @@ export default function SelectionsScreen() {
           marginBottom: theme.spacing.sm,
         },
         raceCardsContainer: { gap: theme.spacing.xs },
+        raceCardWithDrawer: { marginBottom: theme.spacing.xs },
         mySelectionCard: {
           position: 'relative',
           flexDirection: 'row',
@@ -616,6 +622,17 @@ export default function SelectionsScreen() {
           borderWidth: 1,
           borderColor: theme.colors.border,
           overflow: 'hidden',
+        },
+        mySelectionCardExpanded: {
+          borderBottomLeftRadius: 0,
+          borderBottomRightRadius: 0,
+          borderBottomColor: 'transparent',
+        },
+        drawerChevron: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 10,
+          color: theme.colors.textMuted,
+          marginLeft: theme.spacing.xs,
         },
         mySelectionCardFade: {
           position: 'absolute',
@@ -663,13 +680,13 @@ export default function SelectionsScreen() {
           paddingVertical: 2,
           borderRadius: theme.radius.sm,
         },
-        wplWon: { backgroundColor: theme.colors.accentMuted },
-        wplPlace: { backgroundColor: 'rgba(163, 163, 163, 0.2)' },
-        wplLost: { backgroundColor: 'rgba(115, 115, 115, 0.2)' },
+        wplWon: { backgroundColor: 'rgba(34, 197, 94, 0.2)' },
+        wplPlace: { backgroundColor: 'rgba(234, 179, 8, 0.2)' },
+        wplLost: { backgroundColor: 'rgba(239, 68, 68, 0.15)' },
         wplBadgeText: { fontFamily: theme.fontFamily.regular, fontSize: 11 },
-        wplWonText: { color: theme.colors.accent, fontWeight: '600' },
-        wplPlaceText: { color: theme.colors.textSecondary },
-        wplLostText: { color: theme.colors.textMuted },
+        wplWonText: { color: '#166534', fontWeight: '600' },
+        wplPlaceText: { color: '#a16207' },
+        wplLostText: { color: '#991b1b' },
         modalBackdrop: {
           flex: 1,
           backgroundColor: 'rgba(0,0,0,0.5)',
@@ -740,6 +757,38 @@ export default function SelectionsScreen() {
           fontSize: 12,
           color: theme.colors.textSecondary,
           marginTop: 2,
+        },
+        othersDrawer: {
+          backgroundColor: theme.colors.background,
+          borderWidth: 1,
+          borderLeftColor: theme.colors.border,
+          borderRightColor: theme.colors.border,
+          borderBottomColor: theme.colors.border,
+          borderTopColor: 'transparent',
+          borderBottomLeftRadius: theme.radius.md,
+          borderBottomRightRadius: theme.radius.md,
+          paddingHorizontal: theme.spacing.md,
+          paddingTop: theme.spacing.sm,
+          paddingBottom: theme.spacing.md,
+        },
+        othersDrawerTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          fontWeight: '600',
+          color: theme.colors.text,
+          marginBottom: 2,
+        },
+        othersDrawerSubtitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.sm,
+        },
+        othersDrawerLabel: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.xs,
         },
         modalClose: {
           marginTop: theme.spacing.lg,
@@ -973,12 +1022,16 @@ export default function SelectionsScreen() {
             </View>
           ) : (
             <>
-              {availableRaces.length > 0 && (
+              {(() => {
+                const today = new Date().toISOString().slice(0, 10);
+                const nonExpiredRaces = availableRaces.filter((item) => item.raceDate >= today);
+                const openRaces = nonExpiredRaces.filter((item) => !isSelectionClosed(item.firstRaceUtc));
+                return openRaces.length > 0 && (
                 <View style={styles.makePicksSection}>
                   <Text style={styles.makePicksSectionTitle}>Make your picks</Text>
                   <Text style={styles.makePicksSectionSubtitle}>Select a meeting to make or view your selections</Text>
                   <View style={styles.raceCardsList}>
-                    {availableRaces.map((item) => {
+                    {openRaces.map((item) => {
                       const closed = isSelectionClosed(item.firstRaceUtc);
                       const cardKey = `${item.competitionId}-${item.raceDate}`;
                       const isLocking = lockingId === cardKey;
@@ -1044,7 +1097,8 @@ export default function SelectionsScreen() {
                     })}
                   </View>
                 </View>
-              )}
+              );
+              })()}
 
               <Text style={[styles.sectionTitle, styles.sectionTitleWithTopMargin]}>Your selections</Text>
 
@@ -1144,65 +1198,101 @@ export default function SelectionsScreen() {
                     {currentGroup.items
                       .sort((a, b) => a.raceTimeUtc.localeCompare(b.raceTimeUtc))
                       .map((item, index) => {
-                        const fadeColors = item.positionLabel === 'won'
-                          ? [theme.colors.accent, 'rgba(34, 197, 94, 0)']
-                          : item.positionLabel === 'place'
-                            ? ['#eab308', 'rgba(234, 179, 8, 0)']
-                            : item.positionLabel === 'lost'
-                              ? [theme.colors.error, 'rgba(239, 68, 68, 0)']
-                              : null;
+                        const cardKey = `${item.competitionId}-${item.raceId}-${item.raceDate}`;
+                        const isExpanded = expandedDrawer?.cardKey === cardKey;
                         return (
-                          <TouchableOpacity
-                            key={`${item.competitionId}-${item.raceId}-${item.raceDate}-${index}`}
-                            style={styles.mySelectionCard}
-                            onPress={() => handleCardPress(item)}
-                            activeOpacity={0.7}
-                          >
-                            {fadeColors && (
-                              <LinearGradient
-                                colors={fadeColors}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 0 }}
-                                style={styles.mySelectionCardFade}
-                              />
-                            )}
-                            <View style={[styles.mySelectionCardRow, fadeColors && { paddingLeft: 12 }]}>
-                              <Text style={styles.mySelectionCardTime}>
-                                {new Date(item.raceTimeUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                              </Text>
-                              <View style={styles.mySelectionCardCenter}>
-                                <Text style={styles.mySelectionCardPick} numberOfLines={1}>{displayHorseName(item.runnerName)}</Text>
-                                {item.jockey && (
-                                  <Text style={styles.mySelectionCardJockey} numberOfLines={1}>{item.jockey}</Text>
-                                )}
-                              </View>
-                              {item.positionLabel ? (
-                              <View
-                                style={[
-                                  styles.wplBadge,
-                                  item.positionLabel === 'won' && styles.wplWon,
-                                  item.positionLabel === 'place' && styles.wplPlace,
-                                  item.positionLabel === 'lost' && styles.wplLost,
-                                ]}
-                              >
-                                <Text
+                          <View key={cardKey} style={styles.raceCardWithDrawer}>
+                            <TouchableOpacity
+                              style={[styles.mySelectionCard, isExpanded && styles.mySelectionCardExpanded]}
+                              onPress={() => handleCardPress(item, cardKey)}
+                              activeOpacity={0.7}
+                            >
+                              <View style={styles.mySelectionCardRow}>
+                                <Text style={styles.mySelectionCardTime}>
+                                  {new Date(item.raceTimeUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                </Text>
+                                <View style={styles.mySelectionCardCenter}>
+                                  <Text style={styles.mySelectionCardPick} numberOfLines={1}>{displayHorseName(item.runnerName)}</Text>
+                                  {item.jockey && (
+                                    <Text style={styles.mySelectionCardJockey} numberOfLines={1}>{item.jockey}</Text>
+                                  )}
+                                </View>
+                                {item.positionLabel ? (
+                                <View
                                   style={[
-                                    styles.wplBadgeText,
-                                    item.positionLabel === 'won' && styles.wplWonText,
-                                    item.positionLabel === 'place' && styles.wplPlaceText,
-                                    item.positionLabel === 'lost' && styles.wplLostText,
+                                    styles.wplBadge,
+                                    item.positionLabel === 'won' && styles.wplWon,
+                                    item.positionLabel === 'place' && styles.wplPlace,
+                                    item.positionLabel === 'lost' && styles.wplLost,
                                   ]}
                                 >
-                                  {item.positionLabel === 'won' ? 'Win' : item.positionLabel === 'place' ? 'Place' : 'Loss'}
-                                </Text>
+                                  <Text
+                                    style={[
+                                      styles.wplBadgeText,
+                                      item.positionLabel === 'won' && styles.wplWonText,
+                                      item.positionLabel === 'place' && styles.wplPlaceText,
+                                      item.positionLabel === 'lost' && styles.wplLostText,
+                                    ]}
+                                  >
+                                    {item.positionLabel === 'won' ? 'Win' : item.positionLabel === 'place' ? 'Place' : 'Lost'}
+                                  </Text>
+                                </View>
+                              ) : (
+                                <Text style={styles.mySelectionCardPending}>—</Text>
+                              )}
+                                <Text style={styles.drawerChevron}>{isExpanded ? '▲' : '▼'}</Text>
                               </View>
-                            ) : (
-                              <Text style={styles.mySelectionCardPending}>—</Text>
+                            </TouchableOpacity>
+                            {isExpanded && expandedDrawer && (
+                              <View style={styles.othersDrawer}>
+                                <Text style={styles.othersDrawerTitle}>{expandedDrawer.raceName}</Text>
+                                <Text style={styles.othersDrawerSubtitle}>{expandedDrawer.meeting}</Text>
+                                <Text style={styles.othersDrawerLabel}>Other picks in this race</Text>
+                                <View style={styles.othersCardsContainer}>
+                                  {expandedDrawer.others.map((o, i) => (
+                                    <View
+                                      key={`${o.displayName}-${o.runnerName}-${i}`}
+                                      style={[styles.othersCard, o.isCurrentUser && styles.othersCardHighlight]}
+                                    >
+                                      <View style={styles.othersCardRow}>
+                                        <View style={styles.othersCardCenter}>
+                                          <Text style={[styles.othersCardName, o.isCurrentUser && styles.othersCardNameBold]} numberOfLines={1}>
+                                            {o.displayName}{o.isCurrentUser ? ' (you)' : ''}
+                                          </Text>
+                                          <Text style={styles.othersCardPick} numberOfLines={1}>{displayHorseName(o.runnerName)}</Text>
+                                        </View>
+                                        {o.positionLabel ? (
+                                          <View
+                                            style={[
+                                              styles.wplBadge,
+                                              o.positionLabel === 'won' && styles.wplWon,
+                                              o.positionLabel === 'place' && styles.wplPlace,
+                                              o.positionLabel === 'lost' && styles.wplLost,
+                                            ]}
+                                          >
+                                            <Text
+                                              style={[
+                                                styles.wplBadgeText,
+                                                o.positionLabel === 'won' && styles.wplWonText,
+                                                o.positionLabel === 'place' && styles.wplPlaceText,
+                                                o.positionLabel === 'lost' && styles.wplLostText,
+                                              ]}
+                                            >
+                                              {o.positionLabel === 'won' ? 'Win' : o.positionLabel === 'place' ? 'Place' : 'Lost'}
+                                            </Text>
+                                          </View>
+                                        ) : (
+                                          <Text style={styles.mySelectionCardPending}>—</Text>
+                                        )}
+                                      </View>
+                                    </View>
+                                  ))}
+                                </View>
+                              </View>
                             )}
                           </View>
-                        </TouchableOpacity>
-                      );
-                    })}
+                        );
+                      })}
                   </View>
                 </View>
               )}
@@ -1212,80 +1302,6 @@ export default function SelectionsScreen() {
           )}
         </ScrollView>
 
-        <Modal visible={!!othersModal} transparent animationType="fade">
-          <Pressable style={styles.modalBackdrop} onPress={() => setOthersModal(null)}>
-            <Pressable style={styles.modalBox} onPress={(e) => e.stopPropagation()}>
-              {othersModal && (
-                <>
-                  <Text style={styles.modalTitle}>{othersModal.raceName}</Text>
-                  <Text style={styles.modalSubtitle}>{othersModal.meeting}</Text>
-                  <Text style={styles.modalSectionLabel}>Selections in this competition</Text>
-                  <View style={styles.othersCardsContainer}>
-                    {othersModal.others.map((o, i) => {
-                      const fadeColors =
-                        o.positionLabel === 'won'
-                          ? [theme.colors.accent, 'rgba(34, 197, 94, 0)']
-                          : o.positionLabel === 'place'
-                            ? ['#eab308', 'rgba(234, 179, 8, 0)']
-                            : o.positionLabel === 'lost'
-                              ? [theme.colors.error, 'rgba(239, 68, 68, 0)']
-                              : null;
-                      return (
-                        <View
-                          key={`${o.displayName}-${o.runnerName}-${i}`}
-                          style={[styles.othersCard, o.isCurrentUser && styles.othersCardHighlight]}
-                        >
-                          {fadeColors && (
-                            <LinearGradient
-                              colors={fadeColors}
-                              start={{ x: 0, y: 0 }}
-                              end={{ x: 1, y: 0 }}
-                              style={styles.othersCardFade}
-                            />
-                          )}
-                          <View style={[styles.othersCardRow, fadeColors && { paddingLeft: 12 }]}>
-                            <View style={styles.othersCardCenter}>
-                              <Text style={[styles.othersCardName, o.isCurrentUser && styles.othersCardNameBold]} numberOfLines={1}>
-                                {o.displayName}{o.isCurrentUser ? ' (you)' : ''}
-                              </Text>
-                              <Text style={styles.othersCardPick} numberOfLines={1}>{displayHorseName(o.runnerName)}</Text>
-                            </View>
-                            {o.positionLabel ? (
-                              <View
-                                style={[
-                                  styles.wplBadge,
-                                  o.positionLabel === 'won' && styles.wplWon,
-                                  o.positionLabel === 'place' && styles.wplPlace,
-                                  o.positionLabel === 'lost' && styles.wplLost,
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.wplBadgeText,
-                                    o.positionLabel === 'won' && styles.wplWonText,
-                                    o.positionLabel === 'place' && styles.wplPlaceText,
-                                    o.positionLabel === 'lost' && styles.wplLostText,
-                                  ]}
-                                >
-                                  {o.positionLabel === 'won' ? 'Win' : o.positionLabel === 'place' ? 'Place' : 'Loss'}
-                                </Text>
-                              </View>
-                            ) : (
-                              <Text style={styles.mySelectionCardPending}>—</Text>
-                            )}
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
-                  <TouchableOpacity style={styles.modalClose} onPress={() => setOthersModal(null)}>
-                    <Text style={styles.modalCloseText}>Close</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </Pressable>
-          </Pressable>
-        </Modal>
       </>
     );
   }
