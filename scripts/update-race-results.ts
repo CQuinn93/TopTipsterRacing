@@ -149,13 +149,11 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
     return pts > 0 ? pts : (position === 1 ? 5 : 1);
   }
 
+  /** Bonus points only (by SP range and win/place category). Standard points go in pos_points. */
   function getSpPoints(sp: number, position: number): number | null {
     if (pointsRows.length === 0) return null;
-    const standardType = position === 1 ? 'standard_win' : 'standard_place';
     const bonusType = position === 1 ? 'bonus_win' : 'bonus_place';
-    const standard = lookupRangePoints(sp, standardType);
-    const bonus = lookupRangePoints(sp, bonusType);
-    return standard + bonus;
+    return lookupRangePoints(sp, bonusType);
   }
 
   // Clear is_fav for all horses in the race

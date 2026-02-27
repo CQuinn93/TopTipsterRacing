@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,9 +11,10 @@ import {
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
-import { theme } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
 
 export default function AccessCodeScreen() {
+  const theme = useTheme();
   const { userId } = useAuth();
   const [code, setCode] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -102,6 +103,72 @@ export default function AccessCodeScreen() {
     }
   };
 
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        container: {
+          flex: 1,
+          backgroundColor: theme.colors.background,
+          justifyContent: 'center',
+          padding: theme.spacing.lg,
+        },
+        title: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 24,
+          color: theme.colors.text,
+          textAlign: 'center',
+          marginBottom: theme.spacing.xs,
+        },
+        subtitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.textSecondary,
+          textAlign: 'center',
+          marginBottom: theme.spacing.xl,
+        },
+        displayNameLabel: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.textSecondary,
+          marginBottom: theme.spacing.md,
+        },
+        input: {
+          fontFamily: theme.fontFamily.input,
+          fontSize: 16,
+          color: theme.colors.text,
+          backgroundColor: theme.colors.surface,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.md,
+          paddingHorizontal: theme.spacing.md,
+          paddingVertical: theme.spacing.md,
+          marginBottom: theme.spacing.md,
+        },
+        button: {
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.md,
+          paddingVertical: theme.spacing.md,
+          alignItems: 'center',
+          marginTop: theme.spacing.sm,
+          marginBottom: theme.spacing.md,
+        },
+        buttonDisabled: { opacity: 0.7 },
+        buttonText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 18,
+          color: theme.colors.black,
+          fontWeight: '600',
+        },
+        backText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.textSecondary,
+          textAlign: 'center',
+        },
+      }),
+    [theme]
+  );
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Enter competition</Text>
@@ -149,64 +216,3 @@ export default function AccessCodeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-    justifyContent: 'center',
-    padding: theme.spacing.lg,
-  },
-  title: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 24,
-    color: theme.colors.text,
-    textAlign: 'center',
-    marginBottom: theme.spacing.xs,
-  },
-  subtitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: theme.spacing.xl,
-  },
-  displayNameLabel: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.md,
-  },
-  input: {
-    fontFamily: theme.fontFamily.input,
-    fontSize: 16,
-    color: theme.colors.text,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.md,
-    marginBottom: theme.spacing.md,
-  },
-  button: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.md,
-    paddingVertical: theme.spacing.md,
-    alignItems: 'center',
-    marginTop: theme.spacing.sm,
-    marginBottom: theme.spacing.md,
-  },
-  buttonDisabled: { opacity: 0.7 },
-  buttonText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 18,
-    color: theme.colors.black,
-    fontWeight: '600',
-  },
-  backText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
-  },
-});

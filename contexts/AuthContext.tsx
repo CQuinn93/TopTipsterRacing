@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
+import { cancelAllSelectionReminders } from '@/lib/selectionReminderNotifications';
 
 type AuthContextType = {
   session: Session | null;
@@ -31,6 +32,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    await cancelAllSelectionReminders();
     await supabase.auth.signOut();
   };
 

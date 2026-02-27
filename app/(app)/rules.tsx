@@ -1,7 +1,31 @@
+import { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
-import { theme } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
 
 export default function RulesScreen() {
+  const theme = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        container: { flex: 1, backgroundColor: theme.colors.background },
+        content: { padding: theme.spacing.md, paddingBottom: theme.spacing.xxl },
+        title: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 20,
+          fontWeight: '600',
+          color: theme.colors.text,
+          marginBottom: theme.spacing.lg,
+        },
+        rule: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          color: theme.colors.textSecondary,
+          lineHeight: 24,
+          marginBottom: theme.spacing.md,
+        },
+      }),
+    [theme]
+  );
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Rules</Text>
@@ -18,21 +42,3 @@ export default function RulesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
-  content: { padding: theme.spacing.md, paddingBottom: theme.spacing.xxl },
-  title: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 20,
-    fontWeight: '600',
-    color: theme.colors.text,
-    marginBottom: theme.spacing.lg,
-  },
-  rule: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 15,
-    color: theme.colors.textSecondary,
-    lineHeight: 24,
-    marginBottom: theme.spacing.md,
-  },
-});

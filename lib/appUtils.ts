@@ -4,8 +4,8 @@
 
 export const POINTS_PER_ODDS = 10;
 
-/** Position points when results are available (won/place/lost). */
-export const POSITION_POINTS = { won: 10, place: 5, lost: 0 } as const;
+/** Position points when results are available (won/place/lost). Win 5, place 1; bonus from odds in sp_points. */
+export const POSITION_POINTS = { won: 5, place: 1, lost: 0 } as const;
 
 const SELECTION_CLOSE_HOURS_BEFORE_FIRST = 1;
 

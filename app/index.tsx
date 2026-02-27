@@ -1,11 +1,25 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Redirect } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
-import { theme } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
 
 export default function Index() {
+  const theme = useTheme();
   const { session, isLoading } = useAuth();
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        centered: {
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          backgroundColor: theme.colors.background,
+        },
+      }),
+    [theme]
+  );
 
   if (isLoading) {
     return (
@@ -21,12 +35,3 @@ export default function Index() {
 
   return <Redirect href="/(app)" />;
 }
-
-const styles = StyleSheet.create({
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: theme.colors.background,
-  },
-});

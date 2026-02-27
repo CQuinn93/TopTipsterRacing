@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -23,10 +23,12 @@ import {
   type OtherUserSelection,
 } from '@/lib/mySelectionsView';
 import { getSelectionsBulk, type SelectionsBulkData } from '@/lib/selectionsBulkCache';
-import { theme } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
 import { displayHorseName } from '@/lib/displayHorseName';
 import type { Race } from '@/types/races';
-import { formatDayDate, isSelectionClosed, isCompletedMoreThanOneDay } from '@/lib/appUtils';
+import { formatDayDate, isSelectionClosed, isCompletedMoreThanOneDay, formatTimeUntilDeadline } from '@/lib/appUtils';
+import { getAvailableRacesForUser } from '@/lib/availableRacesCache';
+import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
 
 type RaceDay = {
   id: string;
@@ -36,6 +38,7 @@ type RaceDay = {
 };
 
 export default function SelectionsScreen() {
+  const theme = useTheme();
   const { userId } = useAuth();
   const router = useRouter();
   const params = useLocalSearchParams<{ competitionId?: string; raceDate?: string }>();
@@ -60,6 +63,8 @@ export default function SelectionsScreen() {
   } | null>(null);
   const [selectionsBulk, setSelectionsBulk] = useState<SelectionsBulkData | null>(null);
   const [refreshingMySelections, setRefreshingMySelections] = useState(false);
+  const [availableRaces, setAvailableRaces] = useState<AvailableRaceDay[]>([]);
+  const [lockingId, setLockingId] = useState<string | null>(null);
   const [pickingDayIndex, setPickingDayIndex] = useState(0);
   const [selectedRaceIndex, setSelectedRaceIndex] = useState(0);
   const cameFromRaceDayRef = useRef(false);
@@ -85,10 +90,34 @@ export default function SelectionsScreen() {
     );
     const compIds = ongoing.map((c: { id: string }) => c.id);
     const compNames = new Map(ongoing.map((c: { id: string; name: string }) => [c.id, c.name]));
-    const bulk = await getSelectionsBulk(supabase, userId, compIds, true);
+    const [bulk, { availableRaces: races }] = await Promise.all([
+      getSelectionsBulk(supabase, userId, compIds, true),
+      getAvailableRacesForUser(supabase, userId, true),
+    ]);
     setSelectionsBulk(bulk);
     setMySelectionsList(computeMySelectionsFromBulk(bulk, userId, compNames));
+    setAvailableRaces(races);
     setRefreshingMySelections(false);
+  };
+
+  const handleLockIn = async (item: AvailableRaceDay) => {
+    if (!userId || item.isLocked || !item.hasAllPicks) return;
+    setLockingId(`${item.competitionId}-${item.raceDate}`);
+    try {
+      // @ts-expect-error - lock_selections RPC args not in generated types
+      const { data, error } = await supabase.rpc('lock_selections', {
+        p_competition_id: item.competitionId,
+        p_race_date: item.raceDate,
+      });
+      const result = data as { success?: boolean; error?: string } | null;
+      if (error || !result?.success) {
+        Alert.alert('Error', result?.error ?? error?.message ?? 'Failed to lock');
+        return;
+      }
+      await refreshMySelections();
+    } finally {
+      setLockingId(null);
+    }
   };
 
   // When no competitionId: load only ongoing competitions and bulk in one go.
@@ -106,6 +135,7 @@ export default function SelectionsScreen() {
         setUserCompetitions([]);
         setSelectionsBulk(null);
         setMySelectionsList([]);
+        setAvailableRaces([]);
         setLoading(false);
         return;
       }
@@ -120,9 +150,13 @@ export default function SelectionsScreen() {
       const compIds = ongoing.map((c: { id: string }) => c.id);
       setUserCompetitions(ongoing.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })));
       const compNames = new Map(ongoing.map((c: { id: string; name: string }) => [c.id, c.name]));
-      const bulk = await getSelectionsBulk(supabase, userId, compIds, forceRefresh);
+      const [bulk, { availableRaces: races }] = await Promise.all([
+        getSelectionsBulk(supabase, userId, compIds, forceRefresh),
+        getAvailableRacesForUser(supabase, userId, forceRefresh),
+      ]);
       setSelectionsBulk(bulk);
       setMySelectionsList(computeMySelectionsFromBulk(bulk, userId, compNames));
+      setAvailableRaces(races);
       setLoading(false);
     })();
   }, [userId, competitionId]);
@@ -210,8 +244,28 @@ export default function SelectionsScreen() {
     }
   };
 
+  /** User may view others' selections only after locking in or once the entry deadline has passed. */
+  const canViewOthersForItem = (item: MySelectionItem, bulk: SelectionsBulkData | null): boolean => {
+    if (!userId || !bulk) return false;
+    const days = bulk.raceDaysByComp[item.competitionId] ?? [];
+    const day = days.find((d) => d.race_date === item.raceDate);
+    const deadlinePassed = day?.first_race_utc ? isSelectionClosed(day.first_race_utc) : false;
+    const userRow = bulk.selections.find(
+      (s) => s.competition_id === item.competitionId && s.race_date === item.raceDate && s.user_id === userId
+    );
+    const userLocked = userRow != null && userRow.locked_at != null;
+    return deadlinePassed || userLocked;
+  };
+
   const handleCardPress = (item: MySelectionItem) => {
     if (!userId || !selectionsBulk) return;
+    if (!canViewOthersForItem(item, selectionsBulk)) {
+      Alert.alert(
+        "Can't view others yet",
+        "Lock in your picks for this day, or wait until the entry deadline has passed (1 hour before the first race), to view other users' selections."
+      );
+      return;
+    }
     const others = computeOtherUsersSelectionsFromBulk(
       selectionsBulk,
       item.competitionId,
@@ -298,6 +352,594 @@ export default function SelectionsScreen() {
     setSelectedDayIndex(0);
   }, [effectiveCompId, competitionDayGroups.length]);
 
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        container: { flex: 1, backgroundColor: theme.colors.background },
+        content: { padding: theme.spacing.lg, paddingBottom: theme.spacing.xxl },
+        centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background, padding: theme.spacing.lg },
+        text: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.textSecondary, textAlign: 'center' },
+        linkButton: {
+          marginTop: theme.spacing.xl,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+        },
+        linkButtonText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.accent,
+          textDecorationLine: 'underline',
+        },
+        sectionTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 18,
+          color: theme.colors.textSecondary,
+        },
+        pickingHeaderRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: theme.spacing.sm,
+          gap: theme.spacing.md,
+        },
+        saveButtonInline: {
+          backgroundColor: theme.colors.accent,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          borderRadius: theme.radius.md,
+        },
+        emptyState: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.lg,
+          padding: theme.spacing.xl,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          alignItems: 'center',
+        },
+        emptyStateTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 17,
+          fontWeight: '600',
+          color: theme.colors.text,
+          marginBottom: theme.spacing.sm,
+        },
+        emptyStateText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.textMuted,
+          textAlign: 'center',
+          marginBottom: theme.spacing.md,
+        },
+        emptyStateButton: {
+          backgroundColor: theme.colors.accent,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          borderRadius: theme.radius.md,
+        },
+        emptyStateButtonText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.black,
+          fontWeight: '600',
+        },
+        makePicksSection: {
+          marginBottom: theme.spacing.lg,
+        },
+        makePicksSectionTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          fontWeight: '600',
+          color: theme.colors.text,
+          marginBottom: 4,
+        },
+        makePicksSectionSubtitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.sm,
+        },
+        raceCardsList: { gap: theme.spacing.sm },
+        raceCard: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          padding: theme.spacing.md,
+          borderWidth: 1,
+        },
+        raceCardOpen: {
+          borderColor: theme.colors.border,
+        },
+        raceCardClosed: {
+          borderColor: 'rgba(185, 28, 28, 0.6)',
+          opacity: 0.9,
+        },
+        raceCardHasPicks: {
+          borderColor: theme.colors.accent,
+          borderWidth: 2,
+        },
+        raceCardRow: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+        },
+        raceCardLeft: { flex: 1, minWidth: 0 },
+        raceCardRight: { alignItems: 'flex-end', marginLeft: theme.spacing.sm },
+        raceCardTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          fontWeight: '600',
+          color: theme.colors.text,
+        },
+        raceCardMeta: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          marginTop: 2,
+        },
+        raceCardStatus: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.accent,
+          marginTop: 2,
+        },
+        raceCardStatusClosed: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: '#b91c1c',
+          marginTop: 2,
+          fontStyle: 'italic',
+        },
+        timeBlock: { alignItems: 'flex-end' },
+        timeLabel: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 10,
+          color: theme.colors.textMuted,
+        },
+        timeValue: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          fontWeight: '600',
+          color: theme.colors.accent,
+          marginTop: 2,
+        },
+        lockInBtn: {
+          backgroundColor: theme.colors.accent,
+          paddingVertical: theme.spacing.xs,
+          paddingHorizontal: theme.spacing.sm,
+          borderRadius: theme.radius.sm,
+        },
+        lockInBtnDisabled: { opacity: 0.7 },
+        lockInBtnText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.black,
+          fontWeight: '600',
+        },
+        sectionTitleWithTopMargin: {
+          marginTop: theme.spacing.lg,
+        },
+        courseDropdown: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.sm,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          marginBottom: theme.spacing.md,
+        },
+        courseDropdownText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.text,
+        },
+        courseDropdownChevron: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        dropdownOverlay: {
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: theme.spacing.lg,
+        },
+        dropdownContent: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          padding: theme.spacing.sm,
+          width: '100%',
+          maxWidth: 320,
+          maxHeight: 320,
+        },
+        dropdownOption: {
+          paddingVertical: theme.spacing.md,
+          paddingHorizontal: theme.spacing.md,
+          borderRadius: theme.radius.sm,
+        },
+        dropdownOptionActive: {
+          backgroundColor: theme.colors.accentMuted,
+        },
+        dropdownOptionText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          color: theme.colors.text,
+        },
+        dropdownOptionTextActive: {
+          color: theme.colors.accent,
+          fontWeight: '600',
+        },
+        dayTabsRow: {
+          flexDirection: 'row',
+          width: '100%',
+          marginBottom: theme.spacing.md,
+        },
+        dayTab: {
+          flex: 1,
+          paddingVertical: theme.spacing.sm,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderBottomWidth: 2,
+          borderBottomColor: 'transparent',
+        },
+        dayTabActive: {
+          borderBottomColor: theme.colors.accent,
+        },
+        dayTabText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+        },
+        dayTabTextActive: {
+          color: theme.colors.accent,
+          fontWeight: '600',
+        },
+        meetingSection: {
+          marginBottom: theme.spacing.lg,
+        },
+        meetingSectionTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.sm,
+        },
+        raceCardsContainer: { gap: theme.spacing.xs },
+        mySelectionCard: {
+          position: 'relative',
+          flexDirection: 'row',
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          overflow: 'hidden',
+        },
+        mySelectionCardFade: {
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 12,
+          borderTopLeftRadius: theme.radius.md - 1,
+          borderBottomLeftRadius: theme.radius.md - 1,
+        },
+        mySelectionCardRow: {
+          flex: 1,
+          flexDirection: 'row',
+          alignItems: 'center',
+        },
+        mySelectionCardTime: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          width: 36,
+        },
+        mySelectionCardCenter: {
+          flex: 1,
+          minWidth: 0,
+        },
+        mySelectionCardPick: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          fontWeight: '600',
+          color: theme.colors.text,
+        },
+        mySelectionCardJockey: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          marginTop: 2,
+        },
+        mySelectionCardPending: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+        },
+        wplBadge: {
+          paddingHorizontal: theme.spacing.sm,
+          paddingVertical: 2,
+          borderRadius: theme.radius.sm,
+        },
+        wplWon: { backgroundColor: theme.colors.accentMuted },
+        wplPlace: { backgroundColor: 'rgba(163, 163, 163, 0.2)' },
+        wplLost: { backgroundColor: 'rgba(115, 115, 115, 0.2)' },
+        wplBadgeText: { fontFamily: theme.fontFamily.regular, fontSize: 11 },
+        wplWonText: { color: theme.colors.accent, fontWeight: '600' },
+        wplPlaceText: { color: theme.colors.textSecondary },
+        wplLostText: { color: theme.colors.textMuted },
+        modalBackdrop: {
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: theme.spacing.lg,
+        },
+        modalBox: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          padding: theme.spacing.lg,
+          width: '100%',
+          maxWidth: 340,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        modalTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          fontWeight: '600',
+          color: theme.colors.text,
+          marginBottom: theme.spacing.xs,
+        },
+        modalSubtitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.md,
+        },
+        modalSectionLabel: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.sm,
+        },
+        othersCardsContainer: { gap: theme.spacing.xs },
+        othersCard: {
+          position: 'relative',
+          flexDirection: 'row',
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          overflow: 'hidden',
+        },
+        othersCardHighlight: { backgroundColor: theme.colors.accentMuted },
+        othersCardFade: {
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 12,
+          borderTopLeftRadius: theme.radius.md - 1,
+          borderBottomLeftRadius: theme.radius.md - 1,
+        },
+        othersCardRow: {
+          flex: 1,
+          flexDirection: 'row',
+          alignItems: 'center',
+        },
+        othersCardCenter: { flex: 1, minWidth: 0 },
+        othersCardName: { fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.text },
+        othersCardNameBold: { fontWeight: '600' },
+        othersCardPick: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textSecondary,
+          marginTop: 2,
+        },
+        modalClose: {
+          marginTop: theme.spacing.lg,
+          paddingVertical: theme.spacing.sm,
+          alignItems: 'center',
+        },
+        modalCloseText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.accent },
+        pickingDayTabsRow: {
+          flexDirection: 'row',
+          width: '100%',
+          marginBottom: theme.spacing.md,
+        },
+        pickingDayTab: {
+          flex: 1,
+          paddingVertical: theme.spacing.sm,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderBottomWidth: 2,
+          borderBottomColor: 'transparent',
+        },
+        pickingDayTabActive: {
+          borderBottomColor: theme.colors.accent,
+        },
+        pickingDayTabText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+        },
+        pickingDayTabTextActive: {
+          color: theme.colors.accent,
+          fontWeight: '600',
+        },
+        pickingRaceCountRow: {
+          marginBottom: theme.spacing.xs,
+        },
+        pickingRaceCountText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+        },
+        pickingRaceTabsRow: {
+          flexDirection: 'row',
+          width: '100%',
+          marginBottom: theme.spacing.md,
+        },
+        pickingRaceTab: {
+          flex: 1,
+          paddingVertical: theme.spacing.sm,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderBottomWidth: 2,
+          borderBottomColor: 'transparent',
+        },
+        pickingRaceTabActive: {
+          borderBottomColor: theme.colors.accent,
+        },
+        pickingRaceTabPicked: {
+          backgroundColor: theme.colors.accentMuted,
+        },
+        pickingRaceTabText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+        },
+        pickingRaceTabTextActive: {
+          color: theme.colors.accent,
+          fontWeight: '600',
+        },
+        pickingRaceTabTextPicked: {
+          color: theme.colors.accent,
+        },
+        pickingRunnerList: { gap: theme.spacing.xs, marginBottom: theme.spacing.lg },
+        pickingSelectFavLabel: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.xs,
+        },
+        pickingDivider: {
+          height: 2,
+          backgroundColor: theme.colors.accent,
+          marginVertical: theme.spacing.md,
+          borderRadius: 1,
+        },
+        pickingOrSelectLabel: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.xs,
+        },
+        pickingRunnerCard: {
+          position: 'relative',
+          borderRadius: theme.radius.md,
+          overflow: 'hidden',
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        pickingRunnerCardSelected: {
+          backgroundColor: theme.colors.accent,
+          borderColor: theme.colors.accent,
+        },
+        pickingRunnerCardReadOnly: { opacity: 0.9 },
+        pickingRunnerGradient: {
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 12,
+          borderTopLeftRadius: theme.radius.md - 1,
+          borderBottomLeftRadius: theme.radius.md - 1,
+        },
+        pickingRunnerCardInner: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor: theme.colors.surface,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+        },
+        pickingRunnerCardInnerSelected: {
+          backgroundColor: 'transparent',
+        },
+        pickingRunnerCenter: { flex: 1, minWidth: 0 },
+        pickingRunnerName: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          fontWeight: '600',
+          color: theme.colors.text,
+        },
+        pickingRunnerNameSelected: {
+          color: theme.colors.black,
+        },
+        pickingRunnerJockey: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          marginTop: 2,
+        },
+        pickingRunnerJockeySelected: {
+          color: 'rgba(0,0,0,0.7)',
+        },
+        pickingRunnerNumber: {
+          width: 28,
+          height: 28,
+          borderRadius: 14,
+          backgroundColor: theme.colors.border,
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginRight: theme.spacing.md,
+        },
+        pickingRunnerNumberSelected: {
+          backgroundColor: theme.colors.white,
+        },
+        pickingRunnerNumberText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          fontWeight: '600',
+          color: theme.colors.text,
+        },
+        pickingRunnerNumberTextSelected: {
+          color: theme.colors.black,
+        },
+        pickingRunnerCheck: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          fontWeight: '700',
+          color: theme.colors.accent,
+        },
+        pickingRunnerCheckSelected: {
+          color: theme.colors.black,
+        },
+        pickingRunnerSelect: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        closedBanner: {
+          backgroundColor: 'rgba(185, 28, 28, 0.15)',
+          borderWidth: 1,
+          borderColor: '#b91c1c',
+          borderRadius: theme.radius.sm,
+          padding: theme.spacing.sm,
+          marginBottom: theme.spacing.md,
+        },
+        closedBannerText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: '#b91c1c',
+        },
+        muted: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textMuted, marginBottom: theme.spacing.lg },
+        buttonDisabled: { opacity: 0.7 },
+        saveButtonText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          color: theme.colors.black,
+          fontWeight: '600',
+        },
+      }),
+    [theme]
+  );
+
   if (!competitionId) {
     if (loading) {
       return (
@@ -321,10 +963,95 @@ export default function SelectionsScreen() {
         >
           <Text style={styles.sectionTitle}>My selections</Text>
 
+          {userCompetitions.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateTitle}>Join a competition</Text>
+              <Text style={styles.emptyStateText}>Enter an access code from the home screen to join a competition and make your picks.</Text>
+              <TouchableOpacity style={styles.emptyStateButton} onPress={() => router.push('/(auth)/access-code')}>
+                <Text style={styles.emptyStateButtonText}>Enter access code</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {availableRaces.length > 0 && (
+                <View style={styles.makePicksSection}>
+                  <Text style={styles.makePicksSectionTitle}>Make your picks</Text>
+                  <Text style={styles.makePicksSectionSubtitle}>Select a meeting to make or view your selections</Text>
+                  <View style={styles.raceCardsList}>
+                    {availableRaces.map((item) => {
+                      const closed = isSelectionClosed(item.firstRaceUtc);
+                      const cardKey = `${item.competitionId}-${item.raceDate}`;
+                      const isLocking = lockingId === cardKey;
+                      return (
+                        <TouchableOpacity
+                          key={cardKey}
+                          style={[
+                            styles.raceCard,
+                            closed ? styles.raceCardClosed : styles.raceCardOpen,
+                            item.hasAnyPicks && styles.raceCardHasPicks,
+                          ]}
+                          onPress={() =>
+                            closed || item.isLocked
+                              ? router.push({ pathname: '/(app)/selections', params: { competitionId: item.competitionId, raceDate: item.raceDate } })
+                              : router.push({ pathname: '/(app)/selections', params: { competitionId: item.competitionId, raceDate: item.raceDate } })
+                          }
+                          activeOpacity={0.8}
+                          disabled={isLocking}
+                        >
+                          <View style={styles.raceCardRow}>
+                            <View style={styles.raceCardLeft}>
+                              <Text style={styles.raceCardTitle} numberOfLines={1}>{item.competitionName}</Text>
+                              <Text style={styles.raceCardMeta}>
+                                {item.course} · {new Date(item.raceDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+                              </Text>
+                              {closed ? (
+                                <Text style={styles.raceCardStatusClosed}>Closed – view only</Text>
+                              ) : item.isLocked ? (
+                                <Text style={styles.raceCardStatus}>Locked – tap to view</Text>
+                              ) : item.hasAllPicks ? (
+                                <Text style={styles.raceCardStatus}>Lock in to view others</Text>
+                              ) : (
+                                <Text style={styles.raceCardStatus}>
+                                  {item.pendingCount} pick{item.pendingCount !== 1 ? 's' : ''} left
+                                </Text>
+                              )}
+                            </View>
+                            {!closed && !item.isLocked && (
+                              <View style={styles.raceCardRight}>
+                                {item.hasAllPicks ? (
+                                  <TouchableOpacity
+                                    style={[styles.lockInBtn, isLocking && styles.lockInBtnDisabled]}
+                                    onPress={(e) => { e?.stopPropagation?.(); handleLockIn(item); }}
+                                    disabled={isLocking}
+                                  >
+                                    {isLocking ? (
+                                      <ActivityIndicator size="small" color={theme.colors.black} />
+                                    ) : (
+                                      <Text style={styles.lockInBtnText}>Lock in</Text>
+                                    )}
+                                  </TouchableOpacity>
+                                ) : (
+                                  <View style={styles.timeBlock}>
+                                    <Text style={styles.timeLabel}>Closes</Text>
+                                    <Text style={styles.timeValue}>{formatTimeUntilDeadline(item.firstRaceUtc)}</Text>
+                                  </View>
+                                )}
+                              </View>
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
+              <Text style={[styles.sectionTitle, styles.sectionTitleWithTopMargin]}>Your selections</Text>
+
           {mySelectionsList.length === 0 ? (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyStateTitle}>No selections yet</Text>
-              <Text style={styles.emptyStateText}>Make your picks from the home screen when entries are open.</Text>
+              <Text style={styles.emptyStateTitle}>No picks yet</Text>
+              <Text style={styles.emptyStateText}>Your picks will appear here once you've made selections for a meeting above.</Text>
             </View>
           ) : (
             <>
@@ -481,6 +1208,8 @@ export default function SelectionsScreen() {
               )}
             </>
           )}
+            </>
+          )}
         </ScrollView>
 
         <Modal visible={!!othersModal} transparent animationType="fade">
@@ -616,18 +1345,30 @@ export default function SelectionsScreen() {
 
       {currentRaces.length > 0 && (
         <>
+          <View style={styles.pickingRaceCountRow}>
+            <Text style={styles.pickingRaceCountText}>
+              {currentRaces.filter((r) => selections[r.id]).length} of {currentRaces.length} races picked
+            </Text>
+          </View>
           <View style={styles.pickingRaceTabsRow}>
-            {currentRaces.map((race, idx) => (
-              <TouchableOpacity
-                key={race.id}
-                style={[styles.pickingRaceTab, selectedRaceIndex === idx && styles.pickingRaceTabActive]}
-                onPress={() => setSelectedRaceIndex(idx)}
-              >
-                <Text style={[styles.pickingRaceTabText, selectedRaceIndex === idx && styles.pickingRaceTabTextActive]}>
-                  {new Date(race.scheduledTimeUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                </Text>
-              </TouchableOpacity>
-            ))}
+            {currentRaces.map((race, idx) => {
+              const hasSelection = !!selections[race.id];
+              return (
+                <TouchableOpacity
+                  key={race.id}
+                  style={[
+                    styles.pickingRaceTab,
+                    selectedRaceIndex === idx && styles.pickingRaceTabActive,
+                    hasSelection && styles.pickingRaceTabPicked,
+                  ]}
+                  onPress={() => setSelectedRaceIndex(idx)}
+                >
+                  <Text style={[styles.pickingRaceTabText, selectedRaceIndex === idx && styles.pickingRaceTabTextActive, hasSelection && styles.pickingRaceTabTextPicked]}>
+                    {new Date(race.scheduledTimeUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
           {selectedRace && (() => {
@@ -639,29 +1380,25 @@ export default function SelectionsScreen() {
               return (
                 <TouchableOpacity
                   key={r.id}
-                  style={[styles.pickingRunnerCard, selectionsClosed && styles.pickingRunnerCardReadOnly]}
+                  style={[
+                    styles.pickingRunnerCard,
+                    isSelected && styles.pickingRunnerCardSelected,
+                    selectionsClosed && styles.pickingRunnerCardReadOnly,
+                  ]}
                   onPress={() => !selectionsClosed && setSelection(selectedRace.id, r.id, r.name, r.oddsDecimal)}
                   disabled={selectionsClosed}
                   activeOpacity={0.7}
                 >
-                  {isSelected && (
-                    <LinearGradient
-                      colors={[theme.colors.accent, 'rgba(34, 197, 94, 0)']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                      style={styles.pickingRunnerGradient}
-                    />
-                  )}
-                  <View style={[styles.pickingRunnerCardInner, isSelected && { paddingLeft: 12 }]}>
+                  <View style={[styles.pickingRunnerCardInner, isSelected && styles.pickingRunnerCardInnerSelected]}>
                     <View style={[styles.pickingRunnerNumber, isSelected && styles.pickingRunnerNumberSelected]}>
                       <Text style={[styles.pickingRunnerNumberText, isSelected && styles.pickingRunnerNumberTextSelected]}>{r.id === 'FAV' ? '★' : r.number ?? '—'}</Text>
                     </View>
                     <View style={styles.pickingRunnerCenter}>
-                      <Text style={styles.pickingRunnerName} numberOfLines={1}>{displayHorseName(r.name)}</Text>
-                      {r.jockey ? <Text style={styles.pickingRunnerJockey} numberOfLines={1}>{r.jockey}</Text> : null}
+                      <Text style={[styles.pickingRunnerName, isSelected && styles.pickingRunnerNameSelected]} numberOfLines={1}>{displayHorseName(r.name)}</Text>
+                      {r.jockey ? <Text style={[styles.pickingRunnerJockey, isSelected && styles.pickingRunnerJockeySelected]} numberOfLines={1}>{r.jockey}</Text> : null}
                     </View>
                     {isSelected ? (
-                      <Text style={styles.pickingRunnerCheck}>✓</Text>
+                      <Text style={[styles.pickingRunnerCheck, styles.pickingRunnerCheckSelected]}>✓</Text>
                     ) : (
                       <Text style={styles.pickingRunnerSelect}>Select</Text>
                     )}
@@ -686,448 +1423,3 @@ export default function SelectionsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
-  content: { padding: theme.spacing.lg, paddingBottom: theme.spacing.xxl },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background, padding: theme.spacing.lg },
-  text: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.textSecondary, textAlign: 'center' },
-  linkButton: {
-    marginTop: theme.spacing.xl,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-  },
-  linkButtonText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.accent,
-    textDecorationLine: 'underline',
-  },
-  sectionTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 18,
-    color: theme.colors.textSecondary,
-  },
-  pickingHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: theme.spacing.sm,
-    gap: theme.spacing.md,
-  },
-  saveButtonInline: {
-    backgroundColor: theme.colors.accent,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.radius.md,
-  },
-  emptyState: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.lg,
-    padding: theme.spacing.xl,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    alignItems: 'center',
-  },
-  emptyStateTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 17,
-    fontWeight: '600',
-    color: theme.colors.text,
-    marginBottom: theme.spacing.sm,
-  },
-  emptyStateText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.textMuted,
-    textAlign: 'center',
-  },
-  courseDropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.sm,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    marginBottom: theme.spacing.md,
-  },
-  courseDropdownText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.text,
-  },
-  courseDropdownChevron: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.textMuted,
-  },
-  dropdownOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: theme.spacing.lg,
-  },
-  dropdownContent: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.sm,
-    width: '100%',
-    maxWidth: 320,
-    maxHeight: 320,
-  },
-  dropdownOption: {
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.radius.sm,
-  },
-  dropdownOptionActive: {
-    backgroundColor: theme.colors.accentMuted,
-  },
-  dropdownOptionText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 15,
-    color: theme.colors.text,
-  },
-  dropdownOptionTextActive: {
-    color: theme.colors.accent,
-    fontWeight: '600',
-  },
-  dayTabsRow: {
-    flexDirection: 'row',
-    width: '100%',
-    marginBottom: theme.spacing.md,
-  },
-  dayTab: {
-    flex: 1,
-    paddingVertical: theme.spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  dayTabActive: {
-    borderBottomColor: theme.colors.accent,
-  },
-  dayTabText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
-    color: theme.colors.textMuted,
-  },
-  dayTabTextActive: {
-    color: theme.colors.accent,
-    fontWeight: '600',
-  },
-  meetingSection: {
-    marginBottom: theme.spacing.lg,
-  },
-  meetingSectionTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.textMuted,
-    marginBottom: theme.spacing.sm,
-  },
-  raceCardsContainer: { gap: theme.spacing.xs },
-  mySelectionCard: {
-    position: 'relative',
-    flexDirection: 'row',
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    overflow: 'hidden',
-  },
-  mySelectionCardFade: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 12,
-    borderTopLeftRadius: theme.radius.md - 1,
-    borderBottomLeftRadius: theme.radius.md - 1,
-  },
-  mySelectionCardRow: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  mySelectionCardTime: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-    width: 36,
-  },
-  mySelectionCardCenter: {
-    flex: 1,
-    minWidth: 0,
-  },
-  mySelectionCardPick: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  mySelectionCardJockey: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-    marginTop: 2,
-  },
-  mySelectionCardPending: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-  },
-  wplBadge: {
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 2,
-    borderRadius: theme.radius.sm,
-  },
-  wplWon: { backgroundColor: theme.colors.accentMuted },
-  wplPlace: { backgroundColor: 'rgba(163, 163, 163, 0.2)' },
-  wplLost: { backgroundColor: 'rgba(115, 115, 115, 0.2)' },
-  wplBadgeText: { fontFamily: theme.fontFamily.regular, fontSize: 11 },
-  wplWonText: { color: theme.colors.accent, fontWeight: '600' },
-  wplPlaceText: { color: theme.colors.textSecondary },
-  wplLostText: { color: theme.colors.textMuted },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: theme.spacing.lg,
-  },
-  modalBox: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.lg,
-    width: '100%',
-    maxWidth: 340,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  modalTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 16,
-    fontWeight: '600',
-    color: theme.colors.text,
-    marginBottom: theme.spacing.xs,
-  },
-  modalSubtitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.textMuted,
-    marginBottom: theme.spacing.md,
-  },
-  modalSectionLabel: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.textMuted,
-    marginBottom: theme.spacing.sm,
-  },
-  othersCardsContainer: { gap: theme.spacing.xs },
-  othersCard: {
-    position: 'relative',
-    flexDirection: 'row',
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    overflow: 'hidden',
-  },
-  othersCardHighlight: { backgroundColor: theme.colors.accentMuted },
-  othersCardFade: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 12,
-    borderTopLeftRadius: theme.radius.md - 1,
-    borderBottomLeftRadius: theme.radius.md - 1,
-  },
-  othersCardRow: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  othersCardCenter: { flex: 1, minWidth: 0 },
-  othersCardName: { fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.text },
-  othersCardNameBold: { fontWeight: '600' },
-  othersCardPick: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.textSecondary,
-    marginTop: 2,
-  },
-  modalClose: {
-    marginTop: theme.spacing.lg,
-    paddingVertical: theme.spacing.sm,
-    alignItems: 'center',
-  },
-  modalCloseText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.accent },
-  pickingDayTabsRow: {
-    flexDirection: 'row',
-    width: '100%',
-    marginBottom: theme.spacing.md,
-  },
-  pickingDayTab: {
-    flex: 1,
-    paddingVertical: theme.spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  pickingDayTabActive: {
-    borderBottomColor: theme.colors.accent,
-  },
-  pickingDayTabText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
-    color: theme.colors.textMuted,
-  },
-  pickingDayTabTextActive: {
-    color: theme.colors.accent,
-    fontWeight: '600',
-  },
-  pickingRaceTabsRow: {
-    flexDirection: 'row',
-    width: '100%',
-    marginBottom: theme.spacing.md,
-  },
-  pickingRaceTab: {
-    flex: 1,
-    paddingVertical: theme.spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
-  pickingRaceTabActive: {
-    borderBottomColor: theme.colors.accent,
-  },
-  pickingRaceTabText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
-    color: theme.colors.textMuted,
-  },
-  pickingRaceTabTextActive: {
-    color: theme.colors.accent,
-    fontWeight: '600',
-  },
-  pickingRunnerList: { gap: theme.spacing.xs, marginBottom: theme.spacing.lg },
-  pickingSelectFavLabel: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.textMuted,
-    marginBottom: theme.spacing.xs,
-  },
-  pickingDivider: {
-    height: 2,
-    backgroundColor: theme.colors.accent,
-    marginVertical: theme.spacing.md,
-    borderRadius: 1,
-  },
-  pickingOrSelectLabel: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.textMuted,
-    marginBottom: theme.spacing.xs,
-  },
-  pickingRunnerCard: {
-    position: 'relative',
-    borderRadius: theme.radius.md,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  pickingRunnerCardReadOnly: { opacity: 0.9 },
-  pickingRunnerGradient: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 12,
-    borderTopLeftRadius: theme.radius.md - 1,
-    borderBottomLeftRadius: theme.radius.md - 1,
-  },
-  pickingRunnerCardInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.surface,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-  },
-  pickingRunnerCenter: { flex: 1, minWidth: 0 },
-  pickingRunnerName: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  pickingRunnerJockey: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-    marginTop: 2,
-  },
-  pickingRunnerNumber: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: theme.colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: theme.spacing.md,
-  },
-  pickingRunnerNumberSelected: {
-    backgroundColor: theme.colors.accent,
-  },
-  pickingRunnerNumberText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  pickingRunnerNumberTextSelected: {
-    color: theme.colors.black,
-  },
-  pickingRunnerCheck: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    fontWeight: '700',
-    color: theme.colors.accent,
-  },
-  pickingRunnerSelect: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.textMuted,
-  },
-  closedBanner: {
-    backgroundColor: 'rgba(185, 28, 28, 0.15)',
-    borderWidth: 1,
-    borderColor: '#b91c1c',
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.sm,
-    marginBottom: theme.spacing.md,
-  },
-  closedBannerText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
-    color: '#b91c1c',
-  },
-  muted: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textMuted, marginBottom: theme.spacing.lg },
-  buttonDisabled: { opacity: 0.7 },
-  saveButtonText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 16,
-    color: theme.colors.black,
-    fontWeight: '600',
-  },
-});

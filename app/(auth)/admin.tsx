@@ -20,6 +20,7 @@ import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
 import { theme } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
 
 const ADMIN_CODE = '777777';
 
@@ -126,6 +127,7 @@ type AdminSelectionRow = {
 type TabId = 'requests' | 'create' | 'selections';
 
 export default function AdminScreen() {
+  const activeTheme = useTheme();
   const [tab, setTab] = useState<TabId>('requests');
   const [list, setList] = useState<PendingRequest[]>([]);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
@@ -342,7 +344,7 @@ export default function AdminScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: activeTheme.colors.background }]} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>Admin</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => router.replace('/(auth)/tablet-mode')}>

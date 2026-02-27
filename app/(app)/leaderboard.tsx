@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,13 +7,13 @@ import {
   TouchableOpacity,
   ScrollView,
   useWindowDimensions,
-  Animated,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { theme } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
+import { displayHorseName } from '@/lib/displayHorseName';
+import { decimalToFractional } from '@/lib/oddsFormat';
 import { setLeaderboardBulkCache } from '@/lib/leaderboardBulkCache';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
 import type { Race, RaceResult } from '@/types/races';
@@ -32,15 +32,18 @@ type LeaderboardRow = {
   rank_odds: number;
   /** Rank at end of previous complete day (for up/down arrow); null if no previous day. */
   rank_prev_day: number | null;
+  /** For Highest SP view: horse name and race name for the pick that gave max_odds. */
+  best_sp_runner_name?: string;
+  best_sp_race_name?: string;
 };
 
-const RANK_COLORS = {
-  1: theme.colors.accent,
-  2: '#eab308',
-  3: '#06b6d4',
-} as const;
-
 export default function LeaderboardScreen() {
+  const theme = useTheme();
+  const rankColors = useMemo(() => ({
+    1: theme.colors.accent,
+    2: '#eab308',
+    3: '#06b6d4',
+  }), [theme]);
   const { width: screenWidth } = useWindowDimensions();
   const { userId } = useAuth();
   const router = useRouter();
@@ -49,13 +52,16 @@ export default function LeaderboardScreen() {
 
   const [selectedId, setSelectedId] = useState<string | undefined>(competitionId);
   const [competitionName, setCompetitionName] = useState<string>('');
+  const [festivalStart, setFestivalStart] = useState<string | null>(null);
+  const [festivalEnd, setFestivalEnd] = useState<string | null>(null);
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
   const [raceDates, setRaceDates] = useState<string[]>([]);
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const [leaderboardFilter, setLeaderboardFilter] = useState<'daily' | 'overall' | 'sp'>('overall');
+  const [hasAnyRaceResult, setHasAnyRaceResult] = useState(false);
 
   useEffect(() => {
     if (competitionId) setSelectedId(competitionId);
@@ -76,17 +82,21 @@ export default function LeaderboardScreen() {
           .from('daily_selections')
           .select('user_id, race_date, selections')
           .eq('competition_id', selectedId),
-        supabase.from('competitions').select('name').eq('id', selectedId).maybeSingle(),
+        supabase.from('competitions').select('name, festival_start_date, festival_end_date').eq('id', selectedId).maybeSingle(),
       ]);
 
-      const compRow = compRes.data as { name?: string } | null;
+      const compRow = compRes.data as { name?: string; festival_start_date?: string; festival_end_date?: string } | null;
       setCompetitionName(compRow?.name ?? '');
+      setFestivalStart(compRow?.festival_start_date ?? null);
+      setFestivalEnd(compRow?.festival_end_date ?? null);
 
       const parts = (partsRes.data ?? []) as { user_id: string; display_name: string }[];
       if (!parts.length) {
         setRows([]);
         setRaceDates([]);
         setCompetitionName(compRow?.name ?? '');
+        setFestivalStart(compRow?.festival_start_date ?? null);
+        setFestivalEnd(compRow?.festival_end_date ?? null);
         setRefreshing(false);
         return;
       }
@@ -135,14 +145,21 @@ export default function LeaderboardScreen() {
       }
 
       const pointsByUserDay: Record<string, number[]> = {};
+      /** Highest SP among winning picks only (blank until at least one race has results). */
       const maxOddsByUser: Record<string, number> = {};
+      const bestSpByUser: Record<string, { odds: number; runnerName: string; raceName: string }> = {};
       for (const p of parts) {
         pointsByUserDay[p.user_id] = [0, 0, 0, 0];
         maxOddsByUser[p.user_id] = 0;
       }
 
+      const hasAnyRaceResult = raceDaysRows.some((d) => {
+        const races = (d?.races ?? []) as Race[];
+        return races.some((r) => r.results != null && Object.keys(r.results ?? {}).length > 0);
+      });
+
       for (const s of selectionsRes.data ?? []) {
-        const row = s as { user_id: string; race_date: string; selections: Record<string, { runnerId?: string; oddsDecimal?: number }> | null };
+        const row = s as { user_id: string; race_date: string; selections: Record<string, { runnerId?: string; runnerName?: string; oddsDecimal?: number }> | null };
         const sel = row.selections;
         if (!sel) continue;
         const uid = row.user_id;
@@ -151,14 +168,13 @@ export default function LeaderboardScreen() {
         let dayPoints = 0;
         for (const [raceId, v] of Object.entries(sel)) {
           if (!v) continue;
-          if (typeof v.oddsDecimal === 'number' && v.oddsDecimal > (maxOddsByUser[uid] ?? 0)) maxOddsByUser[uid] = v.oddsDecimal;
           const race = raceByDateAndId.get(`${row.race_date}:${raceId}`);
           let result: RaceResult | undefined;
           if (race?.results) {
             const runnerId = v.runnerId ?? '';
             if (runnerId === 'FAV') {
               const favId = Object.entries(race.results).reduce<string | null>((best, [id, r]) => {
-                const sp = r?.sp ?? Infinity;
+                const sp = (r as RaceResult)?.sp ?? Infinity;
                 return !best || sp < ((race.results?.[best] as RaceResult)?.sp ?? Infinity) ? id : best;
               }, null);
               result = favId ? (race.results[favId] as RaceResult) : undefined;
@@ -170,6 +186,16 @@ export default function LeaderboardScreen() {
             ? (result.pos_points ?? 0) + (result.sp_points ?? 0)
             : 0;
           dayPoints += pts;
+          // Highest SP winner: only consider picks that actually won (position 1 / positionLabel 'won')
+          const isWin = result != null && (result.position === 1 || result.positionLabel === 'won');
+          if (hasAnyRaceResult && isWin && result && typeof result.sp === 'number' && result.sp > (maxOddsByUser[uid] ?? 0)) {
+            maxOddsByUser[uid] = result.sp;
+            bestSpByUser[uid] = {
+              odds: result.sp,
+              runnerName: v.runnerName ?? '',
+              raceName: race?.name ?? 'Race',
+            };
+          }
         }
         pointsByUserDay[uid][dayIdx] = (pointsByUserDay[uid]?.[dayIdx] ?? 0) + dayPoints;
       }
@@ -192,6 +218,7 @@ export default function LeaderboardScreen() {
         const day4 = d[3] ?? 0;
         const total = day1 + day2 + day3 + day4;
         const max_odds = maxOddsByUser[p.user_id] ?? 0;
+        const bestSp = bestSpByUser[p.user_id];
         return {
           display_name: usernameByUserId[p.user_id] ?? p.display_name,
           user_id: p.user_id,
@@ -205,20 +232,30 @@ export default function LeaderboardScreen() {
           rank_daily: 0,
           rank_odds: 0,
           rank_prev_day: null,
+          best_sp_runner_name: bestSp?.runnerName,
+          best_sp_race_name: bestSp?.raceName,
         };
       };
 
       let list: LeaderboardRow[] = parts.map(buildRow);
 
+      function assignTiedRanks<T>(sorted: LeaderboardRow[], getScore: (r: LeaderboardRow) => number, setRank: (r: LeaderboardRow, rank: number) => void): void {
+        let rank = 1;
+        for (let i = 0; i < sorted.length; i++) {
+          if (i > 0 && getScore(sorted[i]) !== getScore(sorted[i - 1])) rank = i + 1;
+          setRank(sorted[i], rank);
+        }
+      }
+
       list.sort((a, b) => b.total - a.total);
-      list.forEach((e, i) => { e.rank_overall = i + 1; });
+      assignTiedRanks(list, (r) => r.total, (r, rank) => { r.rank_overall = rank; });
 
       // Rank at end of previous complete day (for position change arrows)
       if (lastCompleteDayIndex >= 1) {
         const prevDayPoints = (r: LeaderboardRow) =>
           [r.day1, r.day2, r.day3, r.day4].slice(0, lastCompleteDayIndex).reduce((s, n) => s + n, 0);
         const byPrev = [...list].sort((a, b) => prevDayPoints(b) - prevDayPoints(a));
-        byPrev.forEach((e, i) => { e.rank_prev_day = i + 1; });
+        assignTiedRanks(byPrev, prevDayPoints, (r, rank) => { r.rank_prev_day = rank; });
       }
 
       list.sort((a, b) => {
@@ -226,13 +263,14 @@ export default function LeaderboardScreen() {
         const bDay = [b.day1, b.day2, b.day3, b.day4][selectedDayIndex] ?? 0;
         return bDay - aDay;
       });
-      list.forEach((e, i) => { e.rank_daily = i + 1; });
+      assignTiedRanks(list, (r) => [r.day1, r.day2, r.day3, r.day4][selectedDayIndex] ?? 0, (r, rank) => { r.rank_daily = rank; });
 
       list.sort((a, b) => b.max_odds - a.max_odds);
-      list.forEach((e, i) => { e.rank_odds = i + 1; });
+      assignTiedRanks(list, (r) => r.max_odds, (r, rank) => { r.rank_odds = rank; });
 
       list.sort((a, b) => b.total - a.total);
       setRows(list);
+      setHasAnyRaceResult(hasAnyRaceResult);
       setLastUpdated(now.toLocaleDateString(undefined, { day: 'numeric', month: 'long' }) + ', ' + now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }));
     } finally {
       setRefreshing(false);
@@ -244,16 +282,6 @@ export default function LeaderboardScreen() {
   }, [selectedId]);
 
   useEffect(() => {
-    const loop = () => {
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 0.4, duration: 700, useNativeDriver: true }),
-      ]).start(() => loop());
-    };
-    loop();
-  }, [pulseAnim]);
-
-  useEffect(() => {
     if (rows.length === 0) return;
     setRows((prev) => {
       const list = prev.map((r) => ({ ...r }));
@@ -262,7 +290,13 @@ export default function LeaderboardScreen() {
         const bDay = [b.day1, b.day2, b.day3, b.day4][selectedDayIndex] ?? 0;
         return bDay - aDay;
       });
-      list.forEach((e, i) => { e.rank_daily = i + 1; });
+      let rank = 1;
+      for (let i = 0; i < list.length; i++) {
+        const curr = [list[i].day1, list[i].day2, list[i].day3, list[i].day4][selectedDayIndex] ?? 0;
+        const prevDay = i > 0 ? [list[i - 1].day1, list[i - 1].day2, list[i - 1].day3, list[i - 1].day4][selectedDayIndex] ?? 0 : null;
+        if (i > 0 && curr !== prevDay) rank = i + 1;
+        list[i].rank_daily = rank;
+      }
       return list;
     });
   }, [selectedDayIndex]);
@@ -281,8 +315,244 @@ export default function LeaderboardScreen() {
 
   const listRows = [...rows].sort((a, b) => a.rank_overall - b.rank_overall);
   const getDailyPoints = (r: LeaderboardRow) => [r.day1, r.day2, r.day3, r.day4][selectedDayIndex] ?? 0;
+  const listRowsForFilter =
+    leaderboardFilter === 'daily'
+      ? [...rows].sort((a, b) => getDailyPoints(b) - getDailyPoints(a))
+      : leaderboardFilter === 'sp'
+        ? [...rows].sort((a, b) => b.max_odds - a.max_odds)
+        : [...rows].sort((a, b) => a.rank_overall - b.rank_overall);
+  const dailyLeader = listRows.find((r) => r.rank_daily === 1);
+  const overallLeader = listRows.find((r) => r.rank_overall === 1);
+  const spLeader = listRows.find((r) => r.rank_odds === 1);
+  const dailyLeaderCount = dailyLeader ? rows.filter((r) => getDailyPoints(r) === getDailyPoints(dailyLeader)).length : 0;
+  const overallLeaderCount = overallLeader ? rows.filter((r) => r.total === overallLeader.total).length : 0;
+  const spLeaderCount = spLeader ? rows.filter((r) => r.max_odds === spLeader.max_odds).length : 0;
+  const dailyHeroLabel = dailyLeaderCount === 1 ? (dailyLeader?.display_name ?? '—') : dailyLeaderCount > 1 ? `${dailyLeaderCount} Users` : '—';
+  const overallHeroLabel = overallLeaderCount === 1 ? (overallLeader?.display_name ?? '—') : overallLeaderCount > 1 ? `${overallLeaderCount} Users` : '—';
+  const spHeroLabel = spLeaderCount === 1 ? (spLeader?.display_name ?? '—') : spLeaderCount > 1 ? `${spLeaderCount} Users` : '—';
+  const eventDaysFromDates =
+    festivalStart && festivalEnd
+      ? Math.round((new Date(festivalEnd).getTime() - new Date(festivalStart).getTime()) / (24 * 60 * 60 * 1000)) + 1
+      : 0;
+  const eventDurationText =
+    eventDaysFromDates <= 0 ? '' : eventDaysFromDates === 1 ? 'Single day event' : `${eventDaysFromDates} day event`;
+  const participantCount = rows.length;
 
+  const PADDING_H = theme.spacing.sm;
   const contentWidth = Math.min(screenWidth - 2 * PADDING_H, 500);
+  const circleSize = Math.min((screenWidth - PADDING_H * 2 - 32) / 3, 100);
+
+  const styles = useMemo(() => {
+    const padH = theme.spacing.sm;
+    return StyleSheet.create({
+      container: { flex: 1, backgroundColor: theme.colors.background },
+      outerScroll: { flex: 1 },
+      outerScrollContent: { paddingBottom: theme.spacing.lg },
+      centeredContent: { alignSelf: 'center', alignItems: 'center' },
+      competitionHeading: {
+        width: '100%',
+        paddingHorizontal: padH,
+        paddingTop: theme.spacing.md,
+        marginBottom: theme.spacing.xs,
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 22,
+        fontWeight: '700',
+        color: theme.colors.text,
+        textAlign: 'center',
+      },
+      competitionSubtitle: {
+        width: '100%',
+        paddingHorizontal: padH,
+        marginBottom: theme.spacing.md,
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 13,
+        color: theme.colors.textMuted,
+        textAlign: 'center',
+      },
+      heroRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingHorizontal: padH,
+        marginBottom: theme.spacing.lg,
+        gap: 12,
+      },
+      heroCircleWrap: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+      },
+      heroCircle: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 4,
+      },
+      heroCircleDaily: {
+        backgroundColor: 'rgba(59, 130, 246, 0.18)',
+        borderWidth: 2,
+        borderColor: 'rgba(59, 130, 246, 0.5)',
+      },
+      heroCircleOverall: {
+        backgroundColor: 'rgba(34, 197, 94, 0.18)',
+        borderWidth: 2,
+        borderColor: 'rgba(34, 197, 94, 0.5)',
+      },
+      heroCircleSp: {
+        backgroundColor: 'rgba(234, 179, 8, 0.18)',
+        borderWidth: 2,
+        borderColor: 'rgba(234, 179, 8, 0.5)',
+      },
+      heroCircleSelected: {
+        borderWidth: 3,
+        borderColor: theme.colors.accent,
+        opacity: 1,
+      },
+      heroName: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 13,
+        fontWeight: '700',
+        color: theme.colors.text,
+        textAlign: 'center',
+        marginBottom: 2,
+        paddingHorizontal: 2,
+      },
+      heroDesc: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 10,
+        color: theme.colors.textMuted,
+        textAlign: 'center',
+      },
+      heroStat: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 10,
+        color: theme.colors.textSecondary,
+        marginTop: 2,
+      },
+      keyInfoBlock: {
+        width: '100%',
+        paddingHorizontal: padH,
+        marginBottom: theme.spacing.sm,
+      },
+      keyInfoText: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 13,
+        color: theme.colors.text,
+        marginBottom: 2,
+      },
+      keyInfoMuted: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 11,
+        color: theme.colors.textMuted,
+        marginTop: 2,
+      },
+      leaderboardListTitle: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 14,
+        fontWeight: '600',
+        color: theme.colors.textMuted,
+        marginBottom: theme.spacing.sm,
+        paddingHorizontal: padH,
+      },
+      listWrap: { paddingHorizontal: padH },
+      listRowWrap: { marginBottom: theme.spacing.xs },
+      listRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: theme.colors.surface,
+        borderRadius: theme.radius.sm,
+        paddingVertical: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.sm,
+        borderWidth: 2,
+        borderColor: 'transparent',
+      },
+      rankCircle: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: theme.spacing.sm,
+      },
+      rankCircleText: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 12,
+        fontWeight: '700',
+        color: theme.colors.black,
+      },
+      rankCircleTextMuted: { color: theme.colors.textMuted },
+      rankChangeWrap: { marginRight: theme.spacing.xs, justifyContent: 'center' },
+      rankChangeText: { fontSize: 14, fontWeight: '700' },
+      listRowCenter: { flex: 1 },
+      listRowNameRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+      },
+      listRowName: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 14,
+        fontWeight: '700',
+        color: theme.colors.text,
+      },
+      starDaily: { fontSize: 14, color: '#3b82f6' },
+      starSp: { fontSize: 14, color: '#eab308' },
+      listRowSubtitle: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 11,
+        color: theme.colors.textMuted,
+        marginTop: 2,
+      },
+      listRowTotal: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 11,
+        color: theme.colors.textMuted,
+        marginTop: 1,
+      },
+      listRowTotalRight: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 14,
+        fontWeight: '600',
+        color: theme.colors.accent,
+        marginRight: theme.spacing.xs,
+      },
+      expandedStats: {
+        flexDirection: 'row',
+        flex: 1,
+        justifyContent: 'space-around',
+        marginTop: theme.spacing.xs,
+        paddingTop: theme.spacing.xs,
+        borderTopWidth: 1,
+        borderTopColor: theme.colors.border,
+      },
+      expandedStat: { alignItems: 'center' },
+      expandedStatValue: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 14,
+        fontWeight: '600',
+        color: theme.colors.text,
+      },
+      expandedStatLabel: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 10,
+        color: theme.colors.textMuted,
+        marginTop: 1,
+      },
+      seeSelectionsButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: theme.spacing.xs,
+        gap: theme.spacing.xs,
+        marginTop: 2,
+      },
+      seeSelectionsButtonText: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 12,
+        color: theme.colors.accent,
+        fontWeight: '600',
+      },
+    });
+  }, [theme]);
 
   return (
     <View style={styles.container}>
@@ -298,248 +568,172 @@ export default function LeaderboardScreen() {
           {competitionName ? (
             <Text style={styles.competitionHeading} numberOfLines={1}>{competitionName}</Text>
           ) : null}
-          <View style={styles.headerBlock}>
-            <Text style={styles.rankTitle}>Rank</Text>
-            {lastUpdated && (
-              <Text style={styles.lastUpdated}>Last updated: {lastUpdated}</Text>
-            )}
-          </View>
+          {eventDurationText ? (
+            <Text style={styles.competitionSubtitle}>{eventDurationText}</Text>
+          ) : null}
 
           {rows.length > 0 && (
+            <View style={styles.heroRow}>
+              <View style={styles.heroCircleWrap}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setLeaderboardFilter('daily')}
+                  style={[styles.heroCircle, styles.heroCircleDaily, { width: circleSize, height: circleSize, borderRadius: circleSize / 2 }, leaderboardFilter === 'daily' && styles.heroCircleSelected]}
+                >
+                  <Text style={styles.heroName} numberOfLines={1}>{dailyHeroLabel}</Text>
+                  <Text style={styles.heroDesc}>Daily leader</Text>
+                  {dailyLeader != null && (
+                    <Text style={styles.heroStat}>{getDailyPoints(dailyLeader)} pts</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+              <View style={styles.heroCircleWrap}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setLeaderboardFilter('overall')}
+                  style={[styles.heroCircle, styles.heroCircleOverall, { width: circleSize, height: circleSize, borderRadius: circleSize / 2 }, leaderboardFilter === 'overall' && styles.heroCircleSelected]}
+                >
+                  <Text style={styles.heroName} numberOfLines={1}>{overallHeroLabel}</Text>
+                  <Text style={styles.heroDesc}>Overall leader</Text>
+                  {overallLeader != null && (
+                    <Text style={styles.heroStat}>{overallLeader.total} pts</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+              <View style={styles.heroCircleWrap}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => setLeaderboardFilter('sp')}
+                  style={[styles.heroCircle, styles.heroCircleSp, { width: circleSize, height: circleSize, borderRadius: circleSize / 2 }, leaderboardFilter === 'sp' && styles.heroCircleSelected]}
+                >
+                  <Text style={styles.heroName} numberOfLines={1}>{spHeroLabel}</Text>
+                  <Text style={styles.heroDesc}>Highest SP winner</Text>
+                  {hasAnyRaceResult && spLeader != null && spLeader.max_odds > 0 ? (
+                    <Text style={styles.heroStat}>SP {decimalToFractional(spLeader.max_odds)}</Text>
+                  ) : (
+                    <Text style={styles.heroStat}>—</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {rows.length > 0 && (
+            <View style={styles.keyInfoBlock}>
+              <Text style={styles.keyInfoText}>{participantCount} {participantCount === 1 ? 'participant' : 'participants'}</Text>
+              {lastUpdated ? (
+                <Text style={styles.keyInfoMuted}>Updated {lastUpdated}</Text>
+              ) : null}
+            </View>
+          )}
+
+          {rows.length > 0 && (
+            <Text style={styles.leaderboardListTitle}>
+              {leaderboardFilter === 'daily' ? 'Daily leaderboard' : leaderboardFilter === 'sp' ? 'Highest SP' : 'Overall leaderboard'}
+            </Text>
+          )}
+
+          {rows.length > 0 && (() => {
+            const rankCounts: Record<number, number> = {};
+            listRowsForFilter.forEach((item) => {
+              const r = leaderboardFilter === 'daily' ? item.rank_daily : leaderboardFilter === 'sp' ? item.rank_odds : item.rank_overall;
+              rankCounts[r] = (rankCounts[r] ?? 0) + 1;
+            });
+            return (
               <View style={[styles.listWrap, { width: contentWidth }]}>
-                {listRows.map((item) => {
-                  const rank = item.rank_overall;
+                {listRowsForFilter.map((item) => {
+                  const rank = leaderboardFilter === 'daily' ? item.rank_daily : leaderboardFilter === 'sp' ? item.rank_odds : item.rank_overall;
+                  const isTied = (rankCounts[rank] ?? 0) > 1;
+                  const rankDisplay = isTied ? `T-${rank}` : String(rank);
                   const isExpanded = expandedUserId === item.user_id;
                   const isTopDaily = item.rank_daily === 1;
                   const isTopSp = item.rank_odds === 1;
-                  const circleColor = rank <= 3 ? RANK_COLORS[rank as 1 | 2 | 3] : theme.colors.border;
-                  const rankNum = String(rank).padStart(2, '0');
+                  const circleColor = rank <= 3 ? rankColors[rank as 1 | 2 | 3] : theme.colors.border;
+                  const showPrevDayArrow = leaderboardFilter === 'overall' && item.rank_prev_day != null;
+                  const subtitleSp =
+                    leaderboardFilter === 'sp' && item.best_sp_runner_name && item.best_sp_race_name
+                      ? `${displayHorseName(item.best_sp_runner_name)} · ${item.best_sp_race_name}`
+                      : leaderboardFilter === 'sp' ? (item.best_sp_runner_name || item.best_sp_race_name || '—') : null;
+                  const rightValue =
+                    leaderboardFilter === 'daily'
+                      ? `${getDailyPoints(item)} pts`
+                      : leaderboardFilter === 'sp'
+                        ? (hasAnyRaceResult && item.max_odds > 0 ? `SP ${decimalToFractional(item.max_odds)}` : '—')
+                        : `${item.total} pts`;
 
                   const rowContent = (
                     <>
                       <View style={[styles.rankCircle, { backgroundColor: circleColor }]}>
-                        <Text style={[styles.rankCircleText, rank > 3 && styles.rankCircleTextMuted]}>{rankNum}</Text>
+                        <Text style={[styles.rankCircleText, rank > 3 && styles.rankCircleTextMuted]}>{rankDisplay}</Text>
                       </View>
-                      {item.rank_prev_day != null && (
+                      {showPrevDayArrow && (
                         <View style={styles.rankChangeWrap}>
-                          {rank < item.rank_prev_day ? (
-                            <Ionicons name="chevron-up" size={16} color="#22c55e" style={styles.rankChangeIcon} />
-                          ) : rank > item.rank_prev_day ? (
-                            <Ionicons name="chevron-down" size={16} color="#ef4444" style={styles.rankChangeIcon} />
+                          {rank < item.rank_prev_day! ? (
+                            <Text style={[styles.rankChangeText, { color: '#22c55e' }]}>↑</Text>
+                          ) : rank > item.rank_prev_day! ? (
+                            <Text style={[styles.rankChangeText, { color: '#ef4444' }]}>↓</Text>
                           ) : null}
                         </View>
                       )}
                       <View style={styles.listRowCenter}>
-                        <Text style={styles.listRowName} numberOfLines={1}>{item.display_name}</Text>
-                        {!isExpanded && (
-                          <Text style={styles.listRowTotal}>{item.total} pts</Text>
-                        )}
-                        {isExpanded && (
+                        <View style={styles.listRowNameRow}>
+                          <Text style={styles.listRowName} numberOfLines={1}>{item.display_name}</Text>
+                          {isTopDaily && <Text style={styles.starDaily}>★</Text>}
+                          {isTopSp && hasAnyRaceResult && item.max_odds > 0 && <Text style={styles.starSp}>★</Text>}
+                        </View>
+                        {!isExpanded ? (
+                          subtitleSp != null ? (
+                            <Text style={styles.listRowSubtitle} numberOfLines={2}>{subtitleSp}</Text>
+                          ) : null
+                        ) : (
                           <View style={styles.expandedStats}>
                             <View style={styles.expandedStat}>
-                              <Ionicons name="calendar-outline" size={14} color={theme.colors.textMuted} />
-                              <Text style={styles.expandedStatValue}>{getDailyPoints(item)}</Text>
                               <Text style={styles.expandedStatLabel}>Daily</Text>
+                              <Text style={styles.expandedStatValue}>{getDailyPoints(item)}</Text>
                             </View>
                             <View style={styles.expandedStat}>
-                              <Ionicons name="trophy-outline" size={14} color={theme.colors.textMuted} />
-                              <Text style={styles.expandedStatValue}>{item.total}</Text>
                               <Text style={styles.expandedStatLabel}>Overall</Text>
+                              <Text style={styles.expandedStatValue}>{item.total}</Text>
                             </View>
                             <View style={styles.expandedStat}>
-                              <Ionicons name="flash-outline" size={14} color={theme.colors.textMuted} />
-                              <Text style={styles.expandedStatValue}>{item.max_odds > 0 ? item.max_odds.toFixed(2) : '—'}</Text>
                               <Text style={styles.expandedStatLabel}>Best SP</Text>
+                              <Text style={styles.expandedStatValue}>{hasAnyRaceResult && item.max_odds > 0 ? decimalToFractional(item.max_odds) : '—'}</Text>
                             </View>
                           </View>
                         )}
                       </View>
                       {!isExpanded && (
-                        <Text style={styles.listRowTotalRight}>{item.total}</Text>
+                        <Text style={styles.listRowTotalRight}>{rightValue}</Text>
                       )}
                     </>
                   );
 
                   return (
                     <View key={item.user_id} style={styles.listRowWrap}>
-                      {isTopSp ? (
-                        <View style={styles.listRowPulseWrap}>
-                          <TouchableOpacity
-                            style={[
-                              styles.listRow,
-                              item.user_id === userId && styles.rowHighlight,
-                              isTopDaily && styles.listRowGreenOutline,
-                            ]}
-                            onPress={() => setExpandedUserId(isExpanded ? null : item.user_id)}
-                            activeOpacity={0.7}
-                          >
-                            {rowContent}
-                          </TouchableOpacity>
-                          <Animated.View
-                            pointerEvents="none"
-                            style={[
-                              StyleSheet.absoluteFill,
-                              styles.pulseBorderOverlay,
-                              { opacity: pulseAnim },
-                            ]}
-                          />
-                        </View>
-                      ) : (
-                        <TouchableOpacity
-                          style={[
-                            styles.listRow,
-                            item.user_id === userId && styles.rowHighlight,
-                            isTopDaily && styles.listRowGreenOutline,
-                          ]}
-                          onPress={() => setExpandedUserId(isExpanded ? null : item.user_id)}
-                          activeOpacity={0.7}
-                        >
-                          {rowContent}
-                        </TouchableOpacity>
-                      )}
+                      <TouchableOpacity
+                        style={styles.listRow}
+                        onPress={() => setExpandedUserId(isExpanded ? null : item.user_id)}
+                        activeOpacity={0.7}
+                      >
+                        {rowContent}
+                      </TouchableOpacity>
                       {isExpanded && (
-                        <TouchableOpacity
-                          style={styles.seeSelectionsButton}
-                          onPress={() => openParticipantSelections(item)}
-                        >
-                          <Text style={styles.seeSelectionsButtonText}>See selections</Text>
-                          <Ionicons name="chevron-forward" size={16} color={theme.colors.accent} />
-                        </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.seeSelectionsButton}
+                        onPress={() => openParticipantSelections(item)}
+                      >
+                        <Text style={styles.seeSelectionsButtonText}>See selections</Text>
+                      </TouchableOpacity>
                       )}
                     </View>
                   );
                 })}
               </View>
-          )}
+            );
+          })()}
         </View>
       </ScrollView>
     </View>
   );
 }
 
-const PADDING_H = theme.spacing.sm;
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
-  outerScroll: { flex: 1 },
-  outerScrollContent: { paddingBottom: theme.spacing.lg },
-  centeredContent: { alignSelf: 'center', alignItems: 'center' },
-  competitionHeading: {
-    width: '100%',
-    paddingHorizontal: PADDING_H,
-    marginBottom: theme.spacing.xs,
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 20,
-    fontWeight: '700',
-    color: theme.colors.text,
-  },
-  headerBlock: { width: '100%', paddingHorizontal: PADDING_H, marginBottom: theme.spacing.xs },
-  rankTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 20,
-    fontWeight: '700',
-    color: theme.colors.accent,
-  },
-  lastUpdated: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-    marginTop: 2,
-  },
-  rowHighlight: { backgroundColor: theme.colors.accentMuted },
-  listWrap: { paddingHorizontal: PADDING_H },
-  listRowWrap: { marginBottom: theme.spacing.xs },
-  listRowPulseWrap: {
-    position: 'relative',
-    borderRadius: theme.radius.sm,
-  },
-  pulseBorderOverlay: {
-    borderRadius: theme.radius.sm,
-    borderWidth: 2,
-    borderColor: '#3b82f6',
-    backgroundColor: 'transparent',
-  },
-  listRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.sm,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.sm,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  listRowGreenOutline: { borderColor: theme.colors.accent },
-  rankCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: theme.spacing.sm,
-  },
-  rankCircleText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    fontWeight: '700',
-    color: theme.colors.black,
-  },
-  rankCircleTextMuted: { color: theme.colors.textMuted },
-  rankChangeWrap: { marginRight: theme.spacing.xs, justifyContent: 'center' },
-  rankChangeIcon: {},
-  listRowCenter: { flex: 1 },
-  listRowName: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  listRowTotal: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-    marginTop: 1,
-  },
-  listRowTotalRight: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    fontWeight: '600',
-    color: theme.colors.accent,
-  },
-  expandedStats: {
-    flexDirection: 'row',
-    flex: 1,
-    justifyContent: 'space-around',
-    marginTop: theme.spacing.xs,
-    paddingTop: theme.spacing.xs,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-  },
-  expandedStat: { alignItems: 'center' },
-  expandedStatValue: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  expandedStatLabel: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 10,
-    color: theme.colors.textMuted,
-    marginTop: 1,
-  },
-  seeSelectionsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: theme.spacing.xs,
-    gap: theme.spacing.xs,
-    marginTop: 2,
-  },
-  seeSelectionsButtonText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.accent,
-    fontWeight: '600',
-  },
-});

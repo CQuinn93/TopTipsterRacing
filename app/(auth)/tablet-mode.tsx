@@ -16,6 +16,7 @@ import {
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { theme } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
 import { displayHorseName } from '@/lib/displayHorseName';
 import type { Race } from '@/types/races';
 
@@ -41,6 +42,7 @@ const RETURN_AFTER_SAVE_MS = 5000;
 const CODE_LENGTH = 6;
 
 export default function TabletModeScreen() {
+  const activeTheme = useTheme();
   const [code, setCode] = useState('');
   const codeInputRefs = useRef<(TextInput | null)[]>([]);
   const [loading, setLoading] = useState(false);
@@ -186,7 +188,7 @@ export default function TabletModeScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.codeEntryContent}>
-          <Text style={styles.codeEntryTitle}>Cheltenham Top Tipster</Text>
+          <Text style={styles.codeEntryTitle}>Top Tipster Racing</Text>
           <Text style={styles.codeEntrySubtitle}>Enter your 6-digit tablet code</Text>
           <View style={styles.codeEntryBoxRow}>
             {Array.from({ length: CODE_LENGTH }, (_, i) => (
@@ -228,7 +230,7 @@ export default function TabletModeScreen() {
   const comps = data.competitions ?? [];
   if (!competitionId) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: activeTheme.colors.background }]}>
         <Text style={styles.title}>Select competition</Text>
         <ScrollView style={styles.list}>
           {comps.map((c) => (
@@ -246,7 +248,7 @@ export default function TabletModeScreen() {
 
   if (!selectedDate) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: activeTheme.colors.background }]}>
         <Text style={styles.title}>Select race day</Text>
         {raceDaysForComp.length === 0 ? (
           <Text style={styles.muted}>No race days for this competition yet.</Text>
@@ -276,7 +278,7 @@ export default function TabletModeScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+    <ScrollView style={[styles.container, { backgroundColor: activeTheme.colors.background }]} contentContainerStyle={styles.scrollContent}>
       <Text style={styles.title}>Your selections</Text>
       <Text style={styles.sectionLabel}>Race day</Text>
       <ScrollView horizontal style={styles.dateRow} contentContainerStyle={styles.dateRowContent}>

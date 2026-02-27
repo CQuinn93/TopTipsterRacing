@@ -5,8 +5,33 @@ import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { darkTheme } from '@/constants/theme';
+import { setNotificationHandler } from '@/lib/selectionReminderNotifications';
 
 SplashScreen.preventAutoHideAsync();
+
+setNotificationHandler();
+
+function RootLayoutContent() {
+  const theme = useTheme();
+  return (
+    <>
+      <StatusBar style={theme.colors.background === darkTheme.colors.background ? 'light' : 'dark'} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: theme.colors.background },
+          animation: 'slide_from_right',
+        }}
+      >
+        <Stack.Screen name="index" />
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(app)" />
+      </Stack>
+    </>
+  );
+}
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
@@ -27,18 +52,9 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <StatusBar style="light" />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: '#0a0a0a' },
-          animation: 'slide_from_right',
-        }}
-      >
-        <Stack.Screen name="index" />
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(app)" />
-      </Stack>
+      <ThemeProvider>
+        <RootLayoutContent />
+      </ThemeProvider>
     </AuthProvider>
   );
 }

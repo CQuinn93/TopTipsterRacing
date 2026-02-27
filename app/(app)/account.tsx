@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, Platform } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { theme } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
 import { getOrCreateTabletCode, clearTabletCodeCache } from '@/lib/tabletCode';
 import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
 import { clearLatestResultsCache } from '@/lib/latestResultsCache';
@@ -20,10 +20,35 @@ async function doSignOut(signOut: () => Promise<void>, userId: string | null) {
 }
 
 export default function AccountScreen() {
+  const theme = useTheme();
   const { session, signOut } = useAuth();
   const userId = session?.user?.id ?? null;
   const [tabletCode, setTabletCode] = useState<string | null>(null);
   const [codeLoading, setCodeLoading] = useState(true);
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        container: { flex: 1, backgroundColor: theme.colors.background, padding: theme.spacing.lg },
+        section: { marginBottom: theme.spacing.xl },
+        label: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textMuted, marginBottom: 4 },
+        email: { fontFamily: theme.fontFamily.input, fontSize: 16, color: theme.colors.text },
+        hint: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary, marginBottom: theme.spacing.sm },
+        codeLoader: { marginVertical: theme.spacing.sm },
+        tabletCode: { fontFamily: theme.fontFamily.input, fontSize: 28, letterSpacing: 6, color: theme.colors.accent },
+        muted: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textMuted },
+        button: {
+          backgroundColor: theme.colors.surface,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.md,
+          paddingVertical: theme.spacing.md,
+          alignItems: 'center',
+        },
+        buttonText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.text },
+      }),
+    [theme]
+  );
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -73,23 +98,3 @@ export default function AccountScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background, padding: theme.spacing.lg },
-  section: { marginBottom: theme.spacing.xl },
-  label: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textMuted, marginBottom: 4 },
-  email: { fontFamily: theme.fontFamily.input, fontSize: 16, color: theme.colors.text },
-  hint: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary, marginBottom: theme.spacing.sm },
-  codeLoader: { marginVertical: theme.spacing.sm },
-  tabletCode: { fontFamily: theme.fontFamily.input, fontSize: 28, letterSpacing: 6, color: theme.colors.accent },
-  muted: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textMuted },
-  button: {
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
-    paddingVertical: theme.spacing.md,
-    alignItems: 'center',
-  },
-  buttonText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.text },
-});

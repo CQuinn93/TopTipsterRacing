@@ -28,10 +28,24 @@ type HorseRow = {
   sp_points?: number | null;
 };
 
-function positionLabel(position: number): 'won' | 'place' | 'lost' {
-  if (position === 1) return 'won';
-  if (position === 2 || position === 3) return 'place';
+/** Must match scripts/update-race-results.ts getPlacedPositions. Only these positions count as "placed". */
+function getPlacedPositions(isHandicap: boolean, totalRunners: number): number[] {
+  if (isHandicap) return totalRunners >= 16 ? [1, 2, 3, 4] : [1, 2, 3];
+  if (totalRunners >= 15) return [1, 2, 3];
+  if (totalRunners > 7) return [1, 2];
+  if (totalRunners >= 4) return [1];
+  return [];
+}
+
+function positionLabelFromPlaced(position: number, placedPositions: number[]): 'won' | 'place' | 'lost' {
+  if (position === 1 && placedPositions.includes(1)) return 'won';
+  if (placedPositions.includes(position)) return 'place';
   return 'lost';
+}
+
+function positionLabel(position: number, isHandicap: boolean, totalRunners: number): 'won' | 'place' | 'lost' {
+  const placed = getPlacedPositions(isHandicap, totalRunners);
+  return positionLabelFromPlaced(position, placed);
 }
 
 /** Build Race shape from race row + horse rows. Adds FAV runner; results from horses with position. */
@@ -45,12 +59,16 @@ function buildRace(race: RaceRow, horses: HorseRow[]): Race {
   }));
   runners.push({ id: 'FAV', name: 'FAV', oddsDecimal: 0 });
 
+  const isHandicap = race.is_handicap ?? false;
+  const horsesWithResult = horses.filter((h) => (h.position != null && h.position >= 1) || (h.result_code != null && String(h.result_code).trim() !== ''));
+  const totalRunners = horsesWithResult.length;
+
   const results: Record<string, RaceResult> = {};
   for (const h of horses) {
     if (h.position != null && h.position >= 1) {
       results[h.api_horse_id] = {
         position: h.position,
-        positionLabel: positionLabel(h.position),
+        positionLabel: positionLabel(h.position, isHandicap, totalRunners),
         sp: h.sp != null && Number.isFinite(h.sp) ? h.sp : 0,
         pos_points: h.pos_points != null && Number.isFinite(h.pos_points) ? h.pos_points : undefined,
         sp_points: h.sp_points != null && Number.isFinite(h.sp_points) ? h.sp_points : undefined,

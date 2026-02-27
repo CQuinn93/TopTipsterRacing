@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,14 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { theme } from '@/constants/theme';
+import { isSelectionClosed } from '@/lib/appUtils';
+import { useTheme } from '@/contexts/ThemeContext';
 import { displayHorseName } from '@/lib/displayHorseName';
+import { decimalToFractional } from '@/lib/oddsFormat';
 import { getLeaderboardBulkCache } from '@/lib/leaderboardBulkCache';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
 import { getCached, setCached } from '@/lib/selectionsCache';
@@ -36,6 +40,8 @@ type SelectionEntry = {
 };
 
 export default function ParticipantSelectionsScreen() {
+  const activeTheme = useTheme();
+  const { userId: currentUserId } = useAuth();
   const router = useRouter();
   const params = useLocalSearchParams<{ competitionId: string; participantUserId: string; displayName: string }>();
   const competitionId = params.competitionId ?? '';
@@ -45,16 +51,163 @@ export default function ParticipantSelectionsScreen() {
   const [raceDays, setRaceDays] = useState<RaceDayRow[]>([]);
   const [selectionsByDate, setSelectionsByDate] = useState<Record<string, Record<string, SelectionEntry>>>({});
   const [loading, setLoading] = useState(true);
+  const [canViewOthers, setCanViewOthers] = useState<boolean | null>(null);
+  /** Per race_date: true if viewer can see that day's picks (deadline passed or viewer locked that day). */
+  const [viewableRaceDates, setViewableRaceDates] = useState<Record<string, boolean>>({});
   const [breakdownModal, setBreakdownModal] = useState<{
     runnerName: string;
     oddsDecimal: number;
     positionPoints: number | null;
-    oddsPoints: number;
+    /** Odds (bonus) points only – never position + bonus. */
+    oddsPoints: number | null;
   } | null>(null);
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        container: { flex: 1, backgroundColor: activeTheme.colors.background },
+        centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: activeTheme.colors.background },
+        header: { padding: activeTheme.spacing.lg, borderBottomWidth: 1, borderBottomColor: activeTheme.colors.border },
+        backText: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 14,
+          color: activeTheme.colors.accent,
+          marginBottom: activeTheme.spacing.xs,
+        },
+        title: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 20,
+          color: activeTheme.colors.text,
+        },
+        subtitle: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 14,
+          color: activeTheme.colors.textMuted,
+          marginTop: activeTheme.spacing.xs,
+        },
+        scroll: { flex: 1 },
+        content: { padding: activeTheme.spacing.lg, paddingBottom: activeTheme.spacing.xxl },
+        dayCard: {
+          backgroundColor: activeTheme.colors.surface,
+          borderRadius: activeTheme.radius.md,
+          padding: activeTheme.spacing.md,
+          marginBottom: activeTheme.spacing.lg,
+          borderWidth: 1,
+          borderColor: activeTheme.colors.border,
+        },
+        dayCardTitle: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 18,
+          fontWeight: '600',
+          color: activeTheme.colors.accent,
+          marginBottom: activeTheme.spacing.sm,
+        },
+        selectionRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingVertical: activeTheme.spacing.sm,
+          borderBottomWidth: 1,
+          borderBottomColor: activeTheme.colors.border,
+          position: 'relative',
+          overflow: 'hidden',
+        },
+        selectionRowFade: {
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 12,
+          borderTopLeftRadius: 2,
+          borderBottomLeftRadius: 2,
+        },
+        selectionRowInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flex: 1 },
+        selectionLeft: { flex: 1 },
+        selectionRight: { flexDirection: 'row', alignItems: 'center', gap: activeTheme.spacing.sm },
+        raceNameSmall: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 12,
+          color: activeTheme.colors.textMuted,
+        },
+        pickName: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 15,
+          color: activeTheme.colors.text,
+          fontWeight: '600',
+        },
+        placeBadge: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 12,
+          paddingHorizontal: activeTheme.spacing.sm,
+          paddingVertical: 2,
+          borderRadius: activeTheme.radius.sm,
+        },
+        place_won: { color: '#166534', backgroundColor: 'rgba(34, 197, 94, 0.2)' },
+        place_place: { color: '#a16207', backgroundColor: 'rgba(234, 179, 8, 0.2)' },
+        place_lost: { color: '#991b1b', backgroundColor: 'rgba(239, 68, 68, 0.15)' },
+        pointsText: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 14,
+          color: activeTheme.colors.accent,
+          minWidth: 48,
+          textAlign: 'right',
+        },
+        dayTotalRow: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginTop: activeTheme.spacing.sm,
+          paddingTop: activeTheme.spacing.sm,
+          borderTopWidth: 1,
+          borderTopColor: activeTheme.colors.border,
+        },
+        dayTotalLabel: { fontFamily: activeTheme.fontFamily.regular, fontSize: 14, color: activeTheme.colors.textSecondary },
+        dayTotalValue: { fontFamily: activeTheme.fontFamily.regular, fontSize: 16, fontWeight: '600', color: activeTheme.colors.accent },
+        muted: { fontFamily: activeTheme.fontFamily.regular, fontSize: 14, color: activeTheme.colors.textMuted },
+        modalBackdrop: {
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: activeTheme.spacing.lg,
+        },
+        modalBox: {
+          backgroundColor: activeTheme.colors.surface,
+          borderRadius: activeTheme.radius.md,
+          padding: activeTheme.spacing.lg,
+          width: '100%',
+          maxWidth: 320,
+          borderWidth: 1,
+          borderColor: activeTheme.colors.border,
+        },
+        modalTitle: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 18,
+          fontWeight: '600',
+          color: activeTheme.colors.text,
+          marginBottom: activeTheme.spacing.md,
+        },
+        breakdownRow: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          paddingVertical: activeTheme.spacing.sm,
+        },
+        breakdownLabel: { fontFamily: activeTheme.fontFamily.regular, fontSize: 14, color: activeTheme.colors.textMuted },
+        breakdownValue: { fontFamily: activeTheme.fontFamily.regular, fontSize: 14, color: activeTheme.colors.text },
+        modalClose: {
+          marginTop: activeTheme.spacing.lg,
+          paddingVertical: activeTheme.spacing.sm,
+          alignItems: 'center',
+        },
+        modalCloseText: { fontFamily: activeTheme.fontFamily.regular, fontSize: 16, color: activeTheme.colors.accent },
+      }),
+    [activeTheme]
+  );
 
   useEffect(() => {
     if (!competitionId) {
       setLoading(false);
+      setCanViewOthers(false);
       return;
     }
     (async () => {
@@ -88,6 +241,38 @@ export default function ParticipantSelectionsScreen() {
           setSelectionsByDate(normalized);
         }
         setLoading(false);
+        if (currentUserId) {
+          const { data: rdRows } = await supabase
+            .from('competition_race_days')
+            .select('race_day_id')
+            .eq('competition_id', competitionId);
+          const dayIds = (rdRows ?? []).map((r: { race_day_id: string }) => r.race_day_id);
+          const { data: dayRows } = await supabase
+            .from('race_days')
+            .select('race_date, first_race_utc')
+            .in('id', dayIds);
+          const { data: myRows } = await supabase
+            .from('daily_selections')
+            .select('race_date, locked_at')
+            .eq('competition_id', competitionId)
+            .eq('user_id', currentUserId);
+          const dateToFirstUtc = new Map((dayRows ?? []).map((d: { race_date: string; first_race_utc?: string | null }) => [d.race_date, d.first_race_utc]));
+          const myLockedByDate = new Map((myRows ?? []).map((r: { race_date: string; locked_at: string | null }) => [r.race_date, r.locked_at]));
+          const viewable: Record<string, boolean> = {};
+          for (const d of days) {
+            const firstUtc = dateToFirstUtc.get(d.race_date);
+            const closed = !firstUtc || isSelectionClosed(firstUtc);
+            const locked = myLockedByDate.get(d.race_date) != null;
+            viewable[d.race_date] = closed || locked;
+          }
+          setViewableRaceDates(viewable);
+          const hasAnyDeadlineData = (dayRows ?? []).length > 0;
+          const canView = !hasAnyDeadlineData || days.some((d) => viewable[d.race_date]);
+          setCanViewOthers(canView);
+        } else {
+          setCanViewOthers(false);
+          setViewableRaceDates({});
+        }
         return;
       }
       const days = await fetchRaceDaysForCompetition(supabase, competitionId, 'id, race_date, races');
@@ -139,9 +324,41 @@ export default function ParticipantSelectionsScreen() {
         }
         setSelectionsByDate(next);
       }
+      if (currentUserId && days.length > 0) {
+        const { data: rdRows } = await supabase
+          .from('competition_race_days')
+          .select('race_day_id')
+          .eq('competition_id', competitionId);
+        const dayIds = (rdRows ?? []).map((r: { race_day_id: string }) => r.race_day_id);
+        const { data: dayRows } = await supabase
+          .from('race_days')
+          .select('race_date, first_race_utc')
+          .in('id', dayIds);
+        const { data: myRows } = await supabase
+          .from('daily_selections')
+          .select('race_date, locked_at')
+          .eq('competition_id', competitionId)
+          .eq('user_id', currentUserId);
+        const dateToFirstUtc = new Map((dayRows ?? []).map((d: { race_date: string; first_race_utc?: string | null }) => [d.race_date, d.first_race_utc]));
+        const myLockedByDate = new Map((myRows ?? []).map((r: { race_date: string; locked_at: string | null }) => [r.race_date, r.locked_at]));
+        const viewable: Record<string, boolean> = {};
+        for (const d of days as { race_date: string }[]) {
+          const firstUtc = dateToFirstUtc.get(d.race_date);
+          const closed = !firstUtc || isSelectionClosed(firstUtc);
+          const locked = myLockedByDate.get(d.race_date) != null;
+          viewable[d.race_date] = closed || locked;
+        }
+        setViewableRaceDates(viewable);
+        const hasAnyDeadlineData = (dayRows ?? []).length > 0;
+        const canView = !hasAnyDeadlineData || (days as { race_date: string }[]).some((d) => viewable[d.race_date]);
+        setCanViewOthers(canView);
+      } else {
+        setCanViewOthers(false);
+        setViewableRaceDates({});
+      }
       setLoading(false);
     })();
-  }, [competitionId, participantUserId]);
+  }, [competitionId, participantUserId, currentUserId]);
 
   /** Resolve result for pick (handles FAV = horse with lowest SP). */
   const getResultForPick = (race: Race, runnerId: string): RaceResult | null => {
@@ -168,12 +385,31 @@ export default function ParticipantSelectionsScreen() {
   if (loading && raceDays.length === 0) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={theme.colors.accent} />
+        <ActivityIndicator size="large" color={activeTheme.colors.accent} />
       </View>
     );
   }
 
-  const daysToShow = raceDays.length >= 4 ? raceDays : [...raceDays, ...Array.from({ length: 4 - Math.max(0, raceDays.length) }, (_, i) => ({ id: `placeholder-${i}`, race_date: '', races: [] as Race[] }))].slice(0, 4);
+  if (canViewOthers === false) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Text style={styles.backText}>← Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.title}>{displayName}</Text>
+          <Text style={styles.subtitle}>Selections</Text>
+        </View>
+        <View style={styles.content}>
+          <Text style={[styles.muted, { marginTop: activeTheme.spacing.lg, textAlign: 'center', paddingHorizontal: activeTheme.spacing.lg }]}>
+            You can only view other users' selections after you lock in your picks for this competition, or once the entry deadline has passed (1 hour before the first race).
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  const daysToShow = raceDays;
 
   return (
     <View style={styles.container}>
@@ -195,11 +431,16 @@ export default function ParticipantSelectionsScreen() {
             const result = getResultForPick(race as Race, pick.runnerId);
             return sum + pointsFromResult(result);
           }, 0);
+          const canViewThisDay = isPlaceholder || !day.race_date || viewableRaceDates[day.race_date] !== false;
           return (
             <View key={day.id} style={styles.dayCard}>
               <Text style={styles.dayCardTitle}>Day {dayIndex + 1}</Text>
               {isPlaceholder ? (
                 <Text style={styles.muted}>No races</Text>
+              ) : !canViewThisDay ? (
+                <Text style={[styles.muted, { marginTop: 8, textAlign: 'center' }]}>
+                  Selections for this day are hidden until you lock in your picks or the entry deadline has passed (1 hour before the first race).
+                </Text>
               ) : races.length === 0 ? (
                 <Text style={styles.muted}>No races for this day.</Text>
               ) : (
@@ -212,7 +453,16 @@ export default function ParticipantSelectionsScreen() {
                     const dbPos = result != null && (result.pos_points != null || result.sp_points != null)
                       ? (result.pos_points ?? 0)
                       : (result ? POSITION_POINTS[result.positionLabel] : null);
-                    const dbSp = result != null && result.sp_points != null ? result.sp_points : null;
+                    /** Odds points = bonus only (sp_points). Never include position points here. */
+                    const dbSpOnly = result != null && typeof result.sp_points === 'number' ? result.sp_points : null;
+                    const fadeColors =
+                      position === 'won'
+                        ? ['#22c55e', 'rgba(34, 197, 94, 0)']
+                        : position === 'place'
+                          ? ['#eab308', 'rgba(234, 179, 8, 0)']
+                          : position === 'lost'
+                            ? [activeTheme.colors.error, 'rgba(239, 68, 68, 0)']
+                            : null;
                     return (
                       <TouchableOpacity
                         key={race.id}
@@ -223,28 +473,39 @@ export default function ParticipantSelectionsScreen() {
                                 runnerName: pick.runnerName,
                                 oddsDecimal: pick.oddsDecimal,
                                 positionPoints: dbPos,
-                                oddsPoints: dbSp ?? (pick.oddsPoints ?? Math.round(pick.oddsDecimal * POINTS_PER_ODDS)),
+                                oddsPoints: dbSpOnly,
                               })
                             : undefined
                         }
                         disabled={!pick}
+                        activeOpacity={0.7}
                       >
-                        <View style={styles.selectionLeft}>
-                          <Text style={styles.raceNameSmall}>{race.name}</Text>
-                          <Text style={styles.pickName}>{pick ? displayHorseName(pick.runnerName) : 'No selection'}</Text>
-                        </View>
-                        <View style={styles.selectionRight}>
-                          <Text
-                            style={[
-                              styles.placeBadge,
-                              position === 'won' && styles.place_won,
-                              position === 'place' && styles.place_place,
-                              position === 'lost' && styles.place_lost,
-                            ]}
-                          >
-                            {placeLabel(position)}
-                          </Text>
-                          <Text style={styles.pointsText}>{pick ? `${pts} pts` : '—'}</Text>
+                        {fadeColors != null && (
+                          <LinearGradient
+                            colors={fadeColors}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={styles.selectionRowFade}
+                          />
+                        )}
+                        <View style={[styles.selectionRowInner, fadeColors != null && { paddingLeft: 12 }]}>
+                          <View style={styles.selectionLeft}>
+                            <Text style={styles.raceNameSmall}>{race.name}</Text>
+                            <Text style={styles.pickName}>{pick ? displayHorseName(pick.runnerName) : 'No selection'}</Text>
+                          </View>
+                          <View style={styles.selectionRight}>
+                            <Text
+                              style={[
+                                styles.placeBadge,
+                                position === 'won' && styles.place_won,
+                                position === 'place' && styles.place_place,
+                                position === 'lost' && styles.place_lost,
+                              ]}
+                            >
+                              {placeLabel(position)}
+                            </Text>
+                            <Text style={styles.pointsText}>{pick ? `${pts} pts` : '—'}</Text>
+                          </View>
                         </View>
                       </TouchableOpacity>
                     );
@@ -268,7 +529,7 @@ export default function ParticipantSelectionsScreen() {
                 <Text style={styles.modalTitle}>{displayHorseName(breakdownModal.runnerName)}</Text>
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>Odds</Text>
-                  <Text style={styles.breakdownValue}>{breakdownModal.oddsDecimal.toFixed(2)}</Text>
+                  <Text style={styles.breakdownValue}>{decimalToFractional(breakdownModal.oddsDecimal)}</Text>
                 </View>
                 <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>Position points</Text>
@@ -277,8 +538,10 @@ export default function ParticipantSelectionsScreen() {
                   </Text>
                 </View>
                 <View style={styles.breakdownRow}>
-                  <Text style={styles.breakdownLabel}>Odds points</Text>
-                  <Text style={styles.breakdownValue}>{breakdownModal.oddsPoints}</Text>
+                  <Text style={styles.breakdownLabel}>Odds points (bonus)</Text>
+                  <Text style={styles.breakdownValue}>
+                    {breakdownModal.oddsPoints != null ? breakdownModal.oddsPoints : '—'}
+                  </Text>
                 </View>
                 <TouchableOpacity style={styles.modalClose} onPress={() => setBreakdownModal(null)}>
                   <Text style={styles.modalCloseText}>Close</Text>
@@ -291,131 +554,3 @@ export default function ParticipantSelectionsScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background },
-  header: { padding: theme.spacing.lg, borderBottomWidth: 1, borderBottomColor: theme.colors.border },
-  backText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.accent,
-    marginBottom: theme.spacing.xs,
-  },
-  title: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 20,
-    color: theme.colors.text,
-  },
-  subtitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.textMuted,
-    marginTop: theme.spacing.xs,
-  },
-  scroll: { flex: 1 },
-  content: { padding: theme.spacing.lg, paddingBottom: theme.spacing.xxl },
-  dayCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.md,
-    marginBottom: theme.spacing.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  dayCardTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 18,
-    fontWeight: '600',
-    color: theme.colors.accent,
-    marginBottom: theme.spacing.sm,
-  },
-  selectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: theme.spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-  },
-  selectionLeft: { flex: 1 },
-  selectionRight: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm },
-  raceNameSmall: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.textMuted,
-  },
-  pickName: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 15,
-    color: theme.colors.text,
-    fontWeight: '600',
-  },
-  placeBadge: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.textMuted,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: 2,
-    borderRadius: theme.radius.sm,
-    backgroundColor: theme.colors.background,
-  },
-  place_won: { color: theme.colors.accent, backgroundColor: theme.colors.accentMuted },
-  place_place: { color: theme.colors.textSecondary },
-  place_lost: { color: theme.colors.textMuted },
-  pointsText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.accent,
-    minWidth: 48,
-    textAlign: 'right',
-  },
-  dayTotalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: theme.spacing.sm,
-    paddingTop: theme.spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
-  },
-  dayTotalLabel: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textSecondary },
-  dayTotalValue: { fontFamily: theme.fontFamily.regular, fontSize: 16, fontWeight: '600', color: theme.colors.accent },
-  muted: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textMuted },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: theme.spacing.lg,
-  },
-  modalBox: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.lg,
-    width: '100%',
-    maxWidth: 320,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  modalTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 18,
-    fontWeight: '600',
-    color: theme.colors.text,
-    marginBottom: theme.spacing.md,
-  },
-  breakdownRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: theme.spacing.sm,
-  },
-  breakdownLabel: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textMuted },
-  breakdownValue: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.text },
-  modalClose: {
-    marginTop: theme.spacing.lg,
-    paddingVertical: theme.spacing.sm,
-    alignItems: 'center',
-  },
-  modalCloseText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.accent },
-});

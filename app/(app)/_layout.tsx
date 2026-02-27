@@ -1,16 +1,20 @@
 import { useRef } from 'react';
-import { Pressable, Alert, TouchableOpacity } from 'react-native';
+import { View, Pressable, Alert, TouchableOpacity } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
+import { lightTheme } from '@/constants/theme';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { AppSidebar } from '@/components/AppSidebar';
 
 function MenuHeaderButton() {
+  const theme = useTheme();
   const { openSidebar } = useSidebar();
+  const isLight = theme.colors.background === lightTheme.colors.background;
+  const iconColor = isLight ? theme.colors.white : theme.colors.text;
   return (
     <TouchableOpacity onPress={openSidebar} style={{ marginLeft: 12 }} hitSlop={12}>
-      <Ionicons name="menu" size={24} color={theme.colors.text} />
+      <Ionicons name="menu" size={24} color={iconColor} />
     </TouchableOpacity>
   );
 }
@@ -31,6 +35,7 @@ import { ForceRefreshProvider, useForceRefresh } from '@/contexts/ForceRefreshCo
 import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
 import { clearLatestResultsCache } from '@/lib/latestResultsCache';
 import { SidebarProvider } from '@/contexts/SidebarContext';
+import { OnboardingProvider } from '@/contexts/OnboardingContext';
 
 const HOME_TAB_HOLD_MS = 10_000;
 
@@ -75,20 +80,22 @@ function HomeTabButton(props: React.ComponentProps<typeof Pressable> & { onPress
 }
 
 function AppTabs() {
+  const theme = useTheme();
+  const isLight = theme.colors.background === lightTheme.colors.background;
   return (
     <Tabs
       screenOptions={{
-        headerStyle: { backgroundColor: theme.colors.surface },
-        headerTintColor: theme.colors.text,
+        headerStyle: { backgroundColor: isLight ? theme.colors.accent : theme.colors.background },
+        headerTintColor: isLight ? theme.colors.white : theme.colors.text,
         headerTitleStyle: { fontFamily: theme.fontFamily.regular },
         headerLeft: () => <MenuHeaderButton />,
         tabBarStyle: {
-          backgroundColor: theme.colors.surface,
-          borderTopWidth: 1,
-          borderTopColor: theme.colors.border,
+          backgroundColor: theme.colors.accent,
+          borderTopWidth: 0,
         },
-        tabBarActiveTintColor: theme.colors.accent,
-        tabBarInactiveTintColor: theme.colors.textMuted,
+        tabBarBackground: () => <View style={{ flex: 1, backgroundColor: theme.colors.accent }} />,
+        tabBarActiveTintColor: theme.colors.white,
+        tabBarInactiveTintColor: 'rgba(255, 255, 255, 0.7)',
       }}
     >
       <Tabs.Screen
@@ -162,8 +169,10 @@ export default function AppLayout() {
   return (
     <ForceRefreshProvider>
       <SidebarProvider>
-        <AppTabs />
-        <AppSidebar />
+        <OnboardingProvider>
+          <AppTabs />
+          <AppSidebar />
+        </OnboardingProvider>
       </SidebarProvider>
     </ForceRefreshProvider>
   );

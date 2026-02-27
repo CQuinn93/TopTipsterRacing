@@ -1,12 +1,12 @@
 {
   "expo": {
-    "name": "Cheltenham Top Tipster",
+    "name": "Top Tipster Racing",
     "slug": "cheltenham-top-tipster",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "cheltenhamtipster",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -15,14 +15,18 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.cheltenhamtoptipster.app"
+      "bundleIdentifier": "com.cheltenhamtoptipster.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0a0a0a"
       },
-      "package": "com.cheltenhamtoptipster.app"
+      "package": "com.cheltenhamtoptipster.app",
+      "versionCode": 1
     },
     "web": {
       "bundler": "metro",
@@ -43,6 +47,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "46f6a025-ceba-46ea-bd70-26cf8328c4d1"
+      }
     }
   }
 }

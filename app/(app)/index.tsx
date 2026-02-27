@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,43 +7,45 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  useWindowDimensions,
-  Animated,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { theme } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
+import { lightTheme } from '@/constants/theme';
 import { getAvailableRacesForUser } from '@/lib/availableRacesCache';
 import { fetchHomeSummaryByComp, type HomeSummaryByComp } from '@/lib/homeSummary';
 import { useForceRefresh } from '@/contexts/ForceRefreshContext';
 import { getOrCreateTabletCode } from '@/lib/tabletCode';
-import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
 import type { ParticipationRow } from '@/lib/availableRacesCache';
-import { isSelectionClosed, formatTimeUntilDeadline, getCompetitionDisplayStatus } from '@/lib/appUtils';
+import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
+import { isSelectionClosed, getCompetitionDisplayStatus } from '@/lib/appUtils';
+import { decimalToFractional } from '@/lib/oddsFormat';
+import { requestPermissionsAndSetup, scheduleSelectionReminders } from '@/lib/selectionReminderNotifications';
+import { getNotificationCompetitionIds } from '@/lib/notificationCompetitionPrefs';
 
 const TABLET_MODE_INFO =
   'Use this code on a shared device to make selections without logging in. Hold Sign in for 7s on the login screen to open tablet mode.';
 
 export default function HomeScreen() {
+  const theme = useTheme();
   const { userId, session } = useAuth();
-  const { width } = useWindowDimensions();
   const [displayName, setDisplayName] = useState<string>('');
   const [participations, setParticipations] = useState<ParticipationRow[]>([]);
   const [availableRaces, setAvailableRaces] = useState<AvailableRaceDay[]>([]);
   const [summaryByComp, setSummaryByComp] = useState<HomeSummaryByComp | null>(null);
   const [selectedCompId, setSelectedCompId] = useState<string | null>(null); // null = Overall
   const [refreshing, setRefreshing] = useState(false);
-  const [lockingId, setLockingId] = useState<string | null>(null);
   const [tabletCode, setTabletCode] = useState<string | null>(null);
   const [codeLoading, setCodeLoading] = useState(true);
   const [compStatusByCompId, setCompStatusByCompId] = useState<Record<string, 'upcoming' | 'live' | 'complete'>>({});
   const [compPositionByCompId, setCompPositionByCompId] = useState<Record<string, number | null>>({});
+  const [participantCountByCompId, setParticipantCountByCompId] = useState<Record<string, number>>({});
+  const [compDaysByCompId, setCompDaysByCompId] = useState<Record<string, number>>({});
+  const [compDateRangeByCompId, setCompDateRangeByCompId] = useState<Record<string, { start: string; end: string }>>({});
   const scrollRef = useRef<ScrollView>(null);
-  const racesSectionY = useRef(0);
-  const livePulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     if (!userId) return;
@@ -82,21 +84,45 @@ export default function HomeScreen() {
         const { participations: p, availableRaces: r } = await getAvailableRacesForUser(supabase, userId, forceRefresh);
         setParticipations(p);
         setAvailableRaces(r);
+        const optedIn = await getNotificationCompetitionIds(userId);
+        const optedInSet = new Set(optedIn);
+        const toSchedule = r.filter((day) => optedInSet.has(day.competitionId));
+        if (toSchedule.length > 0) {
+          requestPermissionsAndSetup().then((granted) => {
+            if (granted) scheduleSelectionReminders(toSchedule);
+          });
+        }
         if (p.length > 0) {
           const compIds = p.map((x) => x.competition_id);
-          const [summary, compsRes] = await Promise.all([
+          const [summary, compsRes, partsCountRes] = await Promise.all([
             fetchHomeSummaryByComp(supabase, userId, compIds),
             supabase.from('competitions').select('id, festival_start_date, festival_end_date').in('id', compIds),
+            supabase.from('competition_participants').select('competition_id').in('competition_id', compIds),
           ]);
           setSummaryByComp(summary);
           const statusByComp: Record<string, 'upcoming' | 'live' | 'complete'> = {};
-          const positionByComp: Record<string, number | null> = {};
+          const daysByComp: Record<string, number> = {};
+          const dateRangeByComp: Record<string, { start: string; end: string }> = {};
+          const countByComp: Record<string, number> = {};
           for (const c of compsRes.data ?? []) {
             const row = c as { id: string; festival_start_date: string; festival_end_date: string };
-            const status = getCompetitionDisplayStatus(row.festival_start_date, row.festival_end_date);
-            statusByComp[row.id] = status ?? 'live';
+            statusByComp[row.id] = getCompetitionDisplayStatus(row.festival_start_date, row.festival_end_date) ?? 'live';
+            const start = new Date(row.festival_start_date).getTime();
+            const end = new Date(row.festival_end_date).getTime();
+            daysByComp[row.id] = Math.max(1, Math.round((end - start) / (24 * 60 * 60 * 1000)) + 1);
+            dateRangeByComp[row.id] = {
+              start: new Date(row.festival_start_date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+              end: new Date(row.festival_end_date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
+            };
+          }
+          for (const p of partsCountRes.data ?? []) {
+            const compId = (p as { competition_id: string }).competition_id;
+            countByComp[compId] = (countByComp[compId] ?? 0) + 1;
           }
           setCompStatusByCompId(statusByComp);
+          setCompDaysByCompId(daysByComp);
+          setCompDateRangeByCompId(dateRangeByComp);
+          setParticipantCountByCompId(countByComp);
 
           if (compIds.length > 0) {
             const { data: allSelections } = await supabase
@@ -106,6 +132,7 @@ export default function HomeScreen() {
             type SelRow = { competition_id: string; user_id: string; selections: Record<string, { oddsDecimal?: number }> | null };
             const rows = (allSelections ?? []) as SelRow[];
             const totalByCompUser: Record<string, Record<string, number>> = {};
+            const positionByComp: Record<string, number | null> = {};
             for (const compId of compIds) totalByCompUser[compId] = {};
             for (const row of rows) {
               const sel = row.selections;
@@ -135,6 +162,9 @@ export default function HomeScreen() {
           setSelectedCompId(null);
           setCompStatusByCompId({});
           setCompPositionByCompId({});
+          setParticipantCountByCompId({});
+          setCompDaysByCompId({});
+          setCompDateRangeByCompId({});
         }
       } finally {
         setRefreshing(false);
@@ -155,32 +185,6 @@ export default function HomeScreen() {
   }, [userId, homeTrigger, load]);
 
   const hasJoinedAny = participations.length > 0;
-  const isLive =
-    hasJoinedAny &&
-    selectedCompId != null &&
-    compStatusByCompId[selectedCompId] === 'live';
-  useEffect(() => {
-    if (!isLive) {
-      livePulseAnim.setValue(1);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(livePulseAnim, {
-          toValue: 0.5,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.timing(livePulseAnim, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [isLive, livePulseAnim]);
   const compList = summaryByComp
     ? [{ id: null, name: 'Overall' } as const, ...participations.map((p) => ({ id: p.competition_id, name: summaryByComp.byComp[p.competition_id]?.name ?? p.competition_id }))]
     : [];
@@ -199,54 +203,462 @@ export default function HomeScreen() {
     const first = open[0];
     const dateStr = new Date(first.raceDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
     const timeStr = new Date(first.firstRaceUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    return { label: 'Next race off', value: `${first.course}, ${dateStr} · ${timeStr}` };
+    return {
+      label: 'Next race off',
+      course: first.course,
+      dateStr,
+      timeStr,
+      raceName: first.firstRaceName ?? 'Race',
+      runnerCount: first.firstRaceRunnerCount ?? 0,
+    };
   })();
-  const scrollToRacesSection = useCallback(() => {
-    scrollRef.current?.scrollTo({ y: Math.max(0, racesSectionY.current - 8), animated: true });
-  }, []);
 
-  const handleLockIn = async (item: AvailableRaceDay) => {
-    if (!userId || item.isLocked || !item.hasAllPicks) return;
-    setLockingId(`${item.competitionId}-${item.raceDate}`);
-    try {
-      // Generated Supabase types omit lock_selections args; RPC requires p_competition_id, p_race_date
-      // @ts-expect-error - lock_selections RPC args not in generated types
-      const { data, error } = await supabase.rpc('lock_selections', {
-        p_competition_id: item.competitionId,
-        p_race_date: item.raceDate,
+  const styles = useMemo(
+    () => {
+      const isLight = theme.colors.background === lightTheme.colors.background;
+      const cardBorder = isLight ? theme.colors.white : theme.colors.border;
+      const cardBorderWidth = isLight ? 2 : 1;
+      return StyleSheet.create({
+        wrapper: { flex: 1, backgroundColor: theme.colors.background },
+        container: { flex: 1 },
+        content: { padding: theme.spacing.md },
+        sectionTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          fontWeight: '700',
+          color: theme.colors.text,
+          marginTop: theme.spacing.lg,
+          marginBottom: theme.spacing.sm,
+        },
+        sectionTitleFirst: {
+          marginTop: 0,
+        },
+        headerStrip: {
+          marginHorizontal: -theme.spacing.md,
+          paddingHorizontal: theme.spacing.md,
+          paddingVertical: theme.spacing.md,
+          marginBottom: theme.spacing.md,
+          overflow: 'hidden',
+          position: 'relative',
+        },
+        headerStripInner: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        },
+        headerWelcome: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          marginBottom: 2,
+        },
+        headerHello: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 20,
+          fontWeight: '700',
+          color: theme.colors.text,
+        },
+        accountLink: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.spacing.xs,
+        },
+        accountLinkText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.text,
+        },
+        primaryButton: {
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.sm,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          alignItems: 'center',
+          marginBottom: theme.spacing.md,
+        },
+        primaryButtonText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.black,
+          fontWeight: '600',
+        },
+        nextRaceCard: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.lg,
+          padding: theme.spacing.lg,
+          marginBottom: theme.spacing.md,
+          borderWidth: cardBorderWidth,
+          borderColor: cardBorder,
+          overflow: 'hidden',
+        },
+        nextRaceCardTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          marginBottom: 6,
+        },
+        nextRaceCardRaceName: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 17,
+          fontWeight: '700',
+          color: theme.colors.text,
+          marginBottom: 4,
+        },
+        nextRaceCardCourse: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.textSecondary,
+          marginBottom: theme.spacing.sm,
+        },
+        nextRaceCardRow: {
+          flexDirection: 'row',
+          gap: theme.spacing.lg,
+          marginBottom: theme.spacing.md,
+        },
+        nextRaceCardMeta: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+        },
+        nextRaceCardTime: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.text,
+        },
+        nextRaceCardRunners: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.text,
+        },
+        nextRaceCardBtn: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.spacing.xs,
+          backgroundColor: theme.colors.accent,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          borderRadius: theme.radius.sm,
+          alignSelf: 'flex-start',
+        },
+        nextRaceCardBtnText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          fontWeight: '600',
+          color: '#000000',
+        },
+        nextRaceCardMuted: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          color: theme.colors.textMuted,
+        },
+        nextRaceCardEmptyMessage: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          color: theme.colors.textSecondary,
+          marginBottom: theme.spacing.md,
+        },
+        nextRaceCardBtnFull: {
+          alignSelf: 'stretch',
+        },
+        competitionsCard: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.lg,
+          padding: theme.spacing.md,
+          marginBottom: theme.spacing.md,
+          marginTop: theme.spacing.sm,
+          borderWidth: cardBorderWidth,
+          borderColor: cardBorder,
+          overflow: 'hidden',
+        },
+        compInfoInnerCard: {
+          borderRadius: theme.radius.md,
+          padding: theme.spacing.md,
+          marginBottom: theme.spacing.md,
+          overflow: 'hidden',
+          position: 'relative',
+        },
+        compCardHeader: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          fontWeight: '600',
+          color: theme.colors.text,
+          marginBottom: theme.spacing.md,
+        },
+        compCardHeaderCentered: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 18,
+          fontWeight: '600',
+          color: theme.colors.text,
+          textAlign: 'center',
+        },
+        compCardMeetingName: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          fontWeight: '600',
+          color: theme.colors.text,
+          marginBottom: 4,
+        },
+        compCardMeetingNameCentered: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 19,
+          fontWeight: '700',
+          color: theme.colors.text,
+          textAlign: 'center',
+          marginBottom: 4,
+        },
+        compCardMetaRow: {
+          flexDirection: 'row',
+          gap: theme.spacing.lg,
+          marginBottom: theme.spacing.md,
+        },
+        compCardMetaRowCentered: {
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 2,
+        },
+        compCardMeta: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        statsTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          fontWeight: '600',
+          color: theme.colors.text,
+          marginBottom: theme.spacing.sm,
+        },
+        compSection: { marginBottom: theme.spacing.md },
+        compScroll: { marginHorizontal: -theme.spacing.md, marginBottom: theme.spacing.sm },
+        compScrollInCard: { marginHorizontal: 0, marginBottom: theme.spacing.sm },
+        compScrollContent: {
+          paddingHorizontal: theme.spacing.md,
+          gap: theme.spacing.md,
+          paddingBottom: theme.spacing.sm,
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+        },
+        compCircle: {
+          alignItems: 'center',
+          width: 72,
+        },
+        compCircleSelected: {},
+        compCircleInner: {
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          backgroundColor: theme.colors.surface,
+          borderWidth: 2,
+          borderColor: cardBorder,
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: theme.spacing.xs,
+        },
+        compCircleInnerSelected: {
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        compCircleLabel: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.textSecondary,
+          textAlign: 'center',
+        },
+        compCircleLabelSelected: {
+          color: theme.colors.text,
+          fontWeight: '600',
+        },
+        statusCard: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.sm,
+          paddingVertical: theme.spacing.md,
+          paddingHorizontal: theme.spacing.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: theme.spacing.sm,
+        },
+        statusCardText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          fontWeight: '600',
+          color: theme.colors.text,
+        },
+        statusCardTextUpcoming: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          fontWeight: '600',
+          color: '#f97316',
+        },
+        statusCardTextLive: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          fontWeight: '600',
+          color: theme.colors.accent,
+        },
+        statusCardTextComplete: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          fontWeight: '600',
+          color: theme.colors.error,
+        },
+        cardsSection: {
+          marginTop: theme.spacing.sm,
+        },
+        threeBoxRow: {
+          flexDirection: 'row',
+          gap: theme.spacing.sm,
+        },
+        statsGrid: {
+          gap: theme.spacing.sm,
+        },
+        statsRow: {
+          flexDirection: 'row',
+          gap: theme.spacing.sm,
+        },
+        statCardHalf: {
+          flex: 1,
+        },
+        statCard: {
+          backgroundColor: theme.colors.surfaceElevated,
+          borderRadius: theme.radius.md,
+          padding: theme.spacing.sm,
+          borderWidth: cardBorderWidth,
+          borderColor: cardBorder,
+          alignItems: 'center',
+        },
+        statCardLabel: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          marginTop: 4,
+          textAlign: 'center',
+        },
+        statCardValue: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 22,
+          fontWeight: '700',
+          color: theme.colors.text,
+        },
+        statCardFull: {
+          width: '100%',
+        },
+        muted: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+        },
+        cardRow: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+        },
+        cardLeft: { flex: 1, minWidth: 0 },
+        cardRight: { alignItems: 'flex-end', marginLeft: theme.spacing.sm },
+        cardTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          fontWeight: '600',
+          color: theme.colors.text,
+        },
+        cardMeta: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          marginTop: 2,
+        },
+        cardStatus: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.accent,
+          marginTop: 2,
+        },
+        cardStatusClosed: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: '#b91c1c',
+          marginTop: 2,
+          fontStyle: 'italic',
+        },
+        timeBlock: { alignItems: 'flex-end' },
+        timeLabel: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 10,
+          color: theme.colors.textMuted,
+        },
+        timeValue: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          fontWeight: '600',
+          color: theme.colors.accent,
+          marginTop: 2,
+        },
+        lockInBtn: {
+          backgroundColor: theme.colors.accent,
+          paddingVertical: theme.spacing.xs,
+          paddingHorizontal: theme.spacing.sm,
+          borderRadius: theme.radius.sm,
+        },
+        lockInBtnDisabled: { opacity: 0.7 },
+        lockInBtnText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.black,
+          fontWeight: '600',
+        },
+        tabletStrip: {
+          marginBottom: theme.spacing.md,
+        },
+        tabletCodeRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.spacing.sm,
+        },
+        tabletCodeLabel: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        tabletCodeValue: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          fontWeight: '600',
+          color: theme.colors.text,
+          letterSpacing: 2,
+        },
+        tabletCodeMuted: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.textMuted,
+        },
+        infoBtn: {
+          marginLeft: 'auto',
+        },
       });
-      const result = data as { success?: boolean; error?: string } | null;
-      if (error || !result?.success) {
-        Alert.alert('Error', result?.error ?? error?.message ?? 'Failed to lock');
-        return;
-      }
-      await load(true);
-    } finally {
-      setLockingId(null);
-    }
-  };
-
-  const threeCardWidth = (width - theme.spacing.md * 2 - theme.spacing.sm * 2) / 3;
+    },
+    [theme]
+  );
 
   return (
     <View style={styles.wrapper}>
       <ScrollView
         ref={scrollRef}
         style={styles.container}
-        contentContainerStyle={[styles.content, { paddingBottom: theme.spacing.lg }]}
+        contentContainerStyle={[styles.content, { paddingBottom: theme.spacing.lg, paddingTop: theme.spacing.sm }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Welcome + tagline */}
-        <Text style={styles.welcomeTitle}>Welcome to Top Tipster Racing</Text>
-        <Text style={styles.welcomeTagline}>A Fantasy sports racing app</Text>
-
-        {/* Top bar: Hello + Account */}
-        <View style={styles.topBar}>
-          <Text style={styles.hello}>Hello {displayName || '…'}</Text>
-          <TouchableOpacity style={styles.accountLink} onPress={() => router.push('/(app)/account')} activeOpacity={0.7}>
-            <Ionicons name="person-circle-outline" size={24} color={theme.colors.text} />
-            <Text style={styles.accountLinkText}>Account</Text>
-          </TouchableOpacity>
+        {/* Header strip */}
+        <View style={styles.headerStrip}>
+          <View style={styles.headerStripInner}>
+            <View>
+              <Text style={styles.headerWelcome}>Top Tipster Racing</Text>
+              <Text style={styles.headerHello}>Hello {displayName || '…'}</Text>
+            </View>
+            <TouchableOpacity style={styles.accountLink} onPress={() => router.push('/(app)/account')} activeOpacity={0.7}>
+              <Ionicons name="person-circle-outline" size={28} color={theme.colors.text} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Tablet mode code */}
@@ -270,526 +682,161 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Races available: tap to scroll down to selections section */}
-        {hasJoinedAny && racesAvailable.length > 0 && (
-          <TouchableOpacity style={styles.racesAvailableCta} onPress={scrollToRacesSection} activeOpacity={0.8}>
-            <Ionicons name="flag" size={24} color={theme.colors.statusAccent} />
-            <Text style={styles.racesAvailableCtaText}>Races available – tap to view</Text>
-          </TouchableOpacity>
-        )}
-
         {!hasJoinedAny && (
-          <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/(auth)/access-code')}>
-            <Text style={styles.primaryButtonText}>Enter competition (access code)</Text>
-          </TouchableOpacity>
+          <View style={styles.nextRaceCard}>
+            <Text style={styles.nextRaceCardTitle}>Next race</Text>
+            <Text style={styles.nextRaceCardEmptyMessage}>
+              You have no upcoming competitions or races. Join one now.
+            </Text>
+            <TouchableOpacity
+              style={[styles.nextRaceCardBtn, styles.nextRaceCardBtnFull]}
+              onPress={() => router.push('/(auth)/access-code')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.nextRaceCardBtnText}>Enter competition (access code)</Text>
+              <Ionicons name="arrow-forward" size={14} color="#000000" />
+            </TouchableOpacity>
+          </View>
         )}
 
         {hasJoinedAny && (
           <>
-            {/* Full-width next race off card */}
-            <View style={styles.nextRaceCard}>
+            {/* Next race card – own card, above competitions */}
+            <TouchableOpacity
+              style={styles.nextRaceCard}
+              onPress={() => router.push('/(app)/selections')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.nextRaceCardTitle}>Next race</Text>
               {nextRaceOff ? (
                 <>
-                  <Ionicons name="flag-outline" size={20} color={theme.colors.accent} style={styles.nextRaceIcon} />
-                  <Text style={styles.nextRaceLabel}>{nextRaceOff.label}</Text>
-                  <Text style={styles.nextRaceValue} numberOfLines={2}>{nextRaceOff.value}</Text>
+                  <Text style={styles.nextRaceCardRaceName} numberOfLines={1}>{nextRaceOff.raceName}</Text>
+                  <Text style={styles.nextRaceCardCourse}>{nextRaceOff.course} · {nextRaceOff.dateStr}</Text>
+                  <View style={styles.nextRaceCardRow}>
+                    <View style={styles.nextRaceCardMeta}>
+                      <Ionicons name="time-outline" size={14} color={theme.colors.textMuted} />
+                      <Text style={styles.nextRaceCardTime}>{nextRaceOff.timeStr}</Text>
+                    </View>
+                    {nextRaceOff.runnerCount > 0 && (
+                      <View style={styles.nextRaceCardMeta}>
+                        <Ionicons name="people-outline" size={14} color={theme.colors.textMuted} />
+                        <Text style={styles.nextRaceCardRunners}>{nextRaceOff.runnerCount} runners</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.nextRaceCardBtn}>
+                    <Text style={styles.nextRaceCardBtnText}>My selections</Text>
+                    <Ionicons name="arrow-forward" size={14} color="#000000" />
+                  </View>
                 </>
               ) : (
-                <>
-                  <Ionicons name="flag-outline" size={20} color={theme.colors.textMuted} style={styles.nextRaceIcon} />
-                  <Text style={styles.nextRaceLabel}>Next race off</Text>
-                  <Text style={styles.nextRaceValueMuted}>—</Text>
-                </>
+                <Text style={styles.nextRaceCardMuted}>—</Text>
               )}
-            </View>
+            </TouchableOpacity>
 
-            {/* Competition horizontal scroll */}
-            <View style={styles.compSection}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.compScrollContent}
-                style={styles.compScroll}
-              >
-                {compList.map((c) => (
+            {/* Your competitions – title and icons outside card */}
+            <Text style={[styles.sectionTitle, styles.sectionTitleFirst]}>Your competitions</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.compScrollContent}
+              style={styles.compScroll}
+            >
+              {compList.map((c) => {
+                const isOverall = c.id === null;
+                const isSelected = selectedCompId === c.id;
+                return (
                   <TouchableOpacity
                     key={c.id ?? 'overall'}
-                    style={[styles.compPill, (selectedCompId === c.id) && styles.compPillSelected]}
+                    style={[styles.compCircle, isSelected && styles.compCircleSelected]}
                     onPress={() => setSelectedCompId(c.id)}
                     activeOpacity={0.8}
                   >
-                    <Text style={[styles.compPillText, (selectedCompId === c.id) && styles.compPillTextSelected]} numberOfLines={1}>
+                    <View style={[styles.compCircleInner, isSelected && styles.compCircleInnerSelected]}>
+                      <Ionicons
+                        name={isOverall ? 'trophy' : 'flag'}
+                        size={22}
+                        color={isSelected ? theme.colors.accent : theme.colors.textSecondary}
+                      />
+                    </View>
+                    <Text style={[styles.compCircleLabel, isSelected && styles.compCircleLabelSelected]} numberOfLines={1}>
                       {c.name}
                     </Text>
                   </TouchableOpacity>
-                ))}
-              </ScrollView>
-
-              {/* Current status card (centred): Upcoming=orange, Live=green pulse, Complete=red */}
-              {(() => {
-                const status =
-                  selectedCompId === null
-                    ? 'Your competitions'
-                    : compStatusByCompId[selectedCompId] === 'complete'
-                      ? 'Complete'
-                      : compStatusByCompId[selectedCompId] === 'upcoming'
-                        ? 'Upcoming'
-                        : 'Live';
-                const statusStyle =
-                  selectedCompId !== null && compStatusByCompId[selectedCompId] === 'upcoming'
-                    ? styles.statusCardTextUpcoming
-                    : selectedCompId !== null && compStatusByCompId[selectedCompId] === 'live'
-                      ? styles.statusCardTextLive
-                      : selectedCompId !== null && compStatusByCompId[selectedCompId] === 'complete'
-                        ? styles.statusCardTextComplete
-                        : styles.statusCardText;
-                if (selectedCompId !== null && compStatusByCompId[selectedCompId] === 'live') {
-                  return (
-                    <View style={styles.statusCard}>
-                      <Animated.Text style={[styles.statusCardTextLive, { opacity: livePulseAnim }]}>
-                        {status}
-                      </Animated.Text>
-                    </View>
-                  );
-                }
-                return (
-                  <View style={styles.statusCard}>
-                    <Text style={statusStyle}>{status}</Text>
-                  </View>
                 );
-              })()}
+              })}
+            </ScrollView>
 
-              {/* 3 boxes: Overall = Points | Highest daily points | Highest SP. Comp = Points | Daily/Final position | Highest SP */}
+            {/* White card: selected tab info + Your stats (4 boxes, 2x2) */}
+            <View style={styles.competitionsCard}>
+              <View style={styles.compInfoInnerCard}>
+                {selectedCompId === null ? (
+                  <Text style={styles.compCardHeaderCentered}>
+                    {participations.length} {participations.length === 1 ? 'competition' : 'competitions'}
+                  </Text>
+                ) : (
+                  <>
+                    <Text style={styles.compCardMeetingNameCentered} numberOfLines={1}>
+                      {summaryByComp?.byComp[selectedCompId]?.name ?? 'Competition'}
+                    </Text>
+                    <View style={styles.compCardMetaRowCentered}>
+                      <Text style={styles.compCardMeta}>
+                        {compDaysByCompId[selectedCompId] ?? 1} day event
+                      </Text>
+                      {compDateRangeByCompId[selectedCompId] && (
+                        <Text style={styles.compCardMeta}>
+                          {compDateRangeByCompId[selectedCompId].start} – {compDateRangeByCompId[selectedCompId].end}
+                        </Text>
+                      )}
+                    </View>
+                  </>
+                )}
+              </View>
+
+              <Text style={styles.statsTitle}>Your stats</Text>
               {(() => {
                 const isOverall = selectedCompId === null;
                 const isComplete = selectedCompId != null && compStatusByCompId[selectedCompId] === 'complete';
                 const position = selectedCompId != null ? compPositionByCompId[selectedCompId] : null;
-                const secondLabel = isOverall
-                  ? 'Highest daily points'
-                  : isComplete
-                    ? 'Final position'
-                    : 'Daily points';
+                const secondLabel = isOverall ? 'Highest daily' : isComplete ? 'Final position' : 'Daily points';
                 const secondValue = isOverall
                   ? (summaryByComp?.overall?.highestDailyPoints ?? 0)
                   : isComplete
                     ? (position != null ? `${position}${position === 1 ? 'st' : position === 2 ? 'nd' : position === 3 ? 'rd' : 'th'}` : '—')
                     : (currentSummary?.dailyPoints ?? 0);
+                const fourthLabel = isOverall ? 'Competitions' : 'Participants';
+                const fourthValue = isOverall
+                  ? participations.length
+                  : (participantCountByCompId[selectedCompId!] ?? 0);
+
+                const StatBox = ({ label, value }: { label: string; value: React.ReactNode }) => (
+                  <View style={[styles.statCard, styles.statCardHalf]}>
+                    <Text style={styles.statCardValue}>{value}</Text>
+                    <Text style={styles.statCardLabel}>{label}</Text>
+                  </View>
+                );
+
                 return (
-                  <View style={styles.threeBoxRow}>
-                    <View style={[styles.statCard, { width: threeCardWidth }]}>
-                      <Ionicons name="trophy-outline" size={18} color={theme.colors.accent} />
-                      <Text style={styles.statCardLabel}>Points</Text>
-                      <Text style={styles.statCardValue}>{currentSummary?.totalPoints ?? 0}</Text>
+                  <View style={styles.statsGrid}>
+                    <View style={styles.statsRow}>
+                      <StatBox label="Points" value={currentSummary?.totalPoints ?? 0} />
+                      <StatBox label={secondLabel} value={typeof secondValue === 'number' ? secondValue : secondValue} />
                     </View>
-                    <View style={[styles.statCard, { width: threeCardWidth }]}>
-                      {isOverall ? (
-                        <Ionicons name="trending-up-outline" size={18} color={theme.colors.accent} />
-                      ) : isComplete ? (
-                        <Ionicons name="podium-outline" size={18} color={theme.colors.accent} />
-                      ) : (
-                        <Ionicons name="calendar-outline" size={18} color={theme.colors.accent} />
-                      )}
-                      <Text style={styles.statCardLabel}>{secondLabel}</Text>
-                      <Text style={styles.statCardValue}>{typeof secondValue === 'number' ? secondValue : secondValue}</Text>
-                    </View>
-                    <View style={[styles.statCard, { width: threeCardWidth }]}>
-                      <Ionicons name="flash-outline" size={18} color={theme.colors.accent} />
-                      <Text style={styles.statCardLabel}>Highest odds winner</Text>
-                      <Text style={styles.statCardValue}>
-                        {currentSummary?.highestSpWin != null ? currentSummary.highestSpWin.toFixed(2) : '—'}
-                      </Text>
+                    <View style={styles.statsRow}>
+                      <StatBox
+                        label="Best odds"
+                        value={currentSummary?.highestSpWin != null ? decimalToFractional(currentSummary.highestSpWin) : '—'}
+                      />
+                      <StatBox label={fourthLabel} value={fourthValue} />
                     </View>
                   </View>
                 );
               })()}
             </View>
 
-            {racesAvailable.length > 0 && (
-              <View
-                style={styles.cardsSection}
-                onLayout={(e) => {
-                  const layout = e.nativeEvent?.layout ?? (e as { layout?: { y?: number } }).layout;
-                  racesSectionY.current = layout?.y ?? 0;
-                }}
-              >
-                <View style={styles.cards}>
-                  {racesAvailable.map((item) => {
-                  const closed = isSelectionClosed(item.firstRaceUtc);
-                  const cardKey = `${item.competitionId}-${item.raceDate}`;
-                  const isLocking = lockingId === cardKey;
-                  return (
-                    <TouchableOpacity
-                      key={cardKey}
-                      style={[styles.card, closed && styles.cardClosed]}
-                      onPress={() =>
-                        closed || item.isLocked
-                          ? router.push('/(app)/selections')
-                          : router.push({
-                              pathname: '/(app)/selections',
-                              params: { competitionId: item.competitionId, raceDate: item.raceDate },
-                            })
-                      }
-                      activeOpacity={0.8}
-                      disabled={isLocking}
-                    >
-                      <View style={styles.cardRow}>
-                        <View style={styles.cardLeft}>
-                          <Text style={styles.cardTitle} numberOfLines={1}>
-                            {item.competitionName}
-                          </Text>
-                          <Text style={styles.cardMeta}>
-                            {item.course} · {new Date(item.raceDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
-                          </Text>
-                          {closed ? (
-                            <Text style={styles.cardStatusClosed}>Closed – view in My selections</Text>
-                          ) : item.isLocked ? (
-                            <Text style={styles.cardStatus}>Locked – tap to view</Text>
-                          ) : item.hasAllPicks ? (
-                            <Text style={styles.cardStatus}>Lock in to view others</Text>
-                          ) : (
-                            <Text style={styles.cardStatus}>
-                              {item.pendingCount} pick{item.pendingCount !== 1 ? 's' : ''} left
-                            </Text>
-                          )}
-                        </View>
-                        {!closed && !item.isLocked && (
-                          <View style={styles.cardRight}>
-                            {item.hasAllPicks ? (
-                              <TouchableOpacity
-                                style={[styles.lockInBtn, isLocking && styles.lockInBtnDisabled]}
-                                onPress={(e) => {
-                                  e?.stopPropagation?.();
-                                  handleLockIn(item);
-                                }}
-                                disabled={isLocking}
-                              >
-                                {isLocking ? (
-                                  <ActivityIndicator size="small" color={theme.colors.black} />
-                                ) : (
-                                  <Text style={styles.lockInBtnText}>Lock in</Text>
-                                )}
-                              </TouchableOpacity>
-                            ) : (
-                              <View style={styles.timeBlock}>
-                                <Text style={styles.timeLabel}>Closes</Text>
-                                <Text style={styles.timeValue}>{formatTimeUntilDeadline(item.firstRaceUtc)}</Text>
-                              </View>
-                            )}
-                          </View>
-                        )}
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-                </View>
-              </View>
-            )}
           </>
         )}
       </ScrollView>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  wrapper: { flex: 1, backgroundColor: theme.colors.background },
-  container: { flex: 1 },
-  content: { padding: theme.spacing.md },
-  welcomeTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 22,
-    fontWeight: '700',
-    color: theme.colors.text,
-    marginBottom: theme.spacing.xs,
-  },
-  welcomeTagline: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.md,
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: theme.spacing.md,
-  },
-  hello: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 18,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  accountLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-  },
-  accountLinkText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.text,
-  },
-  primaryButton: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.sm,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    alignItems: 'center',
-    marginBottom: theme.spacing.md,
-  },
-  primaryButtonText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.black,
-    fontWeight: '600',
-  },
-  nextRaceCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.md,
-    marginHorizontal: -theme.spacing.md,
-    paddingHorizontal: theme.spacing.md + theme.spacing.md,
-    marginBottom: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  nextRaceIcon: { marginBottom: theme.spacing.xs },
-  nextRaceLabel: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-    marginBottom: 2,
-  },
-  nextRaceValue: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 15,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  nextRaceValueMuted: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 15,
-    color: theme.colors.textMuted,
-  },
-  compSection: { marginBottom: theme.spacing.md },
-  compScroll: { marginHorizontal: -theme.spacing.md },
-  compScrollContent: {
-    paddingHorizontal: theme.spacing.md,
-    gap: theme.spacing.sm,
-    paddingBottom: theme.spacing.sm,
-    flexDirection: 'row',
-  },
-  compPill: {
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.radius.full,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  compPillSelected: {
-    borderColor: theme.colors.barAccent,
-    backgroundColor: theme.colors.surfaceElevated,
-  },
-  compPillText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
-    color: theme.colors.textSecondary,
-  },
-  compPillTextSelected: {
-    color: theme.colors.text,
-    fontWeight: '600',
-  },
-  statusCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.sm,
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing.sm,
-  },
-  statusCardText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 16,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  statusCardTextUpcoming: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#f97316',
-  },
-  statusCardTextLive: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 16,
-    fontWeight: '600',
-    color: theme.colors.accent,
-  },
-  statusCardTextComplete: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 16,
-    fontWeight: '600',
-    color: theme.colors.error,
-  },
-  racesAvailableCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    backgroundColor: theme.colors.surface,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderRadius: theme.radius.sm,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    marginBottom: theme.spacing.md,
-  },
-  racesAvailableCtaText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.text,
-  },
-  cardsSection: {
-    marginTop: theme.spacing.sm,
-  },
-  threeBoxRow: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: theme.spacing.sm,
-    marginTop: theme.spacing.sm,
-  },
-  statCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.sm,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  statCardLabel: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-    marginTop: 4,
-  },
-  statCardValue: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 18,
-    fontWeight: '700',
-    color: theme.colors.accent,
-  },
-  statCardFull: {
-    width: '100%',
-  },
-  muted: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
-    color: theme.colors.textMuted,
-  },
-  cards: { gap: theme.spacing.sm },
-  card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  cardClosed: {
-    borderColor: '#b91c1c',
-    borderWidth: 1,
-    opacity: 0.9,
-  },
-  cardRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  cardLeft: { flex: 1, minWidth: 0 },
-  cardRight: { alignItems: 'flex-end', marginLeft: theme.spacing.sm },
-  cardTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 15,
-    fontWeight: '600',
-    color: theme.colors.text,
-  },
-  cardMeta: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-    marginTop: 2,
-  },
-  cardStatus: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.accent,
-    marginTop: 2,
-  },
-  cardStatusClosed: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: '#b91c1c',
-    marginTop: 2,
-    fontStyle: 'italic',
-  },
-  timeBlock: { alignItems: 'flex-end' },
-  timeLabel: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 10,
-    color: theme.colors.textMuted,
-  },
-  timeValue: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    fontWeight: '600',
-    color: theme.colors.accent,
-    marginTop: 2,
-  },
-  lockInBtn: {
-    backgroundColor: theme.colors.accent,
-    paddingVertical: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.sm,
-    borderRadius: theme.radius.sm,
-  },
-  lockInBtnDisabled: { opacity: 0.7 },
-  lockInBtnText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.black,
-    fontWeight: '600',
-  },
-  tabletStrip: {
-    marginBottom: theme.spacing.md,
-  },
-  tabletCodeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-  },
-  tabletCodeLabel: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.textMuted,
-  },
-  tabletCodeValue: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 16,
-    fontWeight: '600',
-    color: theme.colors.text,
-    letterSpacing: 2,
-  },
-  tabletCodeMuted: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.textMuted,
-  },
-  infoBtn: {
-    marginLeft: 'auto',
-  },
-});

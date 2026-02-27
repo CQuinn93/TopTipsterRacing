@@ -19,6 +19,7 @@ export type SelectionsBulkData = {
     user_id: string;
     race_date: string;
     selections: Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }> | null;
+    locked_at: string | null;
   }>;
   participants: Array<{
     competition_id: string;
@@ -83,7 +84,7 @@ export async function getSelectionsBulk(
 
   const { data: selRows } = await supabase
     .from('daily_selections')
-    .select('competition_id, user_id, race_date, selections')
+    .select('competition_id, user_id, race_date, selections, locked_at')
     .in('competition_id', competitionIds);
 
   const { data: partRows } = await supabase

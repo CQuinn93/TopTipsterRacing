@@ -1,50 +1,81 @@
 /**
  * Theme: black, white, greys, green only.
  * Font: Roundex (loaded in _layout).
+ * Supports light and dark mode based on system preference.
  */
-export const theme = {
-  colors: {
-    background: '#0a0a0a', //black 10%
-    surface: '#141414', //black 20%
-    surfaceElevated: '#1a1a1a', //black 30%
-    border: '#2a2a2a', //grey 15%
-    borderLight: '#333', //grey 20%
-    text: '#fafafa', //white 100%
-    textSecondary: '#a3a3a3', //grey 65%
-    textMuted: '#737373', //grey 45%
-    accent: '#22c55e', //green 100%
-    accentDim: '#16a34a', //green 10%
-    accentMuted: 'rgba(34, 197, 94, 0.2)', //green 20%
-    error: '#ef4444', //red 100%
-    white: '#ffffff', //white 100%
-    black: '#000000', //black 100%
-    /** Accent for tab bar / tablet code strip (unified bar look). */
-    barAccent: '#a855f7', // purple-500
-    /** Status card (competition status). */
-    statusAccent: '#eab308', // yellow-500
-  },
-  spacing: {
-    xs: 4,
-    sm: 8,
-    md: 16,
-    lg: 24,
-    xl: 32,
-    xxl: 48,
-  },
-  radius: {
-    sm: 6,
-    md: 10,
-    lg: 16,
-    full: 9999,
-  },
-  fontFamily: {
-    regular: 'Roundex',
-    /** Use Arial for text inputs so special characters display correctly. */
-    input: 'Arial, Helvetica, sans-serif',
-    /** Polygon for Results section. */
-    polygon: 'Polygon-Regular',
-    polygonItalic: 'Polygon-Italic',
-  },
+
+const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 16,
+  lg: 24,
+  xl: 32,
+  xxl: 48,
 } as const;
 
-export type Theme = typeof theme;
+const radius = {
+  sm: 6,
+  md: 10,
+  lg: 16,
+  full: 9999,
+} as const;
+
+const fontFamily = {
+  regular: 'Roundex',
+  input: 'Arial, Helvetica, sans-serif',
+  polygon: 'Polygon-Regular',
+  polygonItalic: 'Polygon-Italic',
+} as const;
+
+export const darkTheme = {
+  colors: {
+    background: '#0a0a0a',
+    surface: '#141414',
+    surfaceElevated: '#1a1a1a',
+    border: '#2a2a2a',
+    borderLight: '#333',
+    text: '#fafafa',
+    textSecondary: '#a3a3a3',
+    textMuted: '#737373',
+    accent: '#15803d',
+    accentDim: '#166534',
+    accentMuted: 'rgba(21, 128, 61, 0.2)',
+    error: '#ef4444',
+    white: '#ffffff',
+    black: '#000000',
+    barAccent: '#a855f7',
+    statusAccent: '#eab308',
+  },
+  spacing,
+  radius,
+  fontFamily,
+} as const;
+
+export const lightTheme = {
+  colors: {
+    background: '#fafafa',
+    surface: '#f0f0f0',
+    surfaceElevated: '#e5e5e5',
+    border: '#d4d4d4',
+    borderLight: '#a3a3a3',
+    text: '#171717',
+    textSecondary: '#525252',
+    textMuted: '#737373',
+    accent: '#15803d',
+    accentDim: '#166534',
+    accentMuted: 'rgba(21, 128, 61, 0.25)',
+    error: '#dc2626',
+    white: '#ffffff',
+    black: '#000000',
+    barAccent: '#7c3aed',
+    statusAccent: '#ca8a04',
+  },
+  spacing,
+  radius,
+  fontFamily,
+} as const;
+
+export type Theme = typeof darkTheme;
+
+/** @deprecated Use useTheme() from ThemeContext for light/dark support. */
+export const theme = darkTheme;

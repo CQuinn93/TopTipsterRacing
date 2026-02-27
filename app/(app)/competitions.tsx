@@ -1,12 +1,16 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Alert } from 'react-native';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { theme } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
+import { lightTheme } from '@/constants/theme';
 import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
 import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
 import { getCompetitionDisplayStatus, isCompletedMoreThanOneDay } from '@/lib/appUtils';
+import { getNotificationCompetitionIds, addNotificationCompetition, removeNotificationCompetition } from '@/lib/notificationCompetitionPrefs';
+import { requestPermissionsAndSetup, scheduleRemindersForCompetition, cancelRemindersForCompetition } from '@/lib/selectionReminderNotifications';
 
 type UserCompetition = {
   competition_id: string;
@@ -26,11 +30,14 @@ type PendingCompetition = {
 };
 
 export default function MyCompetitionsScreen() {
+  const theme = useTheme();
   const { userId } = useAuth();
   const [list, setList] = useState<UserCompetition[]>([]);
   const [pendingList, setPendingList] = useState<PendingCompetition[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [newlyApprovedNames, setNewlyApprovedNames] = useState<string[]>([]);
+  const [notificationCompIds, setNotificationCompIds] = useState<Set<string>>(new Set());
+  const [togglingCompId, setTogglingCompId] = useState<string | null>(null);
   const pendingListRef = useRef<PendingCompetition[]>([]);
 
   useEffect(() => {
@@ -142,10 +149,17 @@ export default function MyCompetitionsScreen() {
     } finally {
       setRefreshing(false);
     }
+    const ids = await getNotificationCompetitionIds(userId);
+    setNotificationCompIds(new Set(ids));
   };
 
   useEffect(() => {
     load();
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    getNotificationCompetitionIds(userId).then((ids) => setNotificationCompIds(new Set(ids)));
   }, [userId]);
 
   useEffect(() => {
@@ -165,6 +179,127 @@ export default function MyCompetitionsScreen() {
       },
     ]);
   }, [newlyApprovedNames, userId]);
+
+  const toggleNotificationsForCompetition = async (c: UserCompetition, enabled: boolean) => {
+    if (!userId) return;
+    setTogglingCompId(c.competition_id);
+    try {
+      if (enabled) {
+        const granted = await requestPermissionsAndSetup();
+        if (!granted) return;
+        await addNotificationCompetition(userId, c.competition_id);
+        await scheduleRemindersForCompetition(supabase, userId, c.competition_id, c.name);
+        setNotificationCompIds((prev) => new Set([...prev, c.competition_id]));
+      } else {
+        await removeNotificationCompetition(userId, c.competition_id);
+        await cancelRemindersForCompetition(c.competition_id);
+        setNotificationCompIds((prev) => {
+          const next = new Set(prev);
+          next.delete(c.competition_id);
+          return next;
+        });
+      }
+    } finally {
+      setTogglingCompId(null);
+    }
+  };
+
+  const styles = useMemo(() => {
+    const isLight = theme.colors.background === lightTheme.colors.background;
+    const cardBorder = isLight ? theme.colors.white : theme.colors.border;
+    const cardBorderWidth = isLight ? 2 : 1;
+    return StyleSheet.create({
+      container: { flex: 1, backgroundColor: theme.colors.background },
+      content: { padding: theme.spacing.md, paddingBottom: theme.spacing.xxl },
+      title: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 20,
+        color: theme.colors.text,
+        marginBottom: theme.spacing.xs,
+      },
+      subtitle: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 13,
+        color: theme.colors.textSecondary,
+        marginBottom: theme.spacing.sm,
+      },
+      primaryButton: {
+        backgroundColor: theme.colors.accent,
+        borderRadius: theme.radius.sm,
+        paddingVertical: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.md,
+        alignItems: 'center',
+        marginBottom: theme.spacing.lg,
+      },
+      primaryButtonText: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 14,
+        color: theme.colors.black,
+        fontWeight: '600',
+      },
+      sectionTitle: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 15,
+        color: theme.colors.accent,
+        marginTop: theme.spacing.md,
+        marginBottom: theme.spacing.xs,
+      },
+      sectionSubtitle: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 11,
+        color: theme.colors.textMuted,
+        marginBottom: theme.spacing.xs,
+      },
+      cardPending: {
+        opacity: 0.9,
+      },
+      pendingBadge: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 11,
+        color: theme.colors.textMuted,
+        marginTop: 2,
+        fontStyle: 'italic',
+      },
+      emptyMessage: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 13,
+        color: theme.colors.textMuted,
+        textAlign: 'center',
+        marginTop: theme.spacing.sm,
+      },
+      card: {
+        backgroundColor: theme.colors.surface,
+        borderRadius: theme.radius.md,
+        padding: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.md,
+        marginBottom: theme.spacing.sm,
+        borderWidth: cardBorderWidth,
+        borderColor: cardBorder,
+      },
+      cardTitle: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 15,
+        color: theme.colors.text,
+      },
+      cardMeta: { fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textMuted, marginTop: 2 },
+      cardFooter: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm, marginTop: 2, flexWrap: 'wrap' },
+      cardStatus: { fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.accent },
+      cardPosition: { fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textSecondary },
+      tapHint: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 11,
+        color: theme.colors.textMuted,
+        marginTop: theme.spacing.xs,
+      },
+      cardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: theme.spacing.sm },
+      cardMain: { flex: 1, minWidth: 0 },
+      bellBtn: {
+        padding: theme.spacing.xs,
+        marginTop: -theme.spacing.xs,
+        marginRight: -theme.spacing.xs,
+      },
+    });
+  }, [theme]);
 
   return (
     <ScrollView
@@ -201,112 +336,46 @@ export default function MyCompetitionsScreen() {
       {list.length === 0 && pendingList.length === 0 ? (
         <Text style={styles.emptyMessage}>You're not part of any competitions yet. Press the button below to enter one.</Text>
       ) : list.length === 0 ? null : (
-        list.map((c) => (
-          <TouchableOpacity
-            key={c.competition_id}
-            style={styles.card}
-            onPress={() => router.push({ pathname: '/(app)/leaderboard', params: { competitionId: c.competition_id } })}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.cardTitle}>{c.name}</Text>
-            <Text style={styles.cardMeta}>
-              {new Date(c.festival_start_date).toLocaleDateString()} – {new Date(c.festival_end_date).toLocaleDateString()}
-            </Text>
-            <View style={styles.cardFooter}>
-              <Text style={styles.cardStatus}>{c.status}</Text>
-              {c.position != null && (
-                <Text style={styles.cardPosition}>Your position: {c.position}{c.position === 1 ? 'st' : c.position === 2 ? 'nd' : c.position === 3 ? 'rd' : 'th'}</Text>
-              )}
+        list.map((c) => {
+          const notificationsOn = notificationCompIds.has(c.competition_id);
+          const toggling = togglingCompId === c.competition_id;
+          return (
+            <View key={c.competition_id} style={[styles.card, styles.cardRow]}>
+              <TouchableOpacity
+                style={styles.cardMain}
+                onPress={() => router.push({ pathname: '/(app)/leaderboard', params: { competitionId: c.competition_id } })}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.cardTitle}>{c.name}</Text>
+                <Text style={styles.cardMeta}>
+                  {new Date(c.festival_start_date).toLocaleDateString()} – {new Date(c.festival_end_date).toLocaleDateString()}
+                </Text>
+                <View style={styles.cardFooter}>
+                  <Text style={styles.cardStatus}>{c.status}</Text>
+                  {c.position != null && (
+                    <Text style={styles.cardPosition}>Your position: {c.position}{c.position === 1 ? 'st' : c.position === 2 ? 'nd' : c.position === 3 ? 'rd' : 'th'}</Text>
+                  )}
+                </View>
+                <Text style={styles.tapHint}>Tap to open leaderboard</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.bellBtn}
+                onPress={() => toggleNotificationsForCompetition(c, !notificationsOn)}
+                disabled={toggling}
+                accessibilityLabel={notificationsOn ? 'Turn off reminders for this competition' : 'Turn on reminders for this competition'}
+                accessibilityRole="button"
+              >
+                <Ionicons
+                  name={notificationsOn ? 'notifications' : 'notifications-outline'}
+                  size={24}
+                  color={notificationsOn ? theme.colors.accent : theme.colors.textMuted}
+                />
+              </TouchableOpacity>
             </View>
-            <Text style={styles.tapHint}>Tap to open leaderboard</Text>
-          </TouchableOpacity>
-        ))
+          );
+        })
       )}
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
-  content: { padding: theme.spacing.md, paddingBottom: theme.spacing.xxl },
-  title: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 20,
-    color: theme.colors.text,
-    marginBottom: theme.spacing.xs,
-  },
-  subtitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.sm,
-  },
-  primaryButton: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.sm,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    alignItems: 'center',
-    marginBottom: theme.spacing.lg,
-  },
-  primaryButtonText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.black,
-    fontWeight: '600',
-  },
-  sectionTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 15,
-    color: theme.colors.accent,
-    marginTop: theme.spacing.md,
-    marginBottom: theme.spacing.xs,
-  },
-  sectionSubtitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-    marginBottom: theme.spacing.xs,
-  },
-  cardPending: {
-    opacity: 0.9,
-  },
-  pendingBadge: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-    marginTop: 2,
-    fontStyle: 'italic',
-  },
-  emptyMessage: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 13,
-    color: theme.colors.textMuted,
-    textAlign: 'center',
-    marginTop: theme.spacing.sm,
-  },
-  card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.sm,
-    padding: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    marginBottom: theme.spacing.sm,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  cardTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 15,
-    color: theme.colors.text,
-  },
-  cardMeta: { fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textMuted, marginTop: 2 },
-  cardFooter: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm, marginTop: 2, flexWrap: 'wrap' },
-  cardStatus: { fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.accent },
-  cardPosition: { fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textSecondary },
-  tapHint: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 11,
-    color: theme.colors.textMuted,
-    marginTop: theme.spacing.xs,
-  },
-});

@@ -12,6 +12,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
 import { theme } from '@/constants/theme';
+import { useTheme } from '@/contexts/ThemeContext';
 import { displayHorseName } from '@/lib/displayHorseName';
 import type { Race } from '@/types/races';
 
@@ -25,6 +26,7 @@ type RaceDayRow = {
 };
 
 export default function AdminEditSelectionScreen() {
+  const activeTheme = useTheme();
   const params = useLocalSearchParams<{ selectionId: string; competitionId: string; raceDate: string }>();
   const selectionId = params.selectionId as string;
   const competitionId = params.competitionId as string;
@@ -107,7 +109,7 @@ export default function AdminEditSelectionScreen() {
   const races = raceDay.races ?? [];
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: activeTheme.colors.background }]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
           <Text style={styles.backText}>← Back</Text>

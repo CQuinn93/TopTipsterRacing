@@ -18,10 +18,16 @@ export type AvailableRaceDay = {
   lastRaceUtc: string;
   /** User has made all picks for this day */
   hasAllPicks: boolean;
+  /** User has made at least one selection for this day */
+  hasAnyPicks: boolean;
   /** User has locked in (early lock or past deadline) */
   isLocked: boolean;
   /** daily_selections id for lock RPC */
   selectionId: string | null;
+  /** Name of first race on this day (by time) */
+  firstRaceName?: string;
+  /** Number of runners in first race */
+  firstRaceRunnerCount?: number;
 };
 
 export async function fetchAvailableRacesForUser(
@@ -82,9 +88,12 @@ export async function fetchAvailableRacesForUser(
     const selectionId = sel?.id ?? null;
     const pendingCount = races.filter((r) => !(r.id in selections)).length;
     const hasAllPicks = pendingCount === 0;
+    const hasAnyPicks = Object.keys(selections).length > 0;
     const deadlineMs = new Date(firstRaceUtc).getTime() - 60 * 60 * 1000;
     const beforeDeadline = Date.now() < deadlineMs;
     const isLocked = lockedAt != null || !beforeDeadline;
+    const sortedRaces = [...races].sort((a, b) => a.scheduledTimeUtc.localeCompare(b.scheduledTimeUtc));
+    const firstRace = sortedRaces[0];
 
     result.push({
       competitionId: compId,
@@ -96,8 +105,11 @@ export async function fetchAvailableRacesForUser(
       firstRaceUtc,
       lastRaceUtc,
       hasAllPicks,
+      hasAnyPicks,
       isLocked,
       selectionId,
+      firstRaceName: firstRace?.name,
+      firstRaceRunnerCount: firstRace?.runners?.length ?? 0,
     });
   }
   result.sort((a, b) => a.raceDate.localeCompare(b.raceDate) || a.competitionName.localeCompare(b.competitionName));
