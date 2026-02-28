@@ -4,8 +4,8 @@ import 'dotenv/config';
  * Fetch race results from RapidAPI and update DB: horses (position, sp, is_fav, pos_points, sp_points), races (is_finished).
  * Uses RAPIDAPI_KEY_UPDATE_RESULTS (separate key from pull-races).
  *
- * Cron: every 30 min from 13:30 to 21:00. Processes up to 6 races where scheduled_time_utc + 15 min < now and is_finished = false.
- * Each such race gets one API call; if results not ready yet, logs and continues. Max 6 API calls per run.
+ * Cron: every 30 min from 13:30 to 21:00. Processes up to 2 races per run (MAX_RACES_PER_RUN) where scheduled_time_utc + 15 min < now and is_finished = false.
+ * Each such race gets one API call; if results not ready yet, logs and continues. Capped so daily total stays under 50.
  *
  * Logic:
  * 1. Select races where scheduled_time_utc + 15 min < now AND is_finished = false.
@@ -19,6 +19,11 @@ import 'dotenv/config';
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY_UPDATE_RESULTS;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const UPDATE_RESULTS_NOTIFICATION_EMAIL = process.env.UPDATE_RESULTS_NOTIFICATION_EMAIL;
+
+/** Max races to process per run so we stay under 50/day (16 runs × 2 = 32). */
+const MAX_RACES_PER_RUN = 2;
 
 const API_BASE = 'https://horse-racing.p.rapidapi.com';
 const API_HEADERS: Record<string, string> = {
@@ -258,6 +263,61 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
   return true;
 }
 
+type UpdateResultsReport = {
+  status: 'no_races_due' | 'success' | 'partial' | 'no_results_ready';
+  message: string;
+  apiCallsMade: number;
+  racesUpdated: number;
+  racesAttempted: number;
+  error?: string;
+};
+
+function updateResultsReportToText(report: UpdateResultsReport): string {
+  const lines: string[] = [
+    'Update Race Results Report',
+    '',
+    `Status: ${report.status}`,
+    report.message,
+    '',
+    `API calls made: ${report.apiCallsMade} (limit ${MAX_RACES_PER_RUN} per run, 50/day total for this key)`,
+    `Races updated: ${report.racesUpdated} of ${report.racesAttempted} attempted`,
+    '',
+  ];
+  if (report.error) {
+    lines.push('Error: ' + report.error);
+  }
+  return lines.join('\n');
+}
+
+async function sendUpdateResultsEmail(report: UpdateResultsReport): Promise<void> {
+  if (!RESEND_API_KEY || !UPDATE_RESULTS_NOTIFICATION_EMAIL) return;
+  const subject = `[Update Results] ${report.status} – ${report.apiCallsMade} API call(s)`;
+  const text = updateResultsReportToText(report);
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'Update Results <onboarding@resend.dev>',
+        to: [UPDATE_RESULTS_NOTIFICATION_EMAIL],
+        subject,
+        text,
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.warn('[update-race-results] Email send failed:', res.status, err);
+    } else {
+      console.log('[update-race-results] Report sent to', UPDATE_RESULTS_NOTIFICATION_EMAIL);
+    }
+  } catch (e) {
+    console.warn('[update-race-results] Email send error:', e);
+  }
+}
+
 async function main() {
   // Debug: log env presence (never log secret values)
   console.log('[update-race-results] Env check:', {
@@ -287,11 +347,18 @@ async function main() {
     .eq('is_finished', false)
     .lt('scheduled_time_utc', after.toISOString())
     .order('scheduled_time_utc', { ascending: true })
-    .limit(3);
+    .limit(MAX_RACES_PER_RUN);
 
   const races = (raceRows ?? []) as RaceRow[];
   if (races.length === 0) {
     console.log('No races due for results (scheduled_time_utc + 15 min < now, is_finished = false).');
+    await sendUpdateResultsEmail({
+      status: 'no_races_due',
+      message: 'No races due for results. No API calls made.',
+      apiCallsMade: 0,
+      racesUpdated: 0,
+      racesAttempted: 0,
+    });
     return;
   }
 
@@ -310,6 +377,22 @@ async function main() {
   }
 
   console.log(`Done. Updated ${updated} of ${races.length} race(s).`);
+
+  const apiCallsMade = races.length;
+  const status =
+    updated === races.length ? 'success' : updated > 0 ? 'partial' : 'no_results_ready';
+  await sendUpdateResultsEmail({
+    status,
+    message:
+      updated === races.length
+        ? `Updated results for all ${updated} race(s).`
+        : updated > 0
+          ? `Updated ${updated} of ${races.length} race(s). Some may not have had results ready yet.`
+          : `No results ready yet for the ${races.length} race(s) attempted.`,
+    apiCallsMade,
+    racesUpdated: updated,
+    racesAttempted: races.length,
+  });
 }
 
 main().catch((e) => {

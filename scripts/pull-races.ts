@@ -2,8 +2,7 @@
  * Pull race data from RapidAPI Horse Racing into Supabase.
  * Uses RAPIDAPI_KEY_PULL_RACES (separate key from update-race-results).
  *
- * Schedule: run at 3pm, 6pm and 9pm UK (15:00, 18:00, 21:00 UTC = 3/6/9 GMT; 4/7/10 BST). Most racecards are available by 2pm;
- * three runs give users time to create competitions (before 8pm UK) and still get tomorrow’s races pulled.
+ * Schedule: run at 5pm and 6pm UK (17:00, 18:00 UTC = 5/6 GMT; 6/7 BST). Racecards are well released by then; the 6pm run is backup.
  *
  * Rule: Competitions for the following day can only be created before 8pm UK; any later and they will not
  * get race data until the next day (enforced in admin UI).
@@ -30,6 +29,10 @@ const PULL_RACES_NOTIFICATION_EMAIL = process.env.PULL_RACES_NOTIFICATION_EMAIL;
 /** Delay in ms between each GET /race/{id} call. 10/min limit → 6s min spacing; 6s = fastest within limit. */
 const DEFAULT_RACE_FETCH_DELAY_MS = 6_000;
 const RACE_FETCH_DELAY_MS = Number(process.env.RACE_FETCH_DELAY_MS) || DEFAULT_RACE_FETCH_DELAY_MS;
+
+/** Hard cap so we never exceed 50 API calls per run (1 racecards + up to 49 race details). */
+const MAX_API_CALLS = 50;
+const MAX_RACE_DETAIL_CALLS = MAX_API_CALLS - 1;
 
 const API_BASE = 'https://horse-racing.p.rapidapi.com';
 const API_HEADERS: Record<string, string> = {
@@ -107,6 +110,7 @@ type PullRacesReport = {
   targetDate: string;
   status: 'no_comps' | 'no_courses' | 'skipped_already_have_data' | 'api_error' | 'db_error' | 'success';
   message: string;
+  apiCallsMade?: number;
   coursesAdded?: string[];
   racesAdded?: { course: string; name: string; time: string }[];
   error?: string;
@@ -120,6 +124,10 @@ function reportToText(report: PullRacesReport): string {
     report.message,
     '',
   ];
+  if (report.apiCallsMade !== undefined) {
+    lines.push(`API calls made: ${report.apiCallsMade} (limit ${MAX_API_CALLS} per run)`);
+    lines.push('');
+  }
   if (report.coursesAdded?.length) {
     lines.push('Courses added: ' + report.coursesAdded.join(', '));
     lines.push('');
@@ -207,6 +215,7 @@ async function main() {
       targetDate,
       status: 'no_comps',
       message: 'No competitions active for this date.',
+      apiCallsMade: 0,
     });
     return;
   }
@@ -225,6 +234,7 @@ async function main() {
       targetDate,
       status: 'no_courses',
       message: 'No courses configured for active competitions.',
+      apiCallsMade: 0,
     });
     return;
   }
@@ -249,6 +259,7 @@ async function main() {
       targetDate,
       status: 'skipped_already_have_data',
       message: `All courses (${courses.join(', ')}) already have race data for ${targetDate}. No API calls made.`,
+      apiCallsMade: 0,
     });
     return;
   }
@@ -264,6 +275,7 @@ async function main() {
       targetDate,
       status: 'api_error',
       message: 'Failed to fetch racecards from API.',
+      apiCallsMade: 1,
       error: e instanceof Error ? e.message : String(e),
     });
     return;
@@ -275,6 +287,12 @@ async function main() {
     for (const card of racecards) {
       if (courseMatches(card.course, course)) allFiltered.push({ course: card.course, card });
     }
+  }
+
+  // Cap so we never exceed 50 API calls per run (1 racecards already used; rest are race details)
+  const toFetch = allFiltered.slice(0, MAX_RACE_DETAIL_CALLS);
+  if (allFiltered.length > MAX_RACE_DETAIL_CALLS) {
+    console.warn(`  Capping at ${MAX_RACE_DETAIL_CALLS} race-detail calls (${allFiltered.length} races matched). Remaining races will be skipped this run.`);
   }
 
   // 3) Collect data: by course -> { racesForDb, firstRaceUtc }
@@ -304,10 +322,10 @@ async function main() {
   };
   const byCourse = new Map<string, CourseData>();
 
-  for (let i = 0; i < allFiltered.length; i++) {
+  for (let i = 0; i < toFetch.length; i++) {
     if (i > 0) await delay(RACE_FETCH_DELAY_MS);
-    const { course: courseName, card } = allFiltered[i];
-    console.log(`  Getting race #${i + 1} of ${allFiltered.length} (${card.id_race})`);
+    const { course: courseName, card } = toFetch[i];
+    console.log(`  Getting race #${i + 1} of ${toFetch.length} (${card.id_race})`);
     try {
       const detail = await fetchRaceDetail(card.id_race);
       const horses = detail?.horses ?? [];
@@ -351,6 +369,8 @@ async function main() {
     }
   }
 
+  const apiCallsMade = 1 + toFetch.length;
+
   // 4) Bulk upload – race_days (course, date, first_race_utc); races + horses tables store full data
   const raceDaysToUpsert: { course: string; race_date: string; first_race_utc: string; updated_at: string }[] = [];
   for (const [courseName, data] of byCourse.entries()) {
@@ -370,6 +390,7 @@ async function main() {
       targetDate,
       status: 'api_error',
       message: 'API returned no matching races for the requested courses.',
+      apiCallsMade,
     });
     return;
   }
@@ -385,6 +406,7 @@ async function main() {
       targetDate,
       status: 'db_error',
       message: 'Failed to upsert race_days.',
+      apiCallsMade,
       error: raceDaysErr?.message ?? String(raceDaysErr),
     });
     return;
@@ -434,6 +456,7 @@ async function main() {
       targetDate,
       status: 'db_error',
       message: 'Failed to insert races.',
+      apiCallsMade,
       error: racesErr?.message ?? String(racesErr),
     });
     return;
@@ -525,6 +548,7 @@ async function main() {
     targetDate,
     status: 'success',
     message: `Added ${upsertedRaceDays.length} race day(s), ${totalRaces} races, ${horsesToInsert.length} horses.`,
+    apiCallsMade,
     coursesAdded: raceDaysToUpsert.map((r) => r.course),
     racesAdded,
   });
