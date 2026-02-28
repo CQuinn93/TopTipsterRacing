@@ -83,7 +83,7 @@ export default function AccountScreen() {
       </View>
       <View style={styles.section}>
         <Text style={styles.label}>Tablet mode code</Text>
-        <Text style={styles.hint}>Use this code on a shared device to make selections without logging in. Hold Sign in for 7s on the login screen to open tablet mode.</Text>
+        <Text style={styles.hint}>Use this code on a shared device to make selections without logging in.</Text>
         {codeLoading ? (
           <ActivityIndicator size="small" color={theme.colors.accent} style={styles.codeLoader} />
         ) : tabletCode ? (

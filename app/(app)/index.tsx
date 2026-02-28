@@ -5,8 +5,10 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Alert,
   ActivityIndicator,
+  useWindowDimensions,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { router } from 'expo-router';
@@ -18,16 +20,12 @@ import { lightTheme } from '@/constants/theme';
 import { getAvailableRacesForUser } from '@/lib/availableRacesCache';
 import { fetchHomeSummaryByComp, type HomeSummaryByComp } from '@/lib/homeSummary';
 import { useForceRefresh } from '@/contexts/ForceRefreshContext';
-import { getOrCreateTabletCode } from '@/lib/tabletCode';
 import type { ParticipationRow } from '@/lib/availableRacesCache';
 import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
 import { isSelectionClosed, getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { decimalToFractional } from '@/lib/oddsFormat';
 import { requestPermissionsAndSetup, scheduleSelectionReminders } from '@/lib/selectionReminderNotifications';
 import { getNotificationCompetitionIds } from '@/lib/notificationCompetitionPrefs';
-
-const TABLET_MODE_INFO =
-  'Use this code on a shared device to make selections without logging in. Hold Sign in for 7s on the login screen to open tablet mode.';
 
 export default function HomeScreen() {
   const theme = useTheme();
@@ -38,14 +36,14 @@ export default function HomeScreen() {
   const [summaryByComp, setSummaryByComp] = useState<HomeSummaryByComp | null>(null);
   const [selectedCompId, setSelectedCompId] = useState<string | null>(null); // null = Overall
   const [refreshing, setRefreshing] = useState(false);
-  const [tabletCode, setTabletCode] = useState<string | null>(null);
-  const [codeLoading, setCodeLoading] = useState(true);
   const [compStatusByCompId, setCompStatusByCompId] = useState<Record<string, 'upcoming' | 'live' | 'complete'>>({});
   const [compPositionByCompId, setCompPositionByCompId] = useState<Record<string, number | null>>({});
   const [participantCountByCompId, setParticipantCountByCompId] = useState<Record<string, number>>({});
   const [compDaysByCompId, setCompDaysByCompId] = useState<Record<string, number>>({});
   const [compDateRangeByCompId, setCompDateRangeByCompId] = useState<Record<string, { start: string; end: string }>>({});
   const scrollRef = useRef<ScrollView>(null);
+  const compScrollRef = useRef<ScrollView>(null);
+  const { width: windowWidth } = useWindowDimensions();
 
   useEffect(() => {
     if (!userId) return;
@@ -67,14 +65,6 @@ export default function HomeScreen() {
     })();
     return () => { cancelled = true; };
   }, [userId, session?.user?.email]);
-
-  useEffect(() => {
-    if (!userId) return;
-    getOrCreateTabletCode(userId)
-      .then(setTabletCode)
-      .catch(() => setTabletCode(null))
-      .finally(() => setCodeLoading(false));
-  }, [userId]);
 
   const load = useCallback(
     async (forceRefresh = false) => {
@@ -155,7 +145,7 @@ export default function HomeScreen() {
           }
 
           if (selectedCompId !== null && !p.some((x) => x.competition_id === selectedCompId)) {
-            setSelectedCompId(null);
+            setSelectedCompId(p[0]?.competition_id ?? null);
           }
         } else {
           setSummaryByComp(null);
@@ -186,30 +176,50 @@ export default function HomeScreen() {
 
   const hasJoinedAny = participations.length > 0;
   const compList = summaryByComp
-    ? [{ id: null, name: 'Overall' } as const, ...participations.map((p) => ({ id: p.competition_id, name: summaryByComp.byComp[p.competition_id]?.name ?? p.competition_id }))]
+    ? participations.map((p) => ({ id: p.competition_id, name: summaryByComp.byComp[p.competition_id]?.name ?? p.competition_id }))
     : [];
+  const effectiveCompId =
+    selectedCompId && compList.some((c) => c.id === selectedCompId)
+      ? selectedCompId
+      : compList[0]?.id ?? null;
 
-  const currentSummary =
-    summaryByComp && selectedCompId === null
-      ? summaryByComp.overall
-      : summaryByComp && selectedCompId
-        ? summaryByComp.byComp[selectedCompId]
-        : null;
+  const currentSummary = summaryByComp && effectiveCompId ? summaryByComp.byComp[effectiveCompId] : null;
 
-  const racesAvailable = availableRaces.filter((item) => !isSelectionClosed(item.firstRaceUtc));
+  const scrollToCompIndex = useCallback((index: number) => {
+    if (compScrollRef.current && index >= 0) {
+      compScrollRef.current.scrollTo({ x: index * windowWidth, animated: true });
+    }
+  }, [windowWidth]);
+
+  useEffect(() => {
+    if (compList.length === 0) return;
+    const index = compList.findIndex((c) => c.id === effectiveCompId);
+    if (index <= 0) return;
+    const t = setTimeout(() => {
+      if (compScrollRef.current) {
+        compScrollRef.current.scrollTo({ x: index * windowWidth, animated: false });
+      }
+    }, 100);
+    return () => clearTimeout(t);
+  }, [effectiveCompId, compList.length, windowWidth]);
+
+  // Next race: show chronologically next race day (from DB) – open or closed. Data is from Supabase, cached in AsyncStorage.
   const nextRaceOff = (() => {
-    const open = [...racesAvailable].sort((a, b) => new Date(a.firstRaceUtc).getTime() - new Date(b.firstRaceUtc).getTime());
-    if (open.length === 0) return null;
-    const first = open[0];
-    const dateStr = new Date(first.raceDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-    const timeStr = new Date(first.firstRaceUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    if (availableRaces.length === 0) return null;
+    const sorted = [...availableRaces].sort((a, b) => new Date(a.firstRaceUtc).getTime() - new Date(b.firstRaceUtc).getTime());
+    const now = Date.now();
+    const next = sorted.find((d) => new Date(d.firstRaceUtc).getTime() > now) ?? sorted[sorted.length - 1];
+    const dateStr = new Date(next.raceDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+    const timeStr = new Date(next.firstRaceUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    const closed = isSelectionClosed(next.firstRaceUtc);
     return {
       label: 'Next race off',
-      course: first.course,
+      course: next.course,
       dateStr,
       timeStr,
-      raceName: first.firstRaceName ?? 'Race',
-      runnerCount: first.firstRaceRunnerCount ?? 0,
+      raceName: next.firstRaceName ?? 'Race',
+      runnerCount: next.firstRaceRunnerCount ?? 0,
+      isClosed: closed,
     };
   })();
 
@@ -224,7 +234,7 @@ export default function HomeScreen() {
         content: { padding: theme.spacing.md },
         sectionTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
+          fontSize: 15,
           fontWeight: '700',
           color: theme.colors.text,
           marginTop: theme.spacing.lg,
@@ -232,14 +242,16 @@ export default function HomeScreen() {
         },
         sectionTitleFirst: {
           marginTop: 0,
+          marginBottom: theme.spacing.sm,
         },
         headerStrip: {
           marginHorizontal: -theme.spacing.md,
           paddingHorizontal: theme.spacing.md,
-          paddingVertical: theme.spacing.md,
-          marginBottom: theme.spacing.md,
-          overflow: 'hidden',
-          position: 'relative',
+          paddingVertical: theme.spacing.lg,
+          paddingTop: theme.spacing.lg + 4,
+          marginBottom: theme.spacing.lg,
+          borderBottomWidth: 1,
+          borderBottomColor: theme.colors.border,
         },
         headerStripInner: {
           flexDirection: 'row',
@@ -248,13 +260,15 @@ export default function HomeScreen() {
         },
         headerWelcome: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
+          fontSize: 12,
           color: theme.colors.textMuted,
-          marginBottom: 2,
+          marginBottom: 4,
+          textTransform: 'uppercase',
+          letterSpacing: 0.5,
         },
         headerHello: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 20,
+          fontSize: 22,
           fontWeight: '700',
           color: theme.colors.text,
         },
@@ -285,7 +299,7 @@ export default function HomeScreen() {
         nextRaceCard: {
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.lg,
-          padding: theme.spacing.lg,
+          padding: theme.spacing.md,
           marginBottom: theme.spacing.md,
           borderWidth: cardBorderWidth,
           borderColor: cardBorder,
@@ -293,27 +307,46 @@ export default function HomeScreen() {
         },
         nextRaceCardTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: 10,
           color: theme.colors.textMuted,
-          marginBottom: 6,
+          marginBottom: theme.spacing.xs,
+          textTransform: 'uppercase',
+          letterSpacing: 0.8,
+        },
+        nextRaceCardHeaderRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.spacing.sm,
+          marginBottom: 2,
         },
         nextRaceCardRaceName: {
+          flex: 1,
           fontFamily: theme.fontFamily.regular,
-          fontSize: 17,
+          fontSize: 15,
           fontWeight: '700',
           color: theme.colors.text,
-          marginBottom: 4,
+        },
+        nextRaceCardClosedBadge: {
+          backgroundColor: theme.colors.textMuted + '20',
+          paddingHorizontal: theme.spacing.sm,
+          paddingVertical: 2,
+          borderRadius: theme.radius.sm,
+        },
+        nextRaceCardClosedBadgeText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.textMuted,
         },
         nextRaceCardCourse: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: 12,
           color: theme.colors.textSecondary,
-          marginBottom: theme.spacing.sm,
+          marginBottom: theme.spacing.xs,
         },
         nextRaceCardRow: {
           flexDirection: 'row',
-          gap: theme.spacing.lg,
-          marginBottom: theme.spacing.md,
+          gap: theme.spacing.md,
+          marginBottom: theme.spacing.sm,
         },
         nextRaceCardMeta: {
           flexDirection: 'row',
@@ -334,22 +367,25 @@ export default function HomeScreen() {
           flexDirection: 'row',
           alignItems: 'center',
           gap: theme.spacing.xs,
-          backgroundColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted ?? 'rgba(21, 128, 61, 0.2)',
           paddingVertical: theme.spacing.sm,
           paddingHorizontal: theme.spacing.md,
           borderRadius: theme.radius.sm,
           alignSelf: 'flex-start',
+          borderWidth: 1,
+          borderColor: theme.colors.accentDim ?? theme.colors.accent,
         },
         nextRaceCardBtnText: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 13,
           fontWeight: '600',
-          color: '#000000',
+          color: theme.colors.accent,
         },
         nextRaceCardMuted: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 15,
+          fontSize: 14,
           color: theme.colors.textMuted,
+          fontStyle: 'italic',
         },
         nextRaceCardEmptyMessage: {
           fontFamily: theme.fontFamily.regular,
@@ -363,19 +399,22 @@ export default function HomeScreen() {
         competitionsCard: {
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.lg,
-          padding: theme.spacing.md,
-          marginBottom: theme.spacing.md,
-          marginTop: theme.spacing.sm,
+          padding: theme.spacing.sm,
+          marginBottom: theme.spacing.sm,
+          marginTop: theme.spacing.xs,
           borderWidth: cardBorderWidth,
           borderColor: cardBorder,
           overflow: 'hidden',
         },
         compInfoInnerCard: {
-          borderRadius: theme.radius.md,
-          padding: theme.spacing.md,
-          marginBottom: theme.spacing.md,
-          overflow: 'hidden',
-          position: 'relative',
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: theme.spacing.xs,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.xs,
+          marginBottom: theme.spacing.sm,
         },
         compCardHeader: {
           fontFamily: theme.fontFamily.regular,
@@ -386,7 +425,7 @@ export default function HomeScreen() {
         },
         compCardHeaderCentered: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 18,
+          fontSize: 16,
           fontWeight: '600',
           color: theme.colors.text,
           textAlign: 'center',
@@ -400,11 +439,11 @@ export default function HomeScreen() {
         },
         compCardMeetingNameCentered: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 19,
+          fontSize: 16,
           fontWeight: '700',
           color: theme.colors.text,
           textAlign: 'center',
-          marginBottom: 4,
+          marginBottom: 0,
         },
         compCardMetaRow: {
           flexDirection: 'row',
@@ -412,23 +451,62 @@ export default function HomeScreen() {
           marginBottom: theme.spacing.md,
         },
         compCardMetaRowCentered: {
-          flexDirection: 'column',
+          flexDirection: 'row',
+          flexWrap: 'wrap',
           alignItems: 'center',
-          gap: 2,
+          justifyContent: 'center',
+          gap: theme.spacing.xs,
         },
         compCardMeta: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 12,
           color: theme.colors.textMuted,
         },
+        compStatusPill: {
+          paddingHorizontal: theme.spacing.sm,
+          paddingVertical: 2,
+          borderRadius: theme.radius.sm,
+        },
+        compStatusPillLive: { backgroundColor: theme.colors.accentMuted },
+        compStatusPillUpcoming: { backgroundColor: 'rgba(249, 115, 22, 0.2)' },
+        compStatusPillComplete: { backgroundColor: 'rgba(239, 68, 68, 0.15)' },
+        compStatusPillText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 10,
+          fontWeight: '600',
+          textTransform: 'uppercase',
+          letterSpacing: 0.3,
+        },
+        compStatusPillTextLive: { color: theme.colors.accent },
+        compStatusPillTextUpcoming: { color: '#ea580c' },
+        compStatusPillTextComplete: { color: theme.colors.error },
         statsTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
+          fontSize: 12,
           fontWeight: '600',
-          color: theme.colors.text,
-          marginBottom: theme.spacing.sm,
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.xs,
+          textTransform: 'uppercase',
+          letterSpacing: 0.5,
         },
         compSection: { marginBottom: theme.spacing.md },
+        compSlide: {
+          paddingHorizontal: theme.spacing.md,
+          paddingBottom: theme.spacing.sm,
+        },
+        compMeetingNameAbove: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          fontWeight: '700',
+          color: theme.colors.text,
+          marginBottom: 2,
+        },
+        compMetaAbove: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.sm,
+        },
         compScroll: { marginHorizontal: -theme.spacing.md, marginBottom: theme.spacing.sm },
         compScrollInCard: { marginHorizontal: 0, marginBottom: theme.spacing.sm },
         compScrollContent: {
@@ -511,38 +589,63 @@ export default function HomeScreen() {
           gap: theme.spacing.sm,
         },
         statsGrid: {
-          gap: theme.spacing.sm,
+          gap: theme.spacing.xs,
         },
         statsRow: {
           flexDirection: 'row',
-          gap: theme.spacing.sm,
+          gap: theme.spacing.xs,
         },
         statCardHalf: {
           flex: 1,
         },
         statCard: {
-          backgroundColor: theme.colors.surfaceElevated,
+          backgroundColor: theme.colors.accentMuted ?? 'rgba(21, 128, 61, 0.15)',
           borderRadius: theme.radius.md,
           padding: theme.spacing.sm,
-          borderWidth: cardBorderWidth,
-          borderColor: cardBorder,
+          borderWidth: 1,
+          borderColor: theme.colors.accentDim ?? theme.colors.accent,
           alignItems: 'center',
         },
         statCardLabel: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 11,
-          color: theme.colors.textMuted,
+          color: theme.colors.textSecondary,
           marginTop: 4,
           textAlign: 'center',
         },
         statCardValue: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 22,
+          fontSize: 20,
           fontWeight: '700',
-          color: theme.colors.text,
+          color: theme.colors.accent,
         },
         statCardFull: {
           width: '100%',
+        },
+        quickLinksRow: {
+          flexDirection: 'row',
+          gap: theme.spacing.sm,
+          marginTop: theme.spacing.sm,
+          marginBottom: theme.spacing.lg,
+        },
+        quickLinkBtn: {
+          flex: 1,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: theme.spacing.xs,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        quickLinkBtnText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          fontWeight: '600',
+          color: theme.colors.accent,
         },
         muted: {
           fontFamily: theme.fontFamily.regular,
@@ -607,34 +710,6 @@ export default function HomeScreen() {
           color: theme.colors.black,
           fontWeight: '600',
         },
-        tabletStrip: {
-          marginBottom: theme.spacing.md,
-        },
-        tabletCodeRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.spacing.sm,
-        },
-        tabletCodeLabel: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
-          color: theme.colors.textMuted,
-        },
-        tabletCodeValue: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          fontWeight: '600',
-          color: theme.colors.text,
-          letterSpacing: 2,
-        },
-        tabletCodeMuted: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
-          color: theme.colors.textMuted,
-        },
-        infoBtn: {
-          marginLeft: 'auto',
-        },
       });
     },
     [theme]
@@ -657,27 +732,6 @@ export default function HomeScreen() {
             </View>
             <TouchableOpacity style={styles.accountLink} onPress={() => router.push('/(app)/account')} activeOpacity={0.7}>
               <Ionicons name="person-circle-outline" size={28} color={theme.colors.text} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Tablet mode code */}
-        <View style={styles.tabletStrip}>
-          <View style={styles.tabletCodeRow}>
-            <Text style={styles.tabletCodeLabel}>Tablet mode code</Text>
-            {codeLoading ? (
-              <ActivityIndicator size="small" color={theme.colors.textMuted} />
-            ) : tabletCode ? (
-              <Text style={styles.tabletCodeValue} selectable>{tabletCode}</Text>
-            ) : (
-              <Text style={styles.tabletCodeMuted}>—</Text>
-            )}
-            <TouchableOpacity
-              hitSlop={12}
-              onPress={() => Alert.alert('Tablet mode', TABLET_MODE_INFO)}
-              style={styles.infoBtn}
-            >
-              <Ionicons name="information-circle-outline" size={22} color={theme.colors.textMuted} />
             </TouchableOpacity>
           </View>
         </View>
@@ -710,7 +764,14 @@ export default function HomeScreen() {
               <Text style={styles.nextRaceCardTitle}>Next race</Text>
               {nextRaceOff ? (
                 <>
-                  <Text style={styles.nextRaceCardRaceName} numberOfLines={1}>{nextRaceOff.raceName}</Text>
+                  <View style={styles.nextRaceCardHeaderRow}>
+                    <Text style={styles.nextRaceCardRaceName} numberOfLines={1}>{nextRaceOff.raceName}</Text>
+                    {nextRaceOff.isClosed && (
+                      <View style={styles.nextRaceCardClosedBadge}>
+                        <Text style={styles.nextRaceCardClosedBadgeText}>View only</Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={styles.nextRaceCardCourse}>{nextRaceOff.course} · {nextRaceOff.dateStr}</Text>
                   <View style={styles.nextRaceCardRow}>
                     <View style={styles.nextRaceCardMeta}>
@@ -730,7 +791,7 @@ export default function HomeScreen() {
                   </View>
                 </>
               ) : (
-                <Text style={styles.nextRaceCardMuted}>—</Text>
+                <Text style={styles.nextRaceCardMuted}>No upcoming races</Text>
               )}
             </TouchableOpacity>
 
@@ -743,18 +804,21 @@ export default function HomeScreen() {
               style={styles.compScroll}
             >
               {compList.map((c) => {
-                const isOverall = c.id === null;
-                const isSelected = selectedCompId === c.id;
+                const isSelected = effectiveCompId === c.id;
                 return (
                   <TouchableOpacity
-                    key={c.id ?? 'overall'}
+                    key={c.id}
                     style={[styles.compCircle, isSelected && styles.compCircleSelected]}
-                    onPress={() => setSelectedCompId(c.id)}
+                    onPress={() => {
+                      const index = compList.findIndex((x) => x.id === c.id);
+                      setSelectedCompId(c.id);
+                      scrollToCompIndex(index);
+                    }}
                     activeOpacity={0.8}
                   >
                     <View style={[styles.compCircleInner, isSelected && styles.compCircleInnerSelected]}>
                       <Ionicons
-                        name={isOverall ? 'trophy' : 'flag'}
+                        name="medal-outline"
                         size={22}
                         color={isSelected ? theme.colors.accent : theme.colors.textSecondary}
                       />
@@ -767,71 +831,88 @@ export default function HomeScreen() {
               })}
             </ScrollView>
 
-            {/* White card: selected tab info + Your stats (4 boxes, 2x2) */}
-            <View style={styles.competitionsCard}>
-              <View style={styles.compInfoInnerCard}>
-                {selectedCompId === null ? (
-                  <Text style={styles.compCardHeaderCentered}>
-                    {participations.length} {participations.length === 1 ? 'competition' : 'competitions'}
-                  </Text>
-                ) : (
-                  <>
-                    <Text style={styles.compCardMeetingNameCentered} numberOfLines={1}>
-                      {summaryByComp?.byComp[selectedCompId]?.name ?? 'Competition'}
-                    </Text>
-                    <View style={styles.compCardMetaRowCentered}>
-                      <Text style={styles.compCardMeta}>
-                        {compDaysByCompId[selectedCompId] ?? 1} day event
-                      </Text>
-                      {compDateRangeByCompId[selectedCompId] && (
-                        <Text style={styles.compCardMeta}>
-                          {compDateRangeByCompId[selectedCompId].start} – {compDateRangeByCompId[selectedCompId].end}
-                        </Text>
-                      )}
-                    </View>
-                  </>
-                )}
-              </View>
-
-              <Text style={styles.statsTitle}>Your stats</Text>
-              {(() => {
-                const isOverall = selectedCompId === null;
-                const isComplete = selectedCompId != null && compStatusByCompId[selectedCompId] === 'complete';
-                const position = selectedCompId != null ? compPositionByCompId[selectedCompId] : null;
-                const secondLabel = isOverall ? 'Highest daily' : isComplete ? 'Final position' : 'Daily points';
-                const secondValue = isOverall
-                  ? (summaryByComp?.overall?.highestDailyPoints ?? 0)
-                  : isComplete
+            {/* Horizontal snap scroll: one slide per competition (meeting name + meta above, stats-only card) */}
+            {compList.length > 0 && (
+              <ScrollView
+                ref={compScrollRef}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onMomentumScrollEnd={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
+                  const x = e.nativeEvent.contentOffset.x;
+                  const slideWidth = windowWidth;
+                  const index = Math.round(x / slideWidth);
+                  const comp = compList[index];
+                  if (comp) setSelectedCompId(comp.id);
+                }}
+                contentContainerStyle={{ flexDirection: 'row' }}
+                style={{ marginHorizontal: -theme.spacing.md, marginBottom: theme.spacing.sm }}
+              >
+                {compList.map((c) => {
+                  const summary = summaryByComp?.byComp[c.id];
+                  const isComplete = compStatusByCompId[c.id] === 'complete';
+                  const position = compPositionByCompId[c.id] ?? null;
+                  const secondLabel = isComplete ? 'Final position' : 'Daily points';
+                  const secondValue = isComplete
                     ? (position != null ? `${position}${position === 1 ? 'st' : position === 2 ? 'nd' : position === 3 ? 'rd' : 'th'}` : '—')
-                    : (currentSummary?.dailyPoints ?? 0);
-                const fourthLabel = isOverall ? 'Competitions' : 'Participants';
-                const fourthValue = isOverall
-                  ? participations.length
-                  : (participantCountByCompId[selectedCompId!] ?? 0);
-
-                const StatBox = ({ label, value }: { label: string; value: React.ReactNode }) => (
-                  <View style={[styles.statCard, styles.statCardHalf]}>
-                    <Text style={styles.statCardValue}>{value}</Text>
-                    <Text style={styles.statCardLabel}>{label}</Text>
-                  </View>
-                );
-
-                return (
-                  <View style={styles.statsGrid}>
-                    <View style={styles.statsRow}>
-                      <StatBox label="Points" value={currentSummary?.totalPoints ?? 0} />
-                      <StatBox label={secondLabel} value={typeof secondValue === 'number' ? secondValue : secondValue} />
+                    : (summary?.dailyPoints ?? 0);
+                  const StatBox = ({ label, value }: { label: string; value: React.ReactNode }) => (
+                    <View style={[styles.statCard, styles.statCardHalf]}>
+                      <Text style={styles.statCardValue}>{value}</Text>
+                      <Text style={styles.statCardLabel}>{label}</Text>
                     </View>
-                    <View style={styles.statsRow}>
-                      <StatBox
-                        label="Best odds"
-                        value={currentSummary?.highestSpWin != null ? decimalToFractional(currentSummary.highestSpWin) : '—'}
-                      />
-                      <StatBox label={fourthLabel} value={fourthValue} />
+                  );
+                  return (
+                    <View key={c.id} style={[styles.compSlide, { width: windowWidth }]}>
+                      <Text style={styles.compMeetingNameAbove} numberOfLines={1}>
+                        {summary?.name ?? c.name}
+                      </Text>
+                      <Text style={styles.compMetaAbove}>
+                        {compDaysByCompId[c.id] ?? 1} day event
+                        {compDateRangeByCompId[c.id]
+                          ? ` · ${compDateRangeByCompId[c.id].start} – ${compDateRangeByCompId[c.id].end}`
+                          : ''}
+                      </Text>
+                      <View style={styles.competitionsCard}>
+                        <Text style={styles.statsTitle}>Your stats</Text>
+                        <View style={styles.statsGrid}>
+                          <View style={styles.statsRow}>
+                            <StatBox label="Points" value={summary?.totalPoints ?? 0} />
+                            <StatBox label={secondLabel} value={typeof secondValue === 'number' ? secondValue : secondValue} />
+                          </View>
+                          <View style={styles.statsRow}>
+                            <StatBox
+                              label="Best odds"
+                              value={summary?.highestSpWin != null ? decimalToFractional(summary.highestSpWin) : '—'}
+                            />
+                            <StatBox label="Participants" value={participantCountByCompId[c.id] ?? 0} />
+                          </View>
+                        </View>
+                      </View>
                     </View>
-                  </View>
-                );
-              })()}
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            {/* Quick links */}
+            <View style={styles.quickLinksRow}>
+              <TouchableOpacity
+                style={styles.quickLinkBtn}
+                onPress={() => router.push({ pathname: '/(app)/leaderboard', params: effectiveCompId ? { competitionId: effectiveCompId } : {} })}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="podium-outline" size={18} color={theme.colors.accent} />
+                <Text style={styles.quickLinkBtnText}>Leaderboard</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.quickLinkBtn}
+                onPress={() => router.push('/(app)/results')}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="trophy-outline" size={18} color={theme.colors.accent} />
+                <Text style={styles.quickLinkBtnText}>Results</Text>
+              </TouchableOpacity>
             </View>
 
           </>

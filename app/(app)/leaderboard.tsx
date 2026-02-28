@@ -282,6 +282,12 @@ export default function LeaderboardScreen() {
   }, [selectedId]);
 
   useEffect(() => {
+    if (raceDates.length > 0) {
+      setSelectedDayIndex((i) => Math.min(i, raceDates.length - 1));
+    }
+  }, [raceDates.length]);
+
+  useEffect(() => {
     if (rows.length === 0) return;
     setRows((prev) => {
       const list = prev.map((r) => ({ ...r }));
@@ -427,6 +433,35 @@ export default function LeaderboardScreen() {
         fontSize: 10,
         color: theme.colors.textSecondary,
         marginTop: 2,
+      },
+      dayTabsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        gap: theme.spacing.xs,
+        paddingHorizontal: padH,
+        marginBottom: theme.spacing.md,
+      },
+      dayTab: {
+        paddingVertical: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.md,
+        borderRadius: theme.radius.md,
+        backgroundColor: theme.colors.surface,
+        borderWidth: 2,
+        borderColor: 'transparent',
+      },
+      dayTabSelected: {
+        borderColor: theme.colors.accent,
+        backgroundColor: theme.colors.accentMuted ?? 'rgba(21, 128, 61, 0.15)',
+      },
+      dayTabText: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 13,
+        fontWeight: '600',
+        color: theme.colors.textSecondary,
+      },
+      dayTabTextSelected: {
+        color: theme.colors.accent,
       },
       keyInfoBlock: {
         width: '100%',
@@ -618,6 +653,33 @@ export default function LeaderboardScreen() {
             </View>
           )}
 
+          {rows.length > 0 && leaderboardFilter === 'daily' && raceDates.length > 1 && (
+            <View style={styles.dayTabsRow}>
+              {raceDates.map((dateStr, index) => {
+                const shortDate = (() => {
+                  try {
+                    const d = new Date(dateStr);
+                    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+                  } catch {
+                    return '';
+                  }
+                })();
+                const label = shortDate ? `Day ${index + 1} (${shortDate})` : `Day ${index + 1}`;
+                const isSelected = selectedDayIndex === index;
+                return (
+                  <TouchableOpacity
+                    key={dateStr}
+                    style={[styles.dayTab, isSelected && styles.dayTabSelected]}
+                    onPress={() => setSelectedDayIndex(index)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.dayTabText, isSelected && styles.dayTabTextSelected]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
           {rows.length > 0 && (
             <View style={styles.keyInfoBlock}>
               <Text style={styles.keyInfoText}>{participantCount} {participantCount === 1 ? 'participant' : 'participants'}</Text>
@@ -629,7 +691,11 @@ export default function LeaderboardScreen() {
 
           {rows.length > 0 && (
             <Text style={styles.leaderboardListTitle}>
-              {leaderboardFilter === 'daily' ? 'Daily leaderboard' : leaderboardFilter === 'sp' ? 'Highest SP' : 'Overall leaderboard'}
+              {leaderboardFilter === 'daily'
+                ? `Daily leaderboard${raceDates.length > 1 ? ` · Day ${selectedDayIndex + 1}` : ''}`
+                : leaderboardFilter === 'sp'
+                  ? 'Highest SP'
+                  : 'Overall leaderboard'}
             </Text>
           )}
 
