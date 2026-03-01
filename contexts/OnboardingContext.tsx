@@ -30,14 +30,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [userId, checked]);
 
-  const handleComplete = useCallback(() => {
-    if (userId) {
-      setGuidedTourCompleted(userId).catch(() => {});
-    }
-    setShowTour(false);
-  }, [userId]);
-
-  const handleSkip = useCallback(() => {
+  const handleCompleteOrSkip = useCallback(() => {
     if (userId) {
       setGuidedTourCompleted(userId).catch(() => {});
     }
@@ -49,8 +42,8 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       {children}
       <GuidedTourModal
         visible={showTour}
-        onComplete={handleComplete}
-        onSkip={handleSkip}
+        onComplete={handleCompleteOrSkip}
+        onSkip={handleCompleteOrSkip}
       />
     </OnboardingContext.Provider>
   );

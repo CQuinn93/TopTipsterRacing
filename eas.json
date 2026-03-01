@@ -22,5 +22,11 @@
       "android": { "buildType": "app-bundle" },
       "env": { "APP_ENV": "production" }
     }
+  },
+  "submit": {
+    "production": {
+      "ios": {},
+      "android": {}
+    }
   }
 }

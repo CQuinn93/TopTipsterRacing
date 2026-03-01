@@ -18,7 +18,7 @@ function cacheKey(competitionId: string, participantUserId: string, raceDate: st
  * Selections become visible (locked) at 13:00 UK on the race day.
  * After that they cannot change, so we can cache indefinitely.
  */
-export function isLocked(raceDate: string): boolean {
+function isLocked(raceDate: string): boolean {
   const dateOnly = raceDate.split('T')[0];
   const now = new Date();
   const ukNow = new Date(now.toLocaleString('en-GB', { timeZone: 'Europe/London' }));
@@ -34,7 +34,7 @@ export function isLocked(raceDate: string): boolean {
  * - we're before 13:00 today and cache was filled after 13:00 the day before (so we have stale-but-acceptable data and skip fetch).
  * For simplicity: use cache if we have it and the race date is locked. Otherwise fetch.
  */
-export function shouldUseCache(raceDate: string, fetchedAt: string): boolean {
+function shouldUseCache(raceDate: string, fetchedAt: string): boolean {
   if (isLocked(raceDate)) return true;
   const fetched = new Date(fetchedAt);
   const ukFetched = new Date(fetched.toLocaleString('en-GB', { timeZone: 'Europe/London' }));

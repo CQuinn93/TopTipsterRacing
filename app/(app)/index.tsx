@@ -34,7 +34,7 @@ export default function HomeScreen() {
   const [participations, setParticipations] = useState<ParticipationRow[]>([]);
   const [availableRaces, setAvailableRaces] = useState<AvailableRaceDay[]>([]);
   const [summaryByComp, setSummaryByComp] = useState<HomeSummaryByComp | null>(null);
-  const [selectedCompId, setSelectedCompId] = useState<string | null>(null); // null = Overall
+  const [selectedCompId, setSelectedCompId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [compStatusByCompId, setCompStatusByCompId] = useState<Record<string, 'upcoming' | 'live' | 'complete'>>({});
   const [compPositionByCompId, setCompPositionByCompId] = useState<Record<string, number | null>>({});

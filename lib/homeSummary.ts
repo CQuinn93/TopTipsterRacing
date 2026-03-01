@@ -31,16 +31,6 @@ function getResultForPick(race: Race, runnerId: string): RaceResult | null {
   return (results[runnerId] as RaceResult) ?? null;
 }
 
-export async function fetchHomeSummary(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any,
-  userId: string,
-  competitionIds: string[]
-): Promise<HomeSummary> {
-  const { overall } = await fetchHomeSummaryByComp(supabase, userId, competitionIds);
-  return overall;
-}
-
 export async function fetchHomeSummaryByComp(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any,
