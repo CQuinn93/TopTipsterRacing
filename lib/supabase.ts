@@ -5,7 +5,7 @@ import { SUPABASE_URL as FALLBACK_URL, SUPABASE_ANON_KEY as FALLBACK_KEY } from 
 
 // App uses only the anon (public) key. Service key is for scripts/admin backends only.
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? FALLBACK_URL;
-const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? FALLBACK_KEY;
+const supabaseKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY ?? FALLBACK_KEY;
 
 if (!supabaseUrl || !supabaseKey || supabaseUrl.includes('YOUR_PROJECT') || supabaseKey.includes('YOUR_ANON')) {
   throw new Error(
@@ -20,3 +20,8 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseKey, {
     detectSessionInUrl: true,
   },
 });
+
+/** Base URL for Supabase project (for Edge Functions). */
+export function getSupabaseUrl(): string {
+  return process.env.EXPO_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? FALLBACK_URL;
+}

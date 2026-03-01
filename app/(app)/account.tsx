@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator, Pla
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { supabase, getSupabaseUrl } from '@/lib/supabase';
 import { getOrCreateTabletCode, clearTabletCodeCache } from '@/lib/tabletCode';
 import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
 import { clearLatestResultsCache } from '@/lib/latestResultsCache';
@@ -25,6 +26,7 @@ export default function AccountScreen() {
   const userId = session?.user?.id ?? null;
   const [tabletCode, setTabletCode] = useState<string | null>(null);
   const [codeLoading, setCodeLoading] = useState(true);
+  const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
 
   const styles = useMemo(
     () =>
@@ -46,6 +48,13 @@ export default function AccountScreen() {
           alignItems: 'center',
         },
         buttonText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.text },
+        deleteButton: {
+          marginTop: theme.spacing.lg,
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          borderColor: theme.colors.error,
+        },
+        deleteButtonText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.error },
       }),
     [theme]
   );
@@ -75,6 +84,52 @@ export default function AccountScreen() {
     ]);
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete account',
+      'This will permanently delete your account and all your data (selections, competition entries). You will not be able to sign in again with this email. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete my account',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleteAccountLoading(true);
+            try {
+              const { data: { session: s } } = await supabase.auth.getSession();
+              const token = s?.access_token;
+              if (!token) {
+                Alert.alert('Error', 'Not signed in.');
+                return;
+              }
+              const url = `${getSupabaseUrl()}/functions/v1/delete-account`;
+              const res = await fetch(url, {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+              });
+              const body = await res.json().catch(() => ({}));
+              if (!res.ok) {
+                Alert.alert('Error', (body as { error?: string })?.error ?? 'Could not delete account. Try again later.');
+                return;
+              }
+              await doSignOut(signOut, userId);
+              if (Platform.OS !== 'web') {
+                Alert.alert('Account deleted', 'Your account has been permanently deleted.');
+              }
+            } catch (e) {
+              Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.');
+            } finally {
+              setDeleteAccountLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.section}>
@@ -94,6 +149,17 @@ export default function AccountScreen() {
       </View>
       <TouchableOpacity style={styles.button} onPress={handleSignOut}>
         <Text style={styles.buttonText}>Sign out</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.button, styles.deleteButton]}
+        onPress={handleDeleteAccount}
+        disabled={deleteAccountLoading}
+      >
+        {deleteAccountLoading ? (
+          <ActivityIndicator size="small" color={theme.colors.error} />
+        ) : (
+          <Text style={styles.deleteButtonText}>Delete account</Text>
+        )}
       </TouchableOpacity>
     </View>
   );
