@@ -55,9 +55,7 @@ export default function ParticipantSelectionsScreen() {
   const [viewableRaceDates, setViewableRaceDates] = useState<Record<string, boolean>>({});
   const [breakdownModal, setBreakdownModal] = useState<{
     runnerName: string;
-    oddsDecimal: number;
     positionPoints: number | null;
-    /** Odds (bonus) points only – never position + bonus. */
     oddsPoints: number | null;
   } | null>(null);
 
@@ -86,6 +84,35 @@ export default function ParticipantSelectionsScreen() {
         },
         scroll: { flex: 1 },
         content: { padding: activeTheme.spacing.lg, paddingBottom: activeTheme.spacing.xxl },
+        overviewRow: {
+          flexDirection: 'row',
+          gap: activeTheme.spacing.sm,
+          marginBottom: activeTheme.spacing.lg,
+        },
+        overviewBox: {
+          flex: 1,
+          borderRadius: activeTheme.radius.md,
+          padding: activeTheme.spacing.md,
+          alignItems: 'center',
+          borderWidth: 1,
+        },
+        overviewWon: { borderColor: 'rgba(34, 197, 94, 0.5)', backgroundColor: 'rgba(34, 197, 94, 0.12)' },
+        overviewPlace: { borderColor: 'rgba(234, 179, 8, 0.5)', backgroundColor: 'rgba(234, 179, 8, 0.12)' },
+        overviewLost: { borderColor: 'rgba(239, 68, 68, 0.4)', backgroundColor: 'rgba(239, 68, 68, 0.1)' },
+        overviewValue: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 24,
+          fontWeight: '700',
+        },
+        overviewValueWon: { color: '#166534' },
+        overviewValuePlace: { color: '#a16207' },
+        overviewValueLost: { color: '#991b1b' },
+        overviewLabel: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 12,
+          color: activeTheme.colors.textMuted,
+          marginTop: 4,
+        },
         dayCard: {
           backgroundColor: activeTheme.colors.surface,
           borderRadius: activeTheme.radius.md,
@@ -117,7 +144,7 @@ export default function ParticipantSelectionsScreen() {
           fontFamily: activeTheme.fontFamily.regular,
           fontSize: 11,
           fontWeight: '600',
-          color: '#fff',
+          color: activeTheme.colors.text,
           marginBottom: activeTheme.spacing.sm,
         },
         columnHeader: {
@@ -225,6 +252,7 @@ export default function ParticipantSelectionsScreen() {
       setCanViewOthers(false);
       return;
     }
+    setSelectionsByDate({});
     (async () => {
       const bulk = await getLeaderboardBulkCache(competitionId);
       if (bulk?.raceDays?.length && bulk.selectionsByUser) {
@@ -254,6 +282,35 @@ export default function ParticipantSelectionsScreen() {
             }
           }
           setSelectionsByDate(normalized);
+        } else {
+          const dates = days.map((d) => d.race_date).filter(Boolean);
+          if (dates.length > 0) {
+            const { data: rows } = await supabase
+              .from('daily_selections')
+              .select('race_date, selections')
+              .eq('competition_id', competitionId)
+              .eq('user_id', participantUserId)
+              .in('race_date', dates);
+            const fetched: Record<string, Record<string, SelectionEntry>> = {};
+            for (const row of rows ?? []) {
+              const r = row as { race_date: string; selections: Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }> };
+              fetched[r.race_date] = {};
+              const sel = r.selections ?? {};
+              for (const [raceId, v] of Object.entries(sel)) {
+                if (v?.oddsDecimal != null) {
+                  fetched[r.race_date][raceId] = {
+                    runnerId: v.runnerId ?? '',
+                    runnerName: v.runnerName ?? '',
+                    oddsDecimal: v.oddsDecimal,
+                    oddsPoints: Math.round(v.oddsDecimal * POINTS_PER_ODDS),
+                  };
+                }
+              }
+            }
+            setSelectionsByDate(fetched);
+          } else {
+            setSelectionsByDate({});
+          }
         }
         setLoading(false);
         if (currentUserId) {
@@ -398,6 +455,27 @@ export default function ParticipantSelectionsScreen() {
     return 0;
   };
 
+  /** Totals across competition: wins, places, losses (must be before early returns for hooks order) */
+  const overviewTotals = useMemo(() => {
+    let wins = 0;
+    let places = 0;
+    let losses = 0;
+    for (const day of raceDays) {
+      const races = (day.races ?? []) as Race[];
+      const selections = day.race_date ? (selectionsByDate[day.race_date] ?? {}) : {};
+      for (const race of races) {
+        const pick = selections[race.id];
+        if (!pick) continue;
+        const result = getResultForPick(race, pick.runnerId);
+        const position = result?.positionLabel ?? pick?.position;
+        if (position === 'won') wins++;
+        else if (position === 'place') places++;
+        else if (position === 'lost') losses++;
+      }
+    }
+    return { wins, places, losses };
+  }, [raceDays, selectionsByDate]);
+
   if (loading && raceDays.length === 0) {
     return (
       <View style={styles.centered}>
@@ -410,7 +488,7 @@ export default function ParticipantSelectionsScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity onPress={() => router.replace({ pathname: '/(app)/leaderboard', params: { competitionId } })}>
             <Text style={styles.backText}>← Back</Text>
           </TouchableOpacity>
           <Text style={styles.title}>{displayName}</Text>
@@ -430,13 +508,27 @@ export default function ParticipantSelectionsScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
+        <TouchableOpacity onPress={() => router.replace({ pathname: '/(app)/leaderboard', params: { competitionId } })}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>{displayName}</Text>
         <Text style={styles.subtitle}>Selections</Text>
       </View>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+        <View style={styles.overviewRow}>
+          <View style={[styles.overviewBox, styles.overviewWon]}>
+            <Text style={[styles.overviewValue, styles.overviewValueWon]}>{overviewTotals.wins}</Text>
+            <Text style={styles.overviewLabel}>Win</Text>
+          </View>
+          <View style={[styles.overviewBox, styles.overviewPlace]}>
+            <Text style={[styles.overviewValue, styles.overviewValuePlace]}>{overviewTotals.places}</Text>
+            <Text style={styles.overviewLabel}>Place</Text>
+          </View>
+          <View style={[styles.overviewBox, styles.overviewLost]}>
+            <Text style={[styles.overviewValue, styles.overviewValueLost]}>{overviewTotals.losses}</Text>
+            <Text style={styles.overviewLabel}>Lost</Text>
+          </View>
+        </View>
         {daysToShow.map((day, dayIndex) => {
           const isPlaceholder = !day.race_date;
           const races = (day.races ?? []) as Race[];
@@ -484,7 +576,6 @@ export default function ParticipantSelectionsScreen() {
                           pick
                             ? setBreakdownModal({
                                 runnerName: pick.runnerName,
-                                oddsDecimal: pick.oddsDecimal,
                                 positionPoints: dbPos,
                                 oddsPoints: dbSpOnly,
                               })
@@ -556,19 +647,21 @@ export default function ParticipantSelectionsScreen() {
               <>
                 <Text style={styles.modalTitle}>{displayHorseName(breakdownModal.runnerName)}</Text>
                 <View style={styles.breakdownRow}>
-                  <Text style={styles.breakdownLabel}>Odds</Text>
-                  <Text style={styles.breakdownValue}>{decimalToFractional(breakdownModal.oddsDecimal)}</Text>
-                </View>
-                <View style={styles.breakdownRow}>
                   <Text style={styles.breakdownLabel}>Position points</Text>
                   <Text style={styles.breakdownValue}>
                     {breakdownModal.positionPoints != null ? breakdownModal.positionPoints : '—'}
                   </Text>
                 </View>
                 <View style={styles.breakdownRow}>
-                  <Text style={styles.breakdownLabel}>Odds points (bonus)</Text>
+                  <Text style={styles.breakdownLabel}>Odds points</Text>
                   <Text style={styles.breakdownValue}>
                     {breakdownModal.oddsPoints != null ? breakdownModal.oddsPoints : '—'}
+                  </Text>
+                </View>
+                <View style={styles.breakdownRow}>
+                  <Text style={styles.breakdownLabel}>Total</Text>
+                  <Text style={styles.breakdownValue}>
+                    {(breakdownModal.positionPoints ?? 0) + (breakdownModal.oddsPoints ?? 0)}
                   </Text>
                 </View>
                 <TouchableOpacity style={styles.modalClose} onPress={() => setBreakdownModal(null)}>

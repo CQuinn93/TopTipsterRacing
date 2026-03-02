@@ -588,31 +588,47 @@ export default function LeaderboardScreen() {
         flexDirection: 'row',
         flex: 1,
         justifyContent: 'space-around',
-        marginTop: theme.spacing.xs,
-        paddingTop: theme.spacing.xs,
+        marginTop: theme.spacing.md,
+        paddingTop: theme.spacing.md,
+        paddingBottom: theme.spacing.sm,
         borderTopWidth: 1,
         borderTopColor: theme.colors.border,
       },
-      expandedStat: { alignItems: 'center' },
+      expandedStat: {
+        alignItems: 'center',
+        paddingHorizontal: theme.spacing.sm,
+        paddingVertical: theme.spacing.xs,
+      },
       expandedStatValue: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 14,
-        fontWeight: '600',
-        color: theme.colors.text,
+        fontSize: 16,
+        fontWeight: '700',
+        marginTop: theme.spacing.sm,
       },
+      expandedStatValueDaily: { color: '#3b82f6' },
+      expandedStatValueOverall: { color: theme.colors.accent },
+      expandedStatValueSp: { color: '#eab308' },
       expandedStatLabel: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 10,
+        fontSize: 12,
         color: theme.colors.textMuted,
-        marginTop: 1,
+      },
+      expandedDrawerWrap: {
+        borderWidth: 2,
+        borderColor: theme.colors.accent,
+        borderRadius: theme.radius.md,
+        overflow: 'hidden',
       },
       seeSelectionsButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: theme.spacing.xs,
+        paddingVertical: theme.spacing.md,
+        paddingHorizontal: theme.spacing.sm,
         gap: theme.spacing.xs,
-        marginTop: 2,
+        borderTopWidth: 1,
+        borderTopColor: theme.colors.border,
+        backgroundColor: theme.colors.surface,
       },
       seeSelectionsButtonText: {
         fontFamily: theme.fontFamily.regular,
@@ -789,15 +805,15 @@ export default function LeaderboardScreen() {
                           <View style={styles.expandedStats}>
                             <View style={styles.expandedStat}>
                               <Text style={styles.expandedStatLabel}>Daily</Text>
-                              <Text style={styles.expandedStatValue}>{getDailyPoints(item)}</Text>
+                              <Text style={[styles.expandedStatValue, styles.expandedStatValueDaily]}>{getDailyPoints(item)}</Text>
                             </View>
                             <View style={styles.expandedStat}>
                               <Text style={styles.expandedStatLabel}>Overall</Text>
-                              <Text style={styles.expandedStatValue}>{item.total}</Text>
+                              <Text style={[styles.expandedStatValue, styles.expandedStatValueOverall]}>{item.total}</Text>
                             </View>
                             <View style={styles.expandedStat}>
                               <Text style={styles.expandedStatLabel}>Best SP</Text>
-                              <Text style={styles.expandedStatValue}>{hasAnyRaceResult && item.max_odds > 0 ? decimalToFractional(item.max_odds) : '—'}</Text>
+                              <Text style={[styles.expandedStatValue, styles.expandedStatValueSp]}>{hasAnyRaceResult && item.max_odds > 0 ? decimalToFractional(item.max_odds) : '—'}</Text>
                             </View>
                           </View>
                         )}
@@ -810,20 +826,30 @@ export default function LeaderboardScreen() {
 
                   return (
                     <View key={item.user_id} style={styles.listRowWrap}>
-                      <TouchableOpacity
-                        style={styles.listRow}
-                        onPress={() => setExpandedUserId(isExpanded ? null : item.user_id)}
-                        activeOpacity={0.7}
-                      >
-                        {rowContent}
-                      </TouchableOpacity>
-                      {isExpanded && (
-                      <TouchableOpacity
-                        style={styles.seeSelectionsButton}
-                        onPress={() => openParticipantSelections(item)}
-                      >
-                        <Text style={styles.seeSelectionsButtonText}>See selections</Text>
-                      </TouchableOpacity>
+                      {isExpanded ? (
+                        <View style={styles.expandedDrawerWrap}>
+                          <TouchableOpacity
+                            style={styles.listRow}
+                            onPress={() => setExpandedUserId(null)}
+                            activeOpacity={0.7}
+                          >
+                            {rowContent}
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.seeSelectionsButton}
+                            onPress={() => openParticipantSelections(item)}
+                          >
+                            <Text style={styles.seeSelectionsButtonText}>See selections</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.listRow}
+                          onPress={() => setExpandedUserId(item.user_id)}
+                          activeOpacity={0.7}
+                        >
+                          {rowContent}
+                        </TouchableOpacity>
                       )}
                     </View>
                   );

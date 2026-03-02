@@ -108,6 +108,9 @@ export default function PointsScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Points system</Text>
+      <Text style={[styles.note, { marginTop: 0, marginBottom: theme.spacing.md }]}>
+        Odds and SP values are shown in decimal format throughout the app.
+      </Text>
 
       <Text style={styles.sectionLabel}>Standard (all odds)</Text>
       <View style={styles.table}>

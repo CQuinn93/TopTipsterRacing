@@ -151,14 +151,14 @@ function AppTabs() {
         name="results"
         options={{
           title: 'Results',
-          href: null,
+          tabBarIcon: ({ color, size }) => <Ionicons name="trophy" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="account"
         options={{
           title: 'Account',
-          tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
+          href: null,
         }}
       />
     </Tabs>

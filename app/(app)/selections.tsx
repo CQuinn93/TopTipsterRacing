@@ -67,6 +67,7 @@ export default function SelectionsScreen() {
   const [lockingId, setLockingId] = useState<string | null>(null);
   const [pickingDayIndex, setPickingDayIndex] = useState(0);
   const [selectedRaceIndex, setSelectedRaceIndex] = useState(0);
+  const [userLockedInForPickingDay, setUserLockedInForPickingDay] = useState(false);
   const cameFromRaceDayRef = useRef(false);
 
   useEffect(() => {
@@ -186,11 +187,12 @@ export default function SelectionsScreen() {
     (async () => {
       const { data } = await supabase
         .from('daily_selections')
-        .select('selections')
+        .select('selections, locked_at')
         .eq('competition_id', competitionId)
         .eq('user_id', userId)
         .eq('race_date', selectedDate)
         .maybeSingle();
+      setUserLockedInForPickingDay(!!(data?.locked_at));
       if (data?.selections && typeof data.selections === 'object') {
         const sel: Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }> = {};
         for (const [k, v] of Object.entries(data.selections as Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }>)) {
@@ -386,6 +388,16 @@ export default function SelectionsScreen() {
           justifyContent: 'space-between',
           marginBottom: theme.spacing.sm,
           gap: theme.spacing.md,
+        },
+        backToSelectionsButton: {
+          marginBottom: theme.spacing.sm,
+          alignSelf: 'flex-start',
+        },
+        backToSelectionsButtonText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          color: theme.colors.accent,
+          fontWeight: '500',
         },
         saveButtonInline: {
           backgroundColor: theme.colors.accent,
@@ -1316,9 +1328,12 @@ export default function SelectionsScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <TouchableOpacity style={styles.backToSelectionsButton} onPress={() => router.replace('/(app)/selections')}>
+        <Text style={styles.backToSelectionsButtonText}>← Back to my selections</Text>
+      </TouchableOpacity>
       <View style={styles.pickingHeaderRow}>
         <Text style={styles.sectionTitle}>Make your picks</Text>
-        {currentRaces.length > 0 && !selectionsClosed && (
+        {currentRaces.length > 0 && !selectionsClosed && !userLockedInForPickingDay && (
           <TouchableOpacity
             style={[styles.saveButtonInline, saving && styles.buttonDisabled]}
             onPress={saveSelections}
@@ -1352,6 +1367,12 @@ export default function SelectionsScreen() {
       {selectionsClosed && currentRaces.length > 0 && (
         <View style={styles.closedBanner}>
           <Text style={styles.closedBannerText}>Selections are closed for this race day (1 hour before first race). View only.</Text>
+        </View>
+      )}
+
+      {userLockedInForPickingDay && currentRaces.length > 0 && !selectionsClosed && (
+        <View style={styles.closedBanner}>
+          <Text style={styles.closedBannerText}>Your selections have been locked in and cannot be changed.</Text>
         </View>
       )}
 
@@ -1399,10 +1420,10 @@ export default function SelectionsScreen() {
                   style={[
                     styles.pickingRunnerCard,
                     isSelected && styles.pickingRunnerCardSelected,
-                    selectionsClosed && styles.pickingRunnerCardReadOnly,
+                    (selectionsClosed || userLockedInForPickingDay) && styles.pickingRunnerCardReadOnly,
                   ]}
-                  onPress={() => !selectionsClosed && setSelection(selectedRace.id, r.id, r.name, r.oddsDecimal)}
-                  disabled={selectionsClosed}
+                  onPress={() => !selectionsClosed && !userLockedInForPickingDay && setSelection(selectedRace.id, r.id, r.name, r.oddsDecimal)}
+                  disabled={selectionsClosed || userLockedInForPickingDay}
                   activeOpacity={0.7}
                 >
                   <View style={[styles.pickingRunnerCardInner, isSelected && styles.pickingRunnerCardInnerSelected]}>

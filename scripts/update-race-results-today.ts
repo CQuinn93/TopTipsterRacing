@@ -1,44 +1,30 @@
-import 'dotenv/config';
 
 /**
- * Fetch race results from RapidAPI and update DB: horses (position, sp, non_runner, is_fav, pos_points, sp_points, result_code), races (is_finished).
- * Uses RAPIDAPI_KEY_UPDATE_RESULTS (separate key from pull-races).
+ * Same as update-race-results.ts but runs for ALL races that took place TODAY (race_date = today UTC).
+ * Use this to backfill or re-run results for every race on today's card. Uses the same upsert-style
+ * updates (UPDATE by id) so safe to run when data already exists.
  *
- * Cron: every 30 min from 13:30 to 21:00. Processes up to 2 races per run (MAX_RACES_PER_RUN) where scheduled_time_utc + 15 min < now and is_finished = false.
- * Each such race gets one API call; if results not ready yet, logs and continues. Capped so daily total stays under 50.
- *
- * Logic:
- * 0. Backfill FAV: For race_days where first_race_utc + 1hr <= now and is_backfilled = false, set missing selections to FAV, then set is_backfilled = true.
- * 1. Select races where scheduled_time_utc + 15 min < now AND is_finished = false.
- * 2. For each race: GET /race/{api_race_id}.
- * 3. If results ready: update horses (position, result_code, sp, non_runner from API); determine favourite (lowest SP, tie-break by lowest number); set is_fav, pos_points, sp_points; copy favourite values to FAV row; mark race is_finished; replace non-runner selections with FAV.
- * 4. If not ready: log "No results currently, will check on next run" and continue.
- *
- * FAV: pull-races inserts a horse row per race with api_horse_id='FAV'. Update-race-results sets the actual favourite's is_fav=true and copies that horse's sp, position, pos_points, sp_points, result_code to the FAV row. Non-runner selections are replaced with runnerId 'FAV'.
+ * Process (identical to update-race-results per race):
+ * 1. Select race_days where race_date = today (UTC), then all races for those race days.
+ * 2. For each race: GET /race/{api_race_id} from RapidAPI.
+ * 3. If results ready: update horses (non_runner, position, result_code, sp, is_fav, pos_points, sp_points);
+ *    set FAV row from winning favourite; mark race is_finished; replace any non-runner user selections with FAV.
+ * 4. If not ready: log "No results currently" and continue to next race.
  *
  * Env: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY_UPDATE_RESULTS
  */
 
+import 'dotenv/config';
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY_UPDATE_RESULTS;
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const UPDATE_RESULTS_NOTIFICATION_EMAIL = process.env.UPDATE_RESULTS_NOTIFICATION_EMAIL;
-
-/** Max races to process per run so we stay under 50/day (16 runs × 2 = 32). */
-const MAX_RACES_PER_RUN = 2;
-
-/** Trigger backfill at first_race_utc + 1 hour. */
-const BACKFILL_HOURS_AFTER_FIRST_RACE = 1;
-const FAV_SELECTION = { runnerId: 'FAV', runnerName: 'FAV', oddsDecimal: 0 };
 
 const API_BASE = 'https://horse-racing.p.rapidapi.com';
 const API_HEADERS: Record<string, string> = {
   'x-rapidapi-key': RAPIDAPI_KEY ?? '',
   'x-rapidapi-host': 'horse-racing.p.rapidapi.com',
 };
-
-const MINUTES_AFTER_RACE = 15;
 
 type HorseResult = {
   id_horse?: string;
@@ -61,12 +47,10 @@ async function fetchRaceDetail(idRace: string): Promise<RaceDetailResponse> {
   return res.json();
 }
 
-/** Returns placed positions (1–4) for this race type. Only horses in these positions get points. */
 function getPlacedPositions(isHandicap: boolean, totalRunners: number): number[] {
   if (isHandicap) {
     return totalRunners >= 16 ? [1, 2, 3, 4] : [1, 2, 3];
   }
-  // Non-handicap: <5 = win only; 5–7 = 1st & 2nd; 8+ = 1st, 2nd, 3rd
   if (totalRunners >= 8) return [1, 2, 3];
   if (totalRunners >= 5) return [1, 2];
   if (totalRunners >= 1) return [1];
@@ -74,90 +58,6 @@ function getPlacedPositions(isHandicap: boolean, totalRunners: number): number[]
 }
 
 type RaceRow = { id: string; race_day_id: string; api_race_id: string; name: string };
-
-type RaceDayRow = { id: string; race_date: string; first_race_utc: string; is_backfilled: boolean | null };
-
-/** Run FAV backfill for race days where first_race_utc + 1hr <= now and not yet backfilled. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function runBackfillIfNeeded(supabase: any): Promise<void> {
-  const now = Date.now();
-  const triggerCutoff = new Date(now - BACKFILL_HOURS_AFTER_FIRST_RACE * 60 * 60 * 1000).toISOString();
-  const { data: raceDaysRows } = await supabase
-    .from('race_days')
-    .select('id, race_date, first_race_utc, is_backfilled')
-    .lte('first_race_utc', triggerCutoff)
-    .or('is_backfilled.is.null,is_backfilled.eq.false');
-
-  const toBackfill = (raceDaysRows ?? []) as RaceDayRow[];
-  if (toBackfill.length === 0) return;
-
-  for (const rd of toBackfill) {
-    const firstRaceMs = new Date(rd.first_race_utc).getTime();
-    const triggerTime = firstRaceMs + BACKFILL_HOURS_AFTER_FIRST_RACE * 60 * 60 * 1000;
-    if (now < triggerTime) continue;
-
-    const { data: raceRows } = await supabase.from('races').select('api_race_id').eq('race_day_id', rd.id);
-    const raceIds = (raceRows ?? []).map((r: { api_race_id: string }) => r.api_race_id).filter(Boolean);
-    if (raceIds.length === 0) {
-      await supabase.from('race_days').update({ is_backfilled: true, backfilled_at: new Date().toISOString() }).eq('id', rd.id);
-      continue;
-    }
-
-    const { data: links } = await supabase.from('competition_race_days').select('competition_id').eq('race_day_id', rd.id);
-    const compIds = [...new Set((links ?? []).map((l: { competition_id: string }) => l.competition_id))];
-    if (compIds.length === 0) {
-      await supabase.from('race_days').update({ is_backfilled: true, backfilled_at: new Date().toISOString() }).eq('id', rd.id);
-      continue;
-    }
-
-    let updated = 0;
-    for (const compId of compIds) {
-      const { data: participants } = await supabase.from('competition_participants').select('user_id').eq('competition_id', compId);
-      const userIds = (participants ?? []).map((p: { user_id: string }) => p.user_id);
-      if (userIds.length === 0) continue;
-
-      const { data: existingRows } = await supabase
-        .from('daily_selections')
-        .select('user_id, selections')
-        .eq('competition_id', compId)
-        .eq('race_date', rd.race_date)
-        .in('user_id', userIds);
-
-      const rows = (existingRows ?? []) as { user_id: string; selections: Record<string, unknown> | null }[];
-      const toUpsert: Array<{ competition_id: string; user_id: string; race_date: string; selections: Record<string, unknown>; updated_at: string }> = [];
-
-      for (const userId of userIds) {
-        const row = rows.find((r: { user_id: string }) => r.user_id === userId);
-        const current = (row?.selections && typeof row.selections === 'object' ? row.selections : {}) as Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }>;
-        let changed = false;
-        const next: Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }> = { ...current };
-        for (const raceId of raceIds) {
-          if (next[raceId] == null) {
-            next[raceId] = FAV_SELECTION;
-            changed = true;
-          }
-        }
-        if (changed) {
-          toUpsert.push({
-            competition_id: String(compId),
-            user_id: String(userId),
-            race_date: rd.race_date,
-            selections: next as unknown as Record<string, unknown>,
-            updated_at: new Date().toISOString(),
-          });
-        }
-      }
-
-      if (toUpsert.length > 0) {
-        const { error: upsertErr } = await supabase.from('daily_selections').upsert(toUpsert, { onConflict: 'competition_id,user_id,race_date' });
-        if (!upsertErr) updated += toUpsert.length;
-      }
-    }
-
-    await supabase.from('race_days').update({ is_backfilled: true, backfilled_at: new Date().toISOString() }).eq('id', rd.id);
-    if (updated > 0) console.log(`  [backfill] Race day ${rd.race_date}: ${updated} selection row(s) backfilled with FAV.`);
-  }
-}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min_decimal: string | number; max_decimal: string | number; points: number; type: string }[]): Promise<boolean> {
@@ -198,7 +98,6 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
     return byName.get((h.horse ?? '').trim().toLowerCase())?.id ?? null;
   };
 
-  // Update non_runner from API for every horse we can match
   const now = new Date().toISOString();
   for (const h of horses) {
     const horseId = getHorseId(h);
@@ -238,7 +137,6 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
     }
   }
 
-  // FAV = lowest SP; if tie, lowest number wins (exclude FAV row)
   const minSp = Math.min(...spByHorseId.values(), Infinity);
   const candidatesWithMinSp = minSp !== Infinity
     ? [...spByHorseId.entries()].filter(([, s]) => s === minSp).map(([id]) => ({ id, number: numberByHorseId.get(id) ?? Infinity }))
@@ -269,17 +167,14 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
     return pts > 0 ? pts : (position === 1 ? 5 : 1);
   }
 
-  /** Bonus points only (by SP range and win/place category). Standard points go in pos_points. */
   function getSpPoints(sp: number, position: number): number | null {
     if (pointsRows.length === 0) return null;
     const bonusType = position === 1 ? 'bonus_win' : 'bonus_place';
     return lookupRangePoints(sp, bonusType);
   }
 
-  // Clear is_fav for all horses in the race
   await supabase.from('horses').update({ is_fav: false, updated_at: now }).eq('race_id', raceRow.id);
 
-  // Update each horse: position, result_code, sp, is_fav, pos_points, sp_points (and save favourite payload for FAV row)
   let favPayload: { sp: number; position: number | null; result_code: string | null; pos_points: number; sp_points: number } | null = null;
 
   for (const { horseId, position, resultCode, sp } of horsesToUpdate) {
@@ -313,7 +208,6 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
     await supabase.from('horses').update(payload).eq('id', horseId);
   }
 
-  // Assign the same values as the race favourite to the FAV row for this race
   if (favRowId && favPayload) {
     await supabase
       .from('horses')
@@ -333,7 +227,6 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
     .update({ is_finished: true, updated_at: now })
     .eq('id', raceRow.id);
 
-  // Non-runners from DB (after we've updated non_runner from API); replace any user selection matching them with FAV
   const { data: dbNonRunners } = await supabase
     .from('horses')
     .select('api_horse_id, name')
@@ -408,68 +301,15 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
   return true;
 }
 
-type UpdateResultsReport = {
-  status: 'no_races_due' | 'success' | 'partial' | 'no_results_ready';
-  message: string;
-  apiCallsMade: number;
-  racesUpdated: number;
-  racesAttempted: number;
-  error?: string;
-};
-
-function updateResultsReportToText(report: UpdateResultsReport): string {
-  const lines: string[] = [
-    'Update Race Results Report',
-    '',
-    `Status: ${report.status}`,
-    report.message,
-    '',
-    `API calls made: ${report.apiCallsMade} (limit ${MAX_RACES_PER_RUN} per run, 50/day total for this key)`,
-    `Races updated: ${report.racesUpdated} of ${report.racesAttempted} attempted`,
-    '',
-  ];
-  if (report.error) {
-    lines.push('Error: ' + report.error);
-  }
-  return lines.join('\n');
-}
-
-async function sendUpdateResultsEmail(report: UpdateResultsReport): Promise<void> {
-  if (!RESEND_API_KEY || !UPDATE_RESULTS_NOTIFICATION_EMAIL) return;
-  const subject = `[Update Results] ${report.status} – ${report.apiCallsMade} API call(s)`;
-  const text = updateResultsReportToText(report);
-  try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${RESEND_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from: 'Update Results <onboarding@resend.dev>',
-        to: [UPDATE_RESULTS_NOTIFICATION_EMAIL],
-        subject,
-        text,
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      console.warn('[update-race-results] Email send failed:', res.status, err);
-    } else {
-      console.log('[update-race-results] Report sent to', UPDATE_RESULTS_NOTIFICATION_EMAIL);
-    }
-  } catch (e) {
-    console.warn('[update-race-results] Email send error:', e);
-  }
-}
-
 async function main() {
-  // Debug: log env presence (never log secret values)
-  console.log('[update-race-results] Env check:', {
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
+
+  console.log('[update-race-results-today] Env check:', {
     SUPABASE_URL: SUPABASE_URL ? `set (${SUPABASE_URL.length} chars)` : 'MISSING',
     SUPABASE_SERVICE_KEY: SUPABASE_KEY ? 'set' : 'MISSING',
     RAPIDAPI_KEY_UPDATE_RESULTS: RAPIDAPI_KEY ? 'set' : 'MISSING',
   });
+  console.log('[update-race-results-today] Today (UTC):', today);
 
   if (!SUPABASE_URL || !SUPABASE_KEY) {
     console.error('Set SUPABASE_URL and SUPABASE_SERVICE_KEY');
@@ -483,33 +323,30 @@ async function main() {
   const { createClient } = await import('@supabase/supabase-js');
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-  await runBackfillIfNeeded(supabase);
+  const { data: dayRows } = await supabase
+    .from('race_days')
+    .select('id')
+    .eq('race_date', today);
 
-  const after = new Date();
-  after.setMinutes(after.getMinutes() - MINUTES_AFTER_RACE);
+  const raceDayIds = (dayRows ?? []).map((r: { id: string }) => r.id).filter(Boolean);
+  if (raceDayIds.length === 0) {
+    console.log(`No race days found for today (race_date = ${today}).`);
+    return;
+  }
 
   const { data: raceRows } = await supabase
     .from('races')
     .select('id, race_day_id, api_race_id, name')
-    .eq('is_finished', false)
-    .lt('scheduled_time_utc', after.toISOString())
-    .order('scheduled_time_utc', { ascending: true })
-    .limit(MAX_RACES_PER_RUN);
+    .in('race_day_id', raceDayIds)
+    .order('scheduled_time_utc', { ascending: true });
 
   const races = (raceRows ?? []) as RaceRow[];
   if (races.length === 0) {
-    console.log('No races due for results (scheduled_time_utc + 15 min < now, is_finished = false).');
-    await sendUpdateResultsEmail({
-      status: 'no_races_due',
-      message: 'No races due for results. No API calls made.',
-      apiCallsMade: 0,
-      racesUpdated: 0,
-      racesAttempted: 0,
-    });
+    console.log(`No races found for today (${today}).`);
     return;
   }
 
-  console.log(`Found ${races.length} race(s) due for results.`);
+  console.log(`Found ${races.length} race(s) for today (${today}).`);
 
   type PointsRow = { min_decimal: string | number; max_decimal: string | number; points: number; type: string };
   let pointsRows: PointsRow[] = [];
@@ -524,22 +361,6 @@ async function main() {
   }
 
   console.log(`Done. Updated ${updated} of ${races.length} race(s).`);
-
-  const apiCallsMade = races.length;
-  const status =
-    updated === races.length ? 'success' : updated > 0 ? 'partial' : 'no_results_ready';
-  await sendUpdateResultsEmail({
-    status,
-    message:
-      updated === races.length
-        ? `Updated results for all ${updated} race(s).`
-        : updated > 0
-          ? `Updated ${updated} of ${races.length} race(s). Some may not have had results ready yet.`
-          : `No results ready yet for the ${races.length} race(s) attempted.`,
-    apiCallsMade,
-    racesUpdated: updated,
-    racesAttempted: races.length,
-  });
 }
 
 main().catch((e) => {

@@ -135,11 +135,11 @@ export function AppSidebar() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuButton}
-              onPress={() => goTo('/(app)/results')}
+              onPress={() => goTo('/(app)/account')}
               activeOpacity={0.7}
             >
-              <Ionicons name="trophy-outline" size={22} color={theme.colors.accent} />
-              <Text style={styles.menuButtonText}>Results</Text>
+              <Ionicons name="person-outline" size={22} color={theme.colors.accent} />
+              <Text style={styles.menuButtonText}>Account</Text>
               <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
             </TouchableOpacity>
           </View>
