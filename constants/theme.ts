@@ -1,6 +1,6 @@
 /**
  * Theme: black, white, greys, green only.
- * Font: Roundex (loaded in _layout).
+ * Font: Laraz Regular / Laraz Light (loaded in _layout).
  * Supports light and dark mode based on system preference.
  */
 
@@ -21,7 +21,8 @@ const radius = {
 } as const;
 
 const fontFamily = {
-  regular: 'Roundex',
+  regular: 'Laraz-Regular',
+  light: 'Laraz-Light',
   input: 'Arial, Helvetica, sans-serif',
   polygon: 'Polygon-Regular',
   polygonItalic: 'Polygon-Italic',

@@ -6,11 +6,18 @@ Areas where the app can be made more efficient (network, CPU, memory). Ordered b
 
 ## Egress (data transfer) – free tier
 
-To keep Supabase egress low:
+**Supabase “cached egress”** applies only to **Storage** (file downloads). Their Smart CDN makes *Storage* egress cheaper when served from cache. It does **not** apply to Database/PostgREST. So to save **database** egress you need to:
+- **Reduce how often you hit the DB** (use client-side cache so repeat views don’t refetch), and/or
+- **Reduce payload size** (select only needed columns, fewer rows).
+
+What this app does:
 
 - **Competitions list** does **not** fetch race days or horses. It only loads `daily_selections` (and participants, competitions). "Your position" there uses an odds-based sum so it can be approximate; **leaderboard** uses full DB points (pos_points + sp_points) when you open a competition.
 - **Leaderboard** and **participant-selections** fetch race days (with races + horses) for **one** competition at a time. Horses select includes `pos_points`, `sp_points` (two extra columns); the rest was already loaded.
 - **Caches** (AsyncStorage): leaderboard bulk, selections bulk, available races, latest results – reduce repeat fetches when the user stays in the app.
+- **Leaderboard cache-on-load**: opening the same competition again within a few minutes uses the local cache and only fetches light data (comp + participants + profiles), saving the large race-days + horses + daily_selections egress.
+
+If you use **Supabase Storage** (e.g. for images or assets), enable the Smart CDN and set cache headers to benefit from cached egress pricing there.
 
 To get **exact** DB points on the competitions list with minimal egress you’d need a **DB-side** solution, e.g. an RPC or view that returns `(competition_id, user_id, total_points)` so the app does one small query instead of pulling all race/horse data.
 
@@ -101,7 +108,7 @@ So opening the leaderboard always does a full fetch, even if you just left it an
 | # | Area | Impact | Effort | Status |
 |---|------|--------|--------|--------|
 | 1 | Parallelise race-days fetches | High | Low | Done |
-| 2 | Leaderboard use cache on load | Medium | Low | Recommended |
+| 2 | Leaderboard use cache on load | Medium | Low | Done |
 | 3 | useMemo for derived lists | Low–Medium | Low | Recommended |
 | 4 | Parallel cache reads (participant-selections) | Low | Low | Optional |
 | 5 | Shared cache / pass data Home → Selections | Medium | Medium | Optional |

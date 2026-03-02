@@ -42,9 +42,10 @@ type SelectionRow = { competition_id: string; race_date: string; selections: Rec
 
 function getPlacedPositions(isHandicap: boolean, totalRunners: number): number[] {
   if (isHandicap) return totalRunners >= 16 ? [1, 2, 3, 4] : [1, 2, 3];
-  if (totalRunners >= 15) return [1, 2, 3];
-  if (totalRunners > 7) return [1, 2];
-  if (totalRunners >= 4) return [1];
+  // Non-handicap: <5 = win only; 5–7 = 1st & 2nd; 8+ = 1st, 2nd, 3rd
+  if (totalRunners >= 8) return [1, 2, 3];
+  if (totalRunners >= 5) return [1, 2];
+  if (totalRunners >= 1) return [1];
   return [];
 }
 

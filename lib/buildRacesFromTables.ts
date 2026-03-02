@@ -31,9 +31,10 @@ type HorseRow = {
 /** Must match scripts/update-race-results.ts getPlacedPositions. Only these positions count as "placed". */
 function getPlacedPositions(isHandicap: boolean, totalRunners: number): number[] {
   if (isHandicap) return totalRunners >= 16 ? [1, 2, 3, 4] : [1, 2, 3];
-  if (totalRunners >= 15) return [1, 2, 3];
-  if (totalRunners > 7) return [1, 2];
-  if (totalRunners >= 4) return [1];
+  // Non-handicap: <5 = win only; 5–7 = 1st & 2nd; 8+ = 1st, 2nd, 3rd
+  if (totalRunners >= 8) return [1, 2, 3];
+  if (totalRunners >= 5) return [1, 2];
+  if (totalRunners >= 1) return [1];
   return [];
 }
 
@@ -48,7 +49,7 @@ function positionLabel(position: number, isHandicap: boolean, totalRunners: numb
   return positionLabelFromPlaced(position, placed);
 }
 
-/** Build Race shape from race row + horse rows. Adds FAV runner; results from horses with position. */
+/** Build Race shape from race row + horse rows. Includes FAV runner from DB if present; otherwise adds it. */
 function buildRace(race: RaceRow, horses: HorseRow[]): Race {
   const runners: Runner[] = horses.map((h) => ({
     id: h.api_horse_id,
@@ -57,7 +58,9 @@ function buildRace(race: RaceRow, horses: HorseRow[]): Race {
     number: h.number != null ? parseInt(h.number, 10) : undefined,
     jockey: h.jockey ?? undefined,
   }));
-  runners.push({ id: 'FAV', name: 'FAV', oddsDecimal: 0 });
+  if (!runners.some((r) => r.id === 'FAV')) {
+    runners.push({ id: 'FAV', name: 'FAV', oddsDecimal: 0 });
+  }
 
   const isHandicap = race.is_handicap ?? false;
   const horsesWithResult = horses.filter((h) => (h.position != null && h.position >= 1) || (h.result_code != null && String(h.result_code).trim() !== ''));

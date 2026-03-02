@@ -35,7 +35,8 @@ function RootLayoutContent() {
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
-    Roundex: require('../assets/fonts/Roundex.otf'),
+    'Laraz-Regular': require('../assets/fonts/LARAZ Regular.ttf'),
+    'Laraz-Light': require('../assets/fonts/LARAZ Light.ttf'),
     'Polygon-Regular': require('../assets/fonts/Polygon-Regular.otf'),
     'Polygon-Italic': require('../assets/fonts/Polygon-Italic.otf'),
   });

@@ -19,6 +19,7 @@ import { displayHorseName } from '@/lib/displayHorseName';
 import { decimalToFractional } from '@/lib/oddsFormat';
 import { getLatestResultsForUser } from '@/lib/latestResultsCache';
 import type { MeetingResults, RaceResultTemplate } from '@/lib/resultsTemplateForUser';
+import { useRealtimeRaces } from '@/lib/useRealtimeRaces';
 
 export default function ResultsScreen() {
   const theme = useTheme();
@@ -31,6 +32,9 @@ export default function ResultsScreen() {
   const [meetingDropdownOpen, setMeetingDropdownOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastManualRefreshAt, setLastManualRefreshAt] = useState<number | null>(null);
+  /** Race api_race_ids currently shown; used by Realtime to refetch when results land. */
+  const [resultsRaceApiIds, setResultsRaceApiIds] = useState<string[]>([]);
 
   const loadResults = useCallback(
     async (forceRefresh = false) => {
@@ -59,9 +63,13 @@ export default function ResultsScreen() {
   );
 
   const onRefresh = useCallback(() => {
+    if (refreshing) return;
+    const now = Date.now();
+    if (lastManualRefreshAt != null && now - lastManualRefreshAt < 30_000) return;
+    setLastManualRefreshAt(now);
     setRefreshing(true);
     loadResults(true);
-  }, [loadResults]);
+  }, [loadResults, lastManualRefreshAt, refreshing]);
 
   useEffect(() => {
     setLoading(true);
@@ -69,7 +77,11 @@ export default function ResultsScreen() {
   }, [userId]);
 
   useEffect(() => {
-    if (meetingResults.length === 0) return;
+    if (meetingResults.length === 0) {
+      setResultsRaceApiIds([]);
+      return;
+    }
+    setResultsRaceApiIds(meetingResults.flatMap((m) => m.races.map((r) => r.raceId)));
     const courses = meetingResults.map((m) => m.course);
     setSelectedMeetingCourse((prev) => (prev && courses.includes(prev) ? prev : meetingResults[0].course));
     setSelectedRaceIndex(0);
@@ -88,6 +100,8 @@ export default function ResultsScreen() {
       return prev;
     });
   }, [meetingResults]);
+
+  useRealtimeRaces(resultsRaceApiIds, () => loadResults(true));
 
   const availableDates = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);

@@ -22,6 +22,8 @@ export type HomeSummaryByComp = {
 function getResultForPick(race: Race, runnerId: string): RaceResult | null {
   const results = race.results ?? {};
   if (runnerId === 'FAV') {
+    // Prefer FAV row result when present (set by update-race-results)
+    if (results['FAV']) return results['FAV'] as RaceResult;
     const favId = Object.entries(results).reduce<string | null>((best, [id, r]) => {
       const sp = (r as RaceResult)?.sp ?? Infinity;
       return !best || sp < ((results[best] as RaceResult)?.sp ?? Infinity) ? id : best;

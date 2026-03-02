@@ -2,7 +2,8 @@
 
 Place these font files in this folder:
 
-- **Roundex.otf** – primary font (black, white, grey and green theme)
+- **LARAZ Regular.ttf** – primary font (body text, headings)
+- **LARAZ Light.ttf** – light weight (use via `theme.fontFamily.light`)
 - **Polygon-Regular.otf** – used for Results section
 - **Polygon-Italic.otf** – used for "Your selection" text in Results
 

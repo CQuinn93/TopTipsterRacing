@@ -111,18 +111,34 @@ export default function ParticipantSelectionsScreen() {
           position: 'relative',
         },
         selectionRowInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flex: 1 },
-        selectionLeft: { flex: 1 },
+        selectionLeft: { flex: 1, paddingRight: activeTheme.spacing.md },
         selectionRight: { flexDirection: 'row', alignItems: 'center', gap: activeTheme.spacing.sm },
-        raceNameSmall: {
+        raceTimeSmall: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 11,
+          fontWeight: '600',
+          color: '#fff',
+          marginBottom: activeTheme.spacing.sm,
+        },
+        columnHeader: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 9,
+          color: activeTheme.colors.textMuted,
+        },
+        pickRow: { flexDirection: 'row', alignItems: 'center', gap: activeTheme.spacing.xs, marginTop: activeTheme.spacing.xs, paddingTop: activeTheme.spacing.xs },
+        pickNumber: {
           fontFamily: activeTheme.fontFamily.regular,
           fontSize: 12,
-          color: activeTheme.colors.textMuted,
+          color: activeTheme.colors.textSecondary,
+          minWidth: 18,
         },
         pickName: {
           fontFamily: activeTheme.fontFamily.regular,
-          fontSize: 15,
+          fontSize: 14,
           color: activeTheme.colors.text,
           fontWeight: '600',
+          paddingLeft: activeTheme.spacing.sm,
+          paddingRight: activeTheme.spacing.md,
         },
         placeBadge: {
           fontFamily: activeTheme.fontFamily.regular,
@@ -130,17 +146,27 @@ export default function ParticipantSelectionsScreen() {
           paddingHorizontal: activeTheme.spacing.sm,
           paddingVertical: 2,
           borderRadius: activeTheme.radius.sm,
+          minWidth: 50,
+          textAlign: 'center',
         },
         place_won: { color: '#166534', backgroundColor: 'rgba(34, 197, 94, 0.2)' },
         place_place: { color: '#a16207', backgroundColor: 'rgba(234, 179, 8, 0.2)' },
         place_lost: { color: '#991b1b', backgroundColor: 'rgba(239, 68, 68, 0.15)' },
+        oddsText: {
+          fontFamily: activeTheme.fontFamily.regular,
+          fontSize: 11,
+          color: activeTheme.colors.textMuted,
+        },
         pointsText: {
           fontFamily: activeTheme.fontFamily.regular,
-          fontSize: 14,
-          color: activeTheme.colors.accent,
+          fontSize: 13,
+          color: activeTheme.colors.text,
           minWidth: 48,
           textAlign: 'right',
         },
+        points_won: { color: '#166534' },
+        points_place: { color: '#a16207' },
+        points_lost: { color: '#991b1b' },
         dayTotalRow: {
           flexDirection: 'row',
           justifyContent: 'space-between',
@@ -349,10 +375,11 @@ export default function ParticipantSelectionsScreen() {
     })();
   }, [competitionId, participantUserId, currentUserId]);
 
-  /** Resolve result for pick (handles FAV = horse with lowest SP). */
+  /** Resolve result for pick (handles FAV: prefer FAV row result when present). */
   const getResultForPick = (race: Race, runnerId: string): RaceResult | null => {
     const results = race.results ?? {};
     if (runnerId === 'FAV') {
+      if (results['FAV']) return results['FAV'] as RaceResult;
       const favId = Object.entries(results).reduce<string | null>((best, [id, r]) => {
         const sp = (r as RaceResult)?.sp ?? Infinity;
         return !best || sp < ((results[best] as RaceResult)?.sp ?? Infinity) ? id : best;
@@ -438,6 +465,11 @@ export default function ParticipantSelectionsScreen() {
                     const pick = selections[race.id];
                     const result = pick ? getResultForPick(race as Race, pick.runnerId) : null;
                     const position = result?.positionLabel ?? pick?.position;
+                    const oddsDecimal = result?.sp != null && Number.isFinite(result.sp) && result.sp > 0
+                      ? result.sp
+                      : (pick?.oddsDecimal ?? null);
+                    const runner = pick ? (race.runners ?? []).find((r) => r.id === pick.runnerId) : null;
+                    const horseNumber = runner?.number != null ? String(runner.number) : pick?.runnerId === 'FAV' ? 'F' : null;
                     const pts = pick ? pointsFromResult(result) : 0;
                     const dbPos = result != null && (result.pos_points != null || result.sp_points != null)
                       ? (result.pos_points ?? 0)
@@ -463,8 +495,22 @@ export default function ParticipantSelectionsScreen() {
                       >
                         <View style={styles.selectionRowInner}>
                           <View style={styles.selectionLeft}>
-                            <Text style={styles.raceNameSmall}>{race.name}</Text>
-                            <Text style={styles.pickName}>{pick ? displayHorseName(pick.runnerName) : 'No selection'}</Text>
+                            <Text style={styles.raceTimeSmall}>
+                              {race.scheduledTimeUtc
+                                ? new Date(race.scheduledTimeUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+                                : ''}
+                            </Text>
+                            <View style={[styles.pickRow, { marginTop: 0, paddingTop: 0 }]}>
+                              <Text style={[styles.pickNumber, styles.columnHeader]}>no.</Text>
+                              <Text style={[styles.pickName, styles.columnHeader]}>Name</Text>
+                            </View>
+                            <View style={styles.pickRow}>
+                              <Text style={styles.pickNumber}>{horseNumber ?? '—'}</Text>
+                              <Text style={styles.pickName}>{pick ? displayHorseName(pick.runnerName) : 'No selection'}</Text>
+                              {pick && oddsDecimal != null ? (
+                                <Text style={styles.oddsText}>{decimalToFractional(oddsDecimal)}</Text>
+                              ) : null}
+                            </View>
                           </View>
                           <View style={styles.selectionRight}>
                             <Text
@@ -477,7 +523,16 @@ export default function ParticipantSelectionsScreen() {
                             >
                               {placeLabel(position)}
                             </Text>
-                            <Text style={styles.pointsText}>{pick ? `${pts} pts` : '—'}</Text>
+                            <Text
+                              style={[
+                                styles.pointsText,
+                                position === 'won' && styles.points_won,
+                                position === 'place' && styles.points_place,
+                                position === 'lost' && styles.points_lost,
+                              ]}
+                            >
+                              {pick ? `${pts} pts` : '—'}
+                            </Text>
                           </View>
                         </View>
                       </TouchableOpacity>

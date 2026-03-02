@@ -509,6 +509,28 @@ async function main() {
     if (horsesErr) console.error('horses insert', horsesErr);
   }
 
+  // Insert one FAV row per race so update-race-results can assign the favourite's result to it
+  const favHorsesToInsert = (insertedRaces as { id: string }[]).map((row) => ({
+    race_id: row.id,
+    api_horse_id: 'FAV',
+    name: 'FAV',
+    jockey: null,
+    trainer: null,
+    age: null,
+    weight: null,
+    number: null,
+    last_ran_days_ago: null,
+    non_runner: '0',
+    form: null,
+    owner: null,
+    odds_decimal: null,
+  }));
+  if (favHorsesToInsert.length > 0) {
+    const { error: favErr } = await supabase.from('horses').insert(favHorsesToInsert);
+    if (favErr) console.error('FAV horses insert', favErr);
+    else console.log(`  Inserted ${favHorsesToInsert.length} FAV row(s) (one per race)`);
+  }
+
   const competitionRaceDaysToUpsert = activeCompetitions
     .filter((c) => courseToRaceDayId.has(c.course))
     .map((c) => ({ competition_id: c.competition_id, race_day_id: courseToRaceDayId.get(c.course)! }));

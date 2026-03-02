@@ -40,7 +40,8 @@
         "expo-font",
         {
           "fonts": [
-            "./assets/fonts/Roundex.otf"
+            "./assets/fonts/LARAZ Regular.ttf",
+            "./assets/fonts/LARAZ Light.ttf"
           ]
         }
       ],

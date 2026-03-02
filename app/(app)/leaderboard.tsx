@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,8 +14,11 @@ import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
 import { displayHorseName } from '@/lib/displayHorseName';
 import { decimalToFractional } from '@/lib/oddsFormat';
-import { setLeaderboardBulkCache } from '@/lib/leaderboardBulkCache';
+import { getLeaderboardBulkCache, setLeaderboardBulkCache } from '@/lib/leaderboardBulkCache';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
+import { useRealtimeRaces } from '@/lib/useRealtimeRaces';
+
+const LEADERBOARD_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes – use cache to save egress on repeat visits
 import type { Race, RaceResult } from '@/types/races';
 
 type LeaderboardRow = {
@@ -58,32 +61,71 @@ export default function LeaderboardScreen() {
   const [raceDates, setRaceDates] = useState<string[]>([]);
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastManualRefreshAt, setLastManualRefreshAt] = useState<number | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [leaderboardFilter, setLeaderboardFilter] = useState<'daily' | 'overall' | 'sp'>('overall');
   const [hasAnyRaceResult, setHasAnyRaceResult] = useState(false);
+  /** Race api_race_ids for current competition; used by Realtime to refetch when results land. */
+  const [leaderboardRaceApiIds, setLeaderboardRaceApiIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (competitionId) setSelectedId(competitionId);
   }, [competitionId]);
 
-  const loadLeaderboard = async () => {
+  const loadLeaderboard = async (forceRefresh = false) => {
     if (!selectedId) return;
     const now = new Date();
     setRefreshing(true);
     try {
-      const [raceDaysData, partsRes, selectionsRes, compRes] = await Promise.all([
-        fetchRaceDaysForCompetition(supabase, selectedId, 'id, race_date, races'),
-        supabase
-          .from('competition_participants')
-          .select('user_id, display_name')
-          .eq('competition_id', selectedId),
-        supabase
-          .from('daily_selections')
-          .select('user_id, race_date, selections')
-          .eq('competition_id', selectedId),
-        supabase.from('competitions').select('name, festival_start_date, festival_end_date').eq('id', selectedId).maybeSingle(),
-      ]);
+      let raceDaysRows: { id: string; race_date: string; races: unknown[] }[];
+      let selectionsDataForPoints: { user_id: string; race_date: string; selections: Record<string, { runnerId?: string; runnerName?: string; oddsDecimal?: number }> | null }[];
+      let compRes: { data: { name?: string; festival_start_date?: string; festival_end_date?: string } | null };
+      let partsRes: { data: { user_id: string; display_name: string }[] | null };
+
+      const cached = !forceRefresh ? await getLeaderboardBulkCache(selectedId) : null;
+      const useCache = cached && (Date.now() - new Date(cached.fetchedAt).getTime() < LEADERBOARD_CACHE_TTL_MS);
+
+      if (useCache && cached) {
+        raceDaysRows = cached.raceDays;
+        selectionsDataForPoints = [];
+        for (const [uid, byDate] of Object.entries(cached.selectionsByUser)) {
+          for (const [date, sel] of Object.entries(byDate)) {
+            selectionsDataForPoints.push({ user_id: uid, race_date: date, selections: sel });
+          }
+        }
+        const [compResF, partsResF] = await Promise.all([
+          supabase.from('competitions').select('name, festival_start_date, festival_end_date').eq('id', selectedId).maybeSingle(),
+          supabase.from('competition_participants').select('user_id, display_name').eq('competition_id', selectedId),
+        ]);
+        compRes = compResF;
+        partsRes = partsResF;
+      } else {
+        const [raceDaysData, partsResF, selectionsRes, compResF] = await Promise.all([
+          fetchRaceDaysForCompetition(supabase, selectedId, 'id, race_date, races'),
+          supabase.from('competition_participants').select('user_id, display_name').eq('competition_id', selectedId),
+          supabase.from('daily_selections').select('user_id, race_date, selections').eq('competition_id', selectedId),
+          supabase.from('competitions').select('name, festival_start_date, festival_end_date').eq('id', selectedId).maybeSingle(),
+        ]);
+        compRes = compResF;
+        partsRes = partsResF;
+        raceDaysRows = (raceDaysData ?? []) as { id: string; race_date: string; races: unknown[] }[];
+        selectionsDataForPoints = (selectionsRes.data ?? []) as { user_id: string; race_date: string; selections: Record<string, { runnerId?: string; runnerName?: string; oddsDecimal?: number }> | null }[];
+        const selectionsByUser: Record<string, Record<string, Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }>>> = {};
+        for (const s of selectionsDataForPoints) {
+          const sel = s.selections;
+          if (!sel || typeof sel !== 'object') continue;
+          if (!selectionsByUser[s.user_id]) selectionsByUser[s.user_id] = {};
+          const normalized: Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }> = {};
+          for (const [raceId, v] of Object.entries(sel)) {
+            if (v && typeof v.oddsDecimal === 'number') {
+              normalized[raceId] = { runnerId: v.runnerId ?? '', runnerName: v.runnerName ?? '', oddsDecimal: v.oddsDecimal };
+            }
+          }
+          selectionsByUser[s.user_id][s.race_date] = normalized;
+        }
+        await setLeaderboardBulkCache(selectedId, { raceDays: raceDaysRows.slice(0, 4).map((d) => ({ id: d.id, race_date: d.race_date, races: d.races ?? [] })), selectionsByUser });
+      }
 
       const compRow = compRes.data as { name?: string; festival_start_date?: string; festival_end_date?: string } | null;
       setCompetitionName(compRow?.name ?? '');
@@ -94,6 +136,7 @@ export default function LeaderboardScreen() {
       if (!parts.length) {
         setRows([]);
         setRaceDates([]);
+        setLeaderboardRaceApiIds([]);
         setCompetitionName(compRow?.name ?? '');
         setFestivalStart(compRow?.festival_start_date ?? null);
         setFestivalEnd(compRow?.festival_end_date ?? null);
@@ -101,30 +144,9 @@ export default function LeaderboardScreen() {
         return;
       }
 
-      const raceDaysRows = (raceDaysData ?? []) as { id: string; race_date: string; races: unknown[] }[];
       const orderedDates = raceDaysRows.slice(0, 4).map((d) => d.race_date);
       setRaceDates(orderedDates);
-
-      const selectionsByUser: Record<string, Record<string, Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }>>> = {};
-      for (const s of selectionsRes.data ?? []) {
-        const row = s as { user_id: string; race_date: string; selections: Record<string, { runnerId?: string; runnerName?: string; oddsDecimal?: number }> | null };
-        const sel = row.selections;
-        if (!sel || typeof sel !== 'object') continue;
-        if (!selectionsByUser[row.user_id]) selectionsByUser[row.user_id] = {};
-        const normalized: Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }> = {};
-        for (const [raceId, v] of Object.entries(sel)) {
-          if (v && typeof v.oddsDecimal === 'number') {
-            normalized[raceId] = {
-              runnerId: v.runnerId ?? '',
-              runnerName: v.runnerName ?? '',
-              oddsDecimal: v.oddsDecimal,
-            };
-          }
-        }
-        selectionsByUser[row.user_id][row.race_date] = normalized;
-      }
-      const bulkRaceDays = raceDaysRows.slice(0, 4).map((d) => ({ id: d.id, race_date: d.race_date, races: d.races ?? [] }));
-      await setLeaderboardBulkCache(selectedId, { raceDays: bulkRaceDays, selectionsByUser });
+      setLeaderboardRaceApiIds([...new Set(raceDaysRows.flatMap((d) => ((d.races ?? []) as Race[]).map((r) => r.id)))]);
 
       const usernameByUserId: Record<string, string> = {};
       const { data: profiles } = await supabase.from('profiles').select('id, username').in('id', parts.map((p) => p.user_id));
@@ -158,8 +180,8 @@ export default function LeaderboardScreen() {
         return races.some((r) => r.results != null && Object.keys(r.results ?? {}).length > 0);
       });
 
-      for (const s of selectionsRes.data ?? []) {
-        const row = s as { user_id: string; race_date: string; selections: Record<string, { runnerId?: string; runnerName?: string; oddsDecimal?: number }> | null };
+      for (const s of selectionsDataForPoints) {
+        const row = s;
         const sel = row.selections;
         if (!sel) continue;
         const uid = row.user_id;
@@ -173,11 +195,13 @@ export default function LeaderboardScreen() {
           if (race?.results) {
             const runnerId = v.runnerId ?? '';
             if (runnerId === 'FAV') {
-              const favId = Object.entries(race.results).reduce<string | null>((best, [id, r]) => {
-                const sp = (r as RaceResult)?.sp ?? Infinity;
-                return !best || sp < ((race.results?.[best] as RaceResult)?.sp ?? Infinity) ? id : best;
-              }, null);
-              result = favId ? (race.results[favId] as RaceResult) : undefined;
+              result = (race.results['FAV'] as RaceResult) ?? (() => {
+                const favId = Object.entries(race.results).reduce<string | null>((best, [id, r]) => {
+                  const sp = (r as RaceResult)?.sp ?? Infinity;
+                  return !best || sp < ((race.results?.[best] as RaceResult)?.sp ?? Infinity) ? id : best;
+                }, null);
+                return favId ? (race.results[favId] as RaceResult) : undefined;
+              })();
             } else {
               result = race.results[runnerId] as RaceResult | undefined;
             }
@@ -276,6 +300,16 @@ export default function LeaderboardScreen() {
       setRefreshing(false);
     }
   };
+
+  useRealtimeRaces(leaderboardRaceApiIds, () => loadLeaderboard(true));
+
+  const onRefresh = useCallback(() => {
+    if (refreshing) return;
+    const now = Date.now();
+    if (lastManualRefreshAt != null && now - lastManualRefreshAt < 30_000) return;
+    setLastManualRefreshAt(now);
+    loadLeaderboard(true);
+  }, [lastManualRefreshAt, loadLeaderboard, refreshing]);
 
   useEffect(() => {
     loadLeaderboard();
@@ -595,7 +629,7 @@ export default function LeaderboardScreen() {
         style={styles.outerScroll}
         contentContainerStyle={styles.outerScrollContent}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={loadLeaderboard} tintColor={theme.colors.accent} />
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} />
         }
         showsVerticalScrollIndicator={true}
       >

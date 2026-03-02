@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
 /**
- * Fetch race results from RapidAPI and update DB: horses (position, sp, is_fav, pos_points, sp_points), races (is_finished).
+ * Fetch race results from RapidAPI and update DB: horses (position, sp, non_runner, is_fav, pos_points, sp_points, result_code), races (is_finished).
  * Uses RAPIDAPI_KEY_UPDATE_RESULTS (separate key from pull-races).
  *
  * Cron: every 30 min from 13:30 to 21:00. Processes up to 2 races per run (MAX_RACES_PER_RUN) where scheduled_time_utc + 15 min < now and is_finished = false.
@@ -10,8 +10,10 @@ import 'dotenv/config';
  * Logic:
  * 1. Select races where scheduled_time_utc + 15 min < now AND is_finished = false.
  * 2. For each race: GET /race/{api_race_id}.
- * 3. If results ready: update horses, mark race is_finished, replace non-runner selections.
+ * 3. If results ready: update horses (position, result_code, sp, non_runner from API); determine favourite (lowest SP, tie-break by lowest number); set is_fav, pos_points, sp_points; copy favourite values to FAV row; mark race is_finished; replace non-runner selections with FAV.
  * 4. If not ready: log "No results currently, will check on next run" and continue.
+ *
+ * FAV: pull-races inserts a horse row per race with api_horse_id='FAV'. Update-race-results sets the actual favourite's is_fav=true and copies that horse's sp, position, pos_points, sp_points, result_code to the FAV row. Non-runner selections are replaced with runnerId 'FAV'.
  *
  * Env: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY_UPDATE_RESULTS
  */
@@ -36,6 +38,7 @@ const MINUTES_AFTER_RACE = 15;
 type HorseResult = {
   id_horse?: string;
   horse: string;
+  number?: string | number;
   position?: string;
   sp?: string;
   non_runner?: string;
@@ -58,9 +61,10 @@ function getPlacedPositions(isHandicap: boolean, totalRunners: number): number[]
   if (isHandicap) {
     return totalRunners >= 16 ? [1, 2, 3, 4] : [1, 2, 3];
   }
-  if (totalRunners >= 15) return [1, 2, 3];
-  if (totalRunners > 7) return [1, 2];
-  if (totalRunners >= 4) return [1];
+  // Non-handicap: <5 = win only; 5–7 = 1st & 2nd; 8+ = 1st, 2nd, 3rd
+  if (totalRunners >= 8) return [1, 2, 3];
+  if (totalRunners >= 5) return [1, 2];
+  if (totalRunners >= 1) return [1];
   return [];
 }
 
@@ -88,14 +92,15 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
 
   const { data: horseRows } = await supabase
     .from('horses')
-    .select('id, api_horse_id, name')
+    .select('id, api_horse_id, name, number')
     .eq('race_id', raceRow.id);
 
-  const byApiId = new Map<string, { id: string }>();
-  const byName = new Map<string, { id: string }>();
+  const byApiId = new Map<string, { id: string; number: string | null }>();
+  const byName = new Map<string, { id: string; number: string | null }>();
   for (const h of horseRows ?? []) {
-    byApiId.set(String(h.api_horse_id), { id: h.id });
-    byName.set((h.name ?? '').trim().toLowerCase(), { id: h.id });
+    const entry = { id: h.id, number: h.number ?? null };
+    byApiId.set(String(h.api_horse_id), entry);
+    byName.set((h.name ?? '').trim().toLowerCase(), entry);
   }
 
   const getHorseId = (h: HorseResult): string | null => {
@@ -104,9 +109,21 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
     return byName.get((h.horse ?? '').trim().toLowerCase())?.id ?? null;
   };
 
-  type HorseUpdate = { horseId: string; position: number | null; resultCode: string | null; sp: number };
+  // Update non_runner from API for every horse we can match
+  const now = new Date().toISOString();
+  for (const h of horses) {
+    const horseId = getHorseId(h);
+    if (!horseId) continue;
+    const nr = String(h.non_runner ?? '0').trim() !== '0' ? '1' : '0';
+    await supabase.from('horses').update({ non_runner: nr, updated_at: now }).eq('id', horseId);
+  }
+
+  type HorseUpdate = { horseId: string; position: number | null; resultCode: string | null; sp: number; number: number };
   const horsesToUpdate: HorseUpdate[] = [];
   const spByHorseId = new Map<string, number>();
+  const numberByHorseId = new Map<string, number>();
+
+  const favRowId = byApiId.get('FAV')?.id ?? null;
 
   for (const h of validHorses) {
     const posStr = String(h.position ?? '').trim().toLowerCase();
@@ -116,26 +133,35 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
     const resultCode = isNumeric ? null : posStr;
     const sp = h.sp != null ? parseFloat(String(h.sp)) : 0;
     const horseId = getHorseId(h);
-    if (horseId) {
-      horsesToUpdate.push({
-        horseId,
-        position: isNumeric ? position : null,
-        resultCode,
-        sp: Number.isFinite(sp) ? sp : 0,
-      });
-      if (isNumeric) spByHorseId.set(horseId, Number.isFinite(sp) ? sp : 0);
+    if (!horseId || horseId === favRowId) continue;
+    const num = h.number != null && Number.isFinite(parseFloat(String(h.number)))
+      ? parseInt(String(h.number), 10) : Infinity;
+    horsesToUpdate.push({
+      horseId,
+      position: isNumeric ? position : null,
+      resultCode,
+      sp: Number.isFinite(sp) ? sp : 0,
+      number: Number.isFinite(num) ? num : Infinity,
+    });
+    if (isNumeric) {
+      spByHorseId.set(horseId, Number.isFinite(sp) ? sp : 0);
+      numberByHorseId.set(horseId, Number.isFinite(num) ? num : Infinity);
     }
   }
 
+  // FAV = lowest SP; if tie, lowest number wins (exclude FAV row)
   const minSp = Math.min(...spByHorseId.values(), Infinity);
-  const favHorseIds = minSp !== Infinity ? [...spByHorseId.entries()].filter(([, s]) => s === minSp).map(([id]) => id) : [];
+  const candidatesWithMinSp = minSp !== Infinity
+    ? [...spByHorseId.entries()].filter(([, s]) => s === minSp).map(([id]) => ({ id, number: numberByHorseId.get(id) ?? Infinity }))
+    : [];
+  const favHorseIds: string[] = candidatesWithMinSp.length === 0
+    ? []
+    : [candidatesWithMinSp.sort((a, b) => a.number - b.number)[0].id];
 
   const title = (detail?.title ?? raceRow.name ?? '').toLowerCase();
   const isHandicap = title.includes('handicap');
   const placedPositions = getPlacedPositions(isHandicap, totalRunners);
   console.log(`  Placed positions: ${placedPositions.join(', ')} (handicap=${isHandicap}, runners=${totalRunners})`);
-
-  const now = new Date().toISOString();
 
   function lookupRangePoints(sp: number, type: 'standard_win' | 'standard_place' | 'bonus_win' | 'bonus_place'): number {
     const rows = pointsRows.filter((r) => r.type === type);
@@ -164,8 +190,9 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
   // Clear is_fav for all horses in the race
   await supabase.from('horses').update({ is_fav: false, updated_at: now }).eq('race_id', raceRow.id);
 
-  // Update each horse: position, result_code, sp, is_fav, pos_points, sp_points
-  // Only horses in placed positions get points. f/u/pu get position=null, result_code set.
+  // Update each horse: position, result_code, sp, is_fav, pos_points, sp_points (and save favourite payload for FAV row)
+  let favPayload: { sp: number; position: number | null; result_code: string | null; pos_points: number; sp_points: number } | null = null;
+
   for (const { horseId, position, resultCode, sp } of horsesToUpdate) {
     const isFav = favHorseIds.includes(horseId);
     const isPlaced = position != null && placedPositions.includes(position);
@@ -185,7 +212,31 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
       payload.pos_points = 0;
       payload.sp_points = 0;
     }
+    if (isFav) {
+      favPayload = {
+        sp,
+        position: position ?? null,
+        result_code: resultCode ?? null,
+        pos_points: (payload.pos_points as number) ?? 0,
+        sp_points: (payload.sp_points as number) ?? 0,
+      };
+    }
     await supabase.from('horses').update(payload).eq('id', horseId);
+  }
+
+  // Assign the same values as the race favourite to the FAV row for this race
+  if (favRowId && favPayload) {
+    await supabase
+      .from('horses')
+      .update({
+        sp: favPayload.sp,
+        position: favPayload.position,
+        result_code: favPayload.result_code,
+        pos_points: favPayload.pos_points,
+        sp_points: favPayload.sp_points,
+        updated_at: now,
+      })
+      .eq('id', favRowId);
   }
 
   await supabase
@@ -193,12 +244,17 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
     .update({ is_finished: true, updated_at: now })
     .eq('id', raceRow.id);
 
-  // Replace non-runner selections: users who picked a horse that became non-runner get FAV instead.
-  const nonRunners = horses.filter((h) => String(h.non_runner ?? '0') !== '0');
-  const nonRunnerIds = new Set(nonRunners.map((h) => String(h.id_horse ?? '').trim()).filter(Boolean));
-  const nonRunnerNames = new Set(nonRunners.map((h) => (h.horse ?? '').trim().toLowerCase()).filter(Boolean));
+  // Non-runners from DB (after we've updated non_runner from API); replace any user selection matching them with FAV
+  const { data: dbNonRunners } = await supabase
+    .from('horses')
+    .select('api_horse_id, name')
+    .eq('race_id', raceRow.id)
+    .eq('non_runner', '1');
 
-  if (nonRunnerIds.size > 0 || nonRunnerNames.size > 0) {
+  const nonRunnerApiIds = new Set((dbNonRunners ?? []).map((r: { api_horse_id: string }) => String(r.api_horse_id).trim()).filter(Boolean));
+  const nonRunnerNames = new Set((dbNonRunners ?? []).map((r: { name: string }) => (r.name ?? '').trim().toLowerCase()).filter(Boolean));
+
+  if (nonRunnerApiIds.size > 0 || nonRunnerNames.size > 0) {
     const { data: raceDay } = await supabase
       .from('race_days')
       .select('race_date')
@@ -231,7 +287,7 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
           const runnerId = String(raceSel.runnerId ?? '').trim();
           const runnerName = (raceSel.runnerName ?? '').trim().toLowerCase();
           const isNonRunner =
-            (runnerId && nonRunnerIds.has(runnerId)) || (runnerName && nonRunnerNames.has(runnerName));
+            (runnerId && nonRunnerApiIds.has(runnerId)) || (runnerName && nonRunnerNames.has(runnerName));
 
           if (isNonRunner) {
             const next = { ...sel, [apiRaceId]: FAV_SELECTION };
