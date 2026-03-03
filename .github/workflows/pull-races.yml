@@ -6,7 +6,7 @@ name: Pull races
 
 on:
   schedule:
-    - cron: '0 17,18 * * *'
+    - cron: '0 16-19 * * *'
   workflow_dispatch:
 
 jobs:
