@@ -5,7 +5,7 @@ name: Update race results
 
 on:
   schedule:
-    - cron: '0/10 13-19 * * *'
+    - cron: '0/12 13-19 * * *'
   workflow_dispatch:
 
 jobs:
