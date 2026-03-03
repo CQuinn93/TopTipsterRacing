@@ -8,11 +8,12 @@ import 'dotenv/config';
  * Each such race gets one API call; if results not ready yet, logs and continues. Capped so daily total stays under 50.
  *
  * Logic:
- * 0. Backfill FAV: For race_days where first_race_utc + 1hr <= now and is_backfilled = false, set missing selections to FAV, then set is_backfilled = true.
  * 1. Select races where scheduled_time_utc + 15 min < now AND is_finished = false.
  * 2. For each race: GET /race/{api_race_id}.
  * 3. If results ready: update horses (position, result_code, sp, non_runner from API); determine favourite (lowest SP, tie-break by lowest number); set is_fav, pos_points, sp_points; copy favourite values to FAV row; mark race is_finished; replace non-runner selections with FAV.
  * 4. If not ready: log "No results currently, will check on next run" and continue.
+ *
+ * FAV backfill (missing selections set to FAV after deadline) is handled by Supabase cron: migration 030, backfill_fav_selections_for_today().
  *
  * FAV: pull-races inserts a horse row per race with api_horse_id='FAV'. Update-race-results sets the actual favourite's is_fav=true and copies that horse's sp, position, pos_points, sp_points, result_code to the FAV row. Non-runner selections are replaced with runnerId 'FAV'.
  *
@@ -27,10 +28,6 @@ const UPDATE_RESULTS_NOTIFICATION_EMAIL = process.env.UPDATE_RESULTS_NOTIFICATIO
 
 /** Max races to process per run so we stay under 50/day (16 runs × 2 = 32). */
 const MAX_RACES_PER_RUN = 2;
-
-/** Trigger backfill at first_race_utc + 1 hour. */
-const BACKFILL_HOURS_AFTER_FIRST_RACE = 1;
-const FAV_SELECTION = { runnerId: 'FAV', runnerName: 'FAV', oddsDecimal: 0 };
 
 const API_BASE = 'https://horse-racing.p.rapidapi.com';
 const API_HEADERS: Record<string, string> = {
@@ -74,90 +71,6 @@ function getPlacedPositions(isHandicap: boolean, totalRunners: number): number[]
 }
 
 type RaceRow = { id: string; race_day_id: string; api_race_id: string; name: string };
-
-type RaceDayRow = { id: string; race_date: string; first_race_utc: string; is_backfilled: boolean | null };
-
-/** Run FAV backfill for race days where first_race_utc + 1hr <= now and not yet backfilled. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function runBackfillIfNeeded(supabase: any): Promise<void> {
-  const now = Date.now();
-  const triggerCutoff = new Date(now - BACKFILL_HOURS_AFTER_FIRST_RACE * 60 * 60 * 1000).toISOString();
-  const { data: raceDaysRows } = await supabase
-    .from('race_days')
-    .select('id, race_date, first_race_utc, is_backfilled')
-    .lte('first_race_utc', triggerCutoff)
-    .or('is_backfilled.is.null,is_backfilled.eq.false');
-
-  const toBackfill = (raceDaysRows ?? []) as RaceDayRow[];
-  if (toBackfill.length === 0) return;
-
-  for (const rd of toBackfill) {
-    const firstRaceMs = new Date(rd.first_race_utc).getTime();
-    const triggerTime = firstRaceMs + BACKFILL_HOURS_AFTER_FIRST_RACE * 60 * 60 * 1000;
-    if (now < triggerTime) continue;
-
-    const { data: raceRows } = await supabase.from('races').select('api_race_id').eq('race_day_id', rd.id);
-    const raceIds = (raceRows ?? []).map((r: { api_race_id: string }) => r.api_race_id).filter(Boolean);
-    if (raceIds.length === 0) {
-      await supabase.from('race_days').update({ is_backfilled: true, backfilled_at: new Date().toISOString() }).eq('id', rd.id);
-      continue;
-    }
-
-    const { data: links } = await supabase.from('competition_race_days').select('competition_id').eq('race_day_id', rd.id);
-    const compIds = [...new Set((links ?? []).map((l: { competition_id: string }) => l.competition_id))];
-    if (compIds.length === 0) {
-      await supabase.from('race_days').update({ is_backfilled: true, backfilled_at: new Date().toISOString() }).eq('id', rd.id);
-      continue;
-    }
-
-    let updated = 0;
-    for (const compId of compIds) {
-      const { data: participants } = await supabase.from('competition_participants').select('user_id').eq('competition_id', compId);
-      const userIds = (participants ?? []).map((p: { user_id: string }) => p.user_id);
-      if (userIds.length === 0) continue;
-
-      const { data: existingRows } = await supabase
-        .from('daily_selections')
-        .select('user_id, selections')
-        .eq('competition_id', compId)
-        .eq('race_date', rd.race_date)
-        .in('user_id', userIds);
-
-      const rows = (existingRows ?? []) as { user_id: string; selections: Record<string, unknown> | null }[];
-      const toUpsert: Array<{ competition_id: string; user_id: string; race_date: string; selections: Record<string, unknown>; updated_at: string }> = [];
-
-      for (const userId of userIds) {
-        const row = rows.find((r: { user_id: string }) => r.user_id === userId);
-        const current = (row?.selections && typeof row.selections === 'object' ? row.selections : {}) as Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }>;
-        let changed = false;
-        const next: Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }> = { ...current };
-        for (const raceId of raceIds) {
-          if (next[raceId] == null) {
-            next[raceId] = FAV_SELECTION;
-            changed = true;
-          }
-        }
-        if (changed) {
-          toUpsert.push({
-            competition_id: String(compId),
-            user_id: String(userId),
-            race_date: rd.race_date,
-            selections: next as unknown as Record<string, unknown>,
-            updated_at: new Date().toISOString(),
-          });
-        }
-      }
-
-      if (toUpsert.length > 0) {
-        const { error: upsertErr } = await supabase.from('daily_selections').upsert(toUpsert, { onConflict: 'competition_id,user_id,race_date' });
-        if (!upsertErr) updated += toUpsert.length;
-      }
-    }
-
-    await supabase.from('race_days').update({ is_backfilled: true, backfilled_at: new Date().toISOString() }).eq('id', rd.id);
-    if (updated > 0) console.log(`  [backfill] Race day ${rd.race_date}: ${updated} selection row(s) backfilled with FAV.`);
-  }
-}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min_decimal: string | number; max_decimal: string | number; points: number; type: string }[]): Promise<boolean> {
@@ -333,75 +246,14 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
     .update({ is_finished: true, updated_at: now })
     .eq('id', raceRow.id);
 
-  // Non-runners from DB (after we've updated non_runner from API); replace any user selection matching them with FAV
-  const { data: dbNonRunners } = await supabase
-    .from('horses')
-    .select('api_horse_id, name')
-    .eq('race_id', raceRow.id)
-    .eq('non_runner', '1');
-
-  const nonRunnerApiIds = new Set((dbNonRunners ?? []).map((r: { api_horse_id: string }) => String(r.api_horse_id).trim()).filter(Boolean));
-  const nonRunnerNames = new Set((dbNonRunners ?? []).map((r: { name: string }) => (r.name ?? '').trim().toLowerCase()).filter(Boolean));
-
-  if (nonRunnerApiIds.size > 0 || nonRunnerNames.size > 0) {
-    const { data: raceDay } = await supabase
-      .from('race_days')
-      .select('race_date')
-      .eq('id', raceRow.race_day_id)
-      .single();
-
-    if (raceDay?.race_date) {
-      const { data: crdRows } = await supabase
-        .from('competition_race_days')
-        .select('competition_id')
-        .eq('race_day_id', raceRow.race_day_id);
-      const compIds = [...new Set((crdRows ?? []).map((r: { competition_id: string }) => r.competition_id))];
-
-      if (compIds.length > 0) {
-        const { data: selRows } = await supabase
-          .from('daily_selections')
-          .select('id, user_id, competition_id, race_date, selections')
-          .eq('race_date', raceDay.race_date)
-          .in('competition_id', compIds);
-
-        const apiRaceId = raceRow.api_race_id;
-        const FAV_SELECTION = { runnerId: 'FAV', runnerName: 'FAV', oddsDecimal: 0 };
-        const toUpsert: Array<{ id: string; competition_id: string; user_id: string; race_date: string; selections: Record<string, unknown>; updated_at: string }> = [];
-
-        for (const row of selRows ?? []) {
-          const sel = (row.selections ?? {}) as Record<string, { runnerId?: string; runnerName?: string; oddsDecimal?: number }>;
-          const raceSel = sel[apiRaceId];
-          if (!raceSel) continue;
-
-          const runnerId = String(raceSel.runnerId ?? '').trim();
-          const runnerName = (raceSel.runnerName ?? '').trim().toLowerCase();
-          const isNonRunner =
-            (runnerId && nonRunnerApiIds.has(runnerId)) || (runnerName && nonRunnerNames.has(runnerName));
-
-          if (isNonRunner) {
-            const next = { ...sel, [apiRaceId]: FAV_SELECTION };
-            toUpsert.push({
-              id: row.id,
-              competition_id: row.competition_id,
-              user_id: row.user_id,
-              race_date: row.race_date,
-              selections: next,
-              updated_at: now,
-            });
-          }
-        }
-
-        if (toUpsert.length > 0) {
-          for (const u of toUpsert) {
-            await supabase
-              .from('daily_selections')
-              .update({ selections: u.selections, updated_at: u.updated_at })
-              .eq('id', u.id);
-          }
-          console.log(`Replaced ${toUpsert.length} non-runner selection(s) with FAV`);
-        }
-      }
-    }
+  // Non-runners: replace any user selection that picked a non-runner with FAV (via RPC so trigger allows write after deadline)
+  const { data: replacedCount, error: rpcError } = await supabase.rpc('replace_non_runner_selections_with_fav', {
+    p_race_id: raceRow.id,
+  });
+  if (rpcError) {
+    console.warn(`  Non-runner replacement RPC error:`, rpcError.message);
+  } else if (typeof replacedCount === 'number' && replacedCount > 0) {
+    console.log(`  Replaced ${replacedCount} non-runner selection(s) with FAV`);
   }
 
   console.log(`  Updated results for race ${raceRow.api_race_id}`);
@@ -482,8 +334,6 @@ async function main() {
 
   const { createClient } = await import('@supabase/supabase-js');
   const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-  await runBackfillIfNeeded(supabase);
 
   const after = new Date();
   after.setMinutes(after.getMinutes() - MINUTES_AFTER_RACE);

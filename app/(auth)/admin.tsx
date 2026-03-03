@@ -211,8 +211,13 @@ export default function AdminScreen() {
         setSelectionsList([]);
         return;
       }
-      const all = (data as AdminSelectionRow[]) ?? [];
-      setSelectionsList(all.filter((s) => s.race_date === selectedRaceDate));
+      // PostgREST may return a single jsonb as [array]; unwrap if needed
+      const raw = data;
+      const all: AdminSelectionRow[] =
+        Array.isArray(raw) && raw.length === 1 && Array.isArray(raw[0])
+          ? (raw[0] as AdminSelectionRow[])
+          : (Array.isArray(raw) ? (raw as AdminSelectionRow[]) : []);
+      setSelectionsList(all.filter((s) => String(s.race_date) === String(selectedRaceDate)));
     })();
   }, [tab, selectedCompId, selectedRaceDate]);
 
@@ -638,9 +643,19 @@ export default function AdminScreen() {
         </ScrollView>
       ) : (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-          <Text style={styles.sectionTitle}>Competition</Text>
+          <View style={styles.editSelectionsIntro}>
+            <Text style={styles.editSelectionsTitle}>Edit a user’s selections</Text>
+            <Text style={styles.editSelectionsHint}>
+              Choose a competition and race day, then tap a participant to change their picks. Changes are allowed even after the deadline.
+            </Text>
+          </View>
+
+          <Text style={styles.stepLabel}>1. Competition</Text>
           {competitions.length === 0 ? (
-            <Text style={styles.empty}>No competitions</Text>
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No competitions</Text>
+              <Text style={styles.emptyDetail}>Create one in the “New competition” tab. Race days appear after pull-races runs for the festival dates.</Text>
+            </View>
           ) : (
             <View style={styles.chipRow}>
               {competitions.map((c) => (
@@ -649,46 +664,59 @@ export default function AdminScreen() {
                   style={[styles.chip, selectedCompId === c.id && styles.chipActive]}
                   onPress={() => setSelectedCompId(selectedCompId === c.id ? null : c.id)}
                 >
-                  <Text style={[styles.chipText, selectedCompId === c.id && styles.chipTextActive]}>{c.name}</Text>
+                  <Text style={[styles.chipText, selectedCompId === c.id && styles.chipTextActive]} numberOfLines={1}>{c.name}</Text>
                 </TouchableOpacity>
               ))}
             </View>
           )}
-          {selectedCompId && raceDays.length > 0 && (
+
+          {selectedCompId && (
             <>
-              <Text style={styles.sectionTitle}>Race day</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-                {raceDays.map((d) => (
-                  <TouchableOpacity
-                    key={d.race_date}
-                    style={[styles.chip, selectedRaceDate === d.race_date && styles.chipActive]}
-                    onPress={() => setSelectedRaceDate(d.race_date)}
-                  >
-                    <Text style={[styles.chipText, selectedRaceDate === d.race_date && styles.chipTextActive]}>
-                      {new Date(d.race_date).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              <Text style={styles.stepLabel}>2. Race day</Text>
+              {raceDays.length === 0 ? (
+                <View style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>No race days</Text>
+                  <Text style={styles.emptyDetail}>Make sure pull-races has run for this competition’s festival dates. Race days appear here once data is loaded.</Text>
+                </View>
+              ) : (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRowScroll}>
+                  {raceDays.map((d) => (
+                    <TouchableOpacity
+                      key={d.race_date}
+                      style={[styles.chip, selectedRaceDate === d.race_date && styles.chipActive]}
+                      onPress={() => setSelectedRaceDate(d.race_date)}
+                    >
+                      <Text style={[styles.chipText, selectedRaceDate === d.race_date && styles.chipTextActive]}>
+                        {new Date(d.race_date).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              )}
             </>
           )}
+
           {selectedCompId && selectedRaceDate && (
             <>
-              <Text style={styles.sectionTitle}>Participants (by username)</Text>
+              <Text style={styles.stepLabel}>3. Participants — tap to edit</Text>
               {selectionsList.length === 0 ? (
-                <Text style={styles.empty}>No selections for this day</Text>
+                <View style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>No selections for this day</Text>
+                  <Text style={styles.emptyDetail}>Participants will appear here once they have made (or been assigned) selections for {new Date(selectedRaceDate).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })}.</Text>
+                </View>
               ) : (
                 selectionsList.map((row) => (
                   <TouchableOpacity
                     key={row.id}
-                    style={styles.card}
+                    style={styles.selectionCard}
                     onPress={() => openEditSelection(row.id, selectedCompId, row.race_date)}
+                    activeOpacity={0.7}
                   >
-                    <Text style={styles.cardName}>{row.display_name}</Text>
-                    <Text style={styles.cardDate}>
+                    <Text style={styles.selectionCardName}>{row.display_name}</Text>
+                    <Text style={styles.selectionCardMeta}>
                       {Object.keys(row.selections || {}).length} race(s) selected
                     </Text>
-                    <Text style={styles.editHint}>Tap to edit</Text>
+                    <Text style={styles.selectionCardEdit}>Tap to edit →</Text>
                   </TouchableOpacity>
                 ))
               )}
@@ -950,6 +978,7 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.7 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: theme.spacing.md, gap: theme.spacing.sm },
+  chipRowScroll: { flexDirection: 'row', marginBottom: theme.spacing.md, gap: theme.spacing.sm },
   chip: {
     paddingHorizontal: theme.spacing.md,
     paddingVertical: theme.spacing.sm,
@@ -961,4 +990,81 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: theme.colors.accentMuted, borderColor: theme.colors.accent },
   chipText: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textSecondary },
   chipTextActive: { color: theme.colors.accent },
+  editSelectionsIntro: {
+    marginBottom: theme.spacing.xl,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.md,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  editSelectionsTitle: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 16,
+    color: theme.colors.text,
+    fontWeight: '600',
+    marginBottom: theme.spacing.xs,
+  },
+  editSelectionsHint: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 13,
+    color: theme.colors.textSecondary,
+    lineHeight: 20,
+  },
+  stepLabel: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    fontWeight: '600',
+    marginBottom: theme.spacing.sm,
+    marginTop: theme.spacing.md,
+  },
+  emptyCard: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.md,
+    padding: theme.spacing.lg,
+    marginBottom: theme.spacing.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  emptyTitle: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 15,
+    color: theme.colors.text,
+    fontWeight: '600',
+    marginBottom: theme.spacing.xs,
+  },
+  emptyDetail: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 13,
+    color: theme.colors.textMuted,
+    lineHeight: 19,
+  },
+  selectionCard: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.md,
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.sm,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  selectionCardName: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 16,
+    color: theme.colors.text,
+    fontWeight: '600',
+  },
+  selectionCardMeta: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 13,
+    color: theme.colors.textMuted,
+    marginTop: theme.spacing.xs,
+  },
+  selectionCardEdit: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 13,
+    color: theme.colors.accent,
+    marginTop: theme.spacing.xs,
+  },
 });

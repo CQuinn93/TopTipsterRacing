@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
@@ -109,13 +110,31 @@ export default function AdminEditSelectionScreen() {
   const races = raceDay.races ?? [];
 
   return (
-    <View style={[styles.container, { backgroundColor: activeTheme.colors.background }]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Edit selections</Text>
-        <Text style={styles.subtitle}>{new Date(raceDate).toLocaleDateString()}</Text>
+    <SafeAreaView style={[styles.container, { backgroundColor: activeTheme.colors.background }]} edges={['top']}>
+      <View style={[styles.header, { borderBottomColor: activeTheme.colors.border }]}>
+        <View style={styles.headerRow}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Text style={[styles.backText, { color: activeTheme.colors.accent }]}>← Back</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.saveButtonTop, saving && styles.buttonDisabled]}
+            onPress={save}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color={theme.colors.black} />
+            ) : (
+              <Text style={styles.saveButtonText}>Save</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+        <Text style={[styles.title, { color: activeTheme.colors.text }]}>Edit selections</Text>
+        <Text style={[styles.subtitle, { color: activeTheme.colors.textMuted }]}>
+          {new Date(raceDate).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' })}
+        </Text>
+        <Text style={[styles.adminHint, { color: activeTheme.colors.textMuted }]}>
+          Tap a horse to set the pick for each race, then Save.
+        </Text>
       </View>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
         {races.map((race) => (
@@ -139,21 +158,8 @@ export default function AdminEditSelectionScreen() {
             ))}
           </View>
         ))}
-        {races.length > 0 && (
-          <TouchableOpacity
-            style={[styles.saveButton, saving && styles.buttonDisabled]}
-            onPress={save}
-            disabled={saving}
-          >
-            {saving ? (
-              <ActivityIndicator color={theme.colors.black} />
-            ) : (
-              <Text style={styles.saveButtonText}>Save changes</Text>
-            )}
-          </TouchableOpacity>
-        )}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -161,11 +167,23 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background },
   header: { padding: theme.spacing.lg, borderBottomWidth: 1, borderBottomColor: theme.colors.border },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing.sm,
+  },
+  backButton: { paddingVertical: theme.spacing.xs, paddingRight: theme.spacing.md },
   backText: {
     fontFamily: theme.fontFamily.regular,
     fontSize: 14,
     color: theme.colors.accent,
-    marginBottom: theme.spacing.sm,
+  },
+  saveButtonTop: {
+    backgroundColor: theme.colors.accent,
+    borderRadius: theme.radius.md,
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.lg,
   },
   title: {
     fontFamily: theme.fontFamily.regular,
@@ -177,6 +195,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: theme.colors.textMuted,
     marginTop: theme.spacing.xs,
+  },
+  adminHint: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    marginTop: theme.spacing.sm,
   },
   scroll: { flex: 1 },
   content: { padding: theme.spacing.lg, paddingBottom: theme.spacing.xxl },
@@ -211,13 +235,6 @@ const styles = StyleSheet.create({
   },
   runnerName: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.text },
   runnerOdds: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.accent },
-  saveButton: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.md,
-    paddingVertical: theme.spacing.md,
-    alignItems: 'center',
-    marginTop: theme.spacing.lg,
-  },
   buttonDisabled: { opacity: 0.7 },
   saveButtonText: {
     fontFamily: theme.fontFamily.regular,

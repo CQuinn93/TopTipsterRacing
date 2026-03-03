@@ -15,10 +15,8 @@ These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/hor
 | Script | Purpose | When to run |
 |--------|---------|-------------|
 | **pull-races.ts** | 1) DB: Competitions where tomorrow ∈ [festival_start_date, festival_end_date]; get their **course** (one per competition). 2) API: One call GET /racecards for tomorrow; filter by those courses. 3) API: One call per race GET /race/{id} for runners (with delay). Each race gets an extra **FAV** option (SP favourite). 4) DB: One bulk upload – upsert race_days, insert races, insert horses, upsert competition_race_days. | **5pm, 6pm UK** – cron `0 17,18 * * *` UTC (5/6 GMT; 6/7 BST). Second run is backup. Competitions for the following day must be created **before 8pm UK** to get races that night. |
-| **update-race-results.ts** | 0) **FAV backfill** (first): For race_days where first_race_utc + 1hr ≤ now and is_backfilled = false, sets missing selections to FAV, marks backfilled. 1) Gets **latest race** where `scheduled_time_utc` + 30 min < now and `is_finished = false`. 2) Calls GET /race/{id}. 3) Updates **horses** (position, sp, is_fav, etc.), **races.is_finished**. | **30 min after each race**; cron every 20 min `*/20 * * * *`. Backfill runs automatically once per race day (1hr after first race). |
+| **update-race-results.ts** | Gets races where `scheduled_time_utc` + 15 min < now and `is_finished = false`. Calls GET /race/{id}. Updates **horses** (position, sp, is_fav, etc.), **races.is_finished**. Replaces non-runner selections with FAV via RPC. FAV backfill (missing selections after deadline) is done by Supabase cron (migration 030). | **30 min after each race**; cron every 10–12 min. |
 | **remove-old-races.ts** | Deletes **race_days** where `race_date` is older than **5 days** (cascade deletes `races` and `horses`). Keeps DB small. | Daily, e.g. **18:00 UTC** – cron `0 18 * * *`. |
-| **backfill-fav-selections.ts** | Standalone version of the FAV backfill. **Update-race-results** now includes this; run this script only for manual/one-off backfills (e.g. if you need to re-run before update-results next runs). | **Optional** – update-race-results handles it via GitHub Actions. |
-| **add-fav-rows-today-tomorrow.ts** | For each race on **today** and **tomorrow** (race_date in UTC), inserts a **FAV** horse row if missing. Pull-races normally does this; use this to backfill (e.g. today's races created before pull-races added FAV). Skips races that already have FAV. | **One-off backfill** – run when races exist but lack FAV rows. |
 
 ## Database tables (migrations 010–011)
 
@@ -45,20 +43,14 @@ These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/hor
 ## Running locally
 
 ```bash
-# Pull tomorrow's races (3pm / 6pm / 9pm runs)
-SUPABASE_URL=... SUPABASE_SERVICE_KEY=... RAPIDAPI_KEY=... npx tsx scripts/pull-races.ts
+# Pull tomorrow's races (5pm / 6pm UK)
+SUPABASE_URL=... SUPABASE_SERVICE_KEY=... RAPIDAPI_KEY_PULL_RACES=... npx tsx scripts/pull-races.ts
 
 # Update results for latest race due (30+ min after start)
-SUPABASE_URL=... SUPABASE_SERVICE_KEY=... RAPIDAPI_KEY=... npx tsx scripts/update-race-results.ts
+SUPABASE_URL=... SUPABASE_SERVICE_KEY=... RAPIDAPI_KEY_UPDATE_RESULTS=... npx tsx scripts/update-race-results.ts
 
 # Remove race_days older than 5 days
 SUPABASE_URL=... SUPABASE_SERVICE_KEY=... npx tsx scripts/remove-old-races.ts
-
-# Backfill FAV for users who didn't select before deadline (1h before first race)
-SUPABASE_URL=... SUPABASE_SERVICE_KEY=... npx tsx scripts/backfill-fav-selections.ts
-
-# Add FAV horse row for each race today and tomorrow (backfill if missing)
-SUPABASE_URL=... SUPABASE_SERVICE_KEY=... npx tsx scripts/add-fav-rows-today-tomorrow.ts
 ```
 
 ## GitHub Actions
