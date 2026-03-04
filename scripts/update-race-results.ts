@@ -149,10 +149,9 @@ async function processOneRace(supabase: any, raceRow: RaceRow, pointsRows: { min
       sp: Number.isFinite(sp) ? sp : 0,
       number: Number.isFinite(num) ? num : Infinity,
     });
-    if (isNumeric) {
-      spByHorseId.set(horseId, Number.isFinite(sp) ? sp : 0);
-      numberByHorseId.set(horseId, Number.isFinite(num) ? num : Infinity);
-    }
+    // Include all horses with a result (including fell/unseated etc.) when determining favourite by lowest SP
+    spByHorseId.set(horseId, Number.isFinite(sp) ? sp : 0);
+    numberByHorseId.set(horseId, Number.isFinite(num) ? num : Infinity);
   }
 
   // FAV = lowest SP; if tie, lowest number wins (exclude FAV row)
