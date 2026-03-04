@@ -226,15 +226,15 @@ export default function MyCompetitionsScreen() {
       primaryButton: {
         backgroundColor: theme.colors.accent,
         borderRadius: theme.radius.sm,
-        paddingVertical: theme.spacing.sm,
-        paddingHorizontal: theme.spacing.md,
+        paddingVertical: theme.spacing.md,
+        paddingHorizontal: theme.spacing.lg,
         alignItems: 'center',
         marginBottom: theme.spacing.lg,
       },
       primaryButtonText: {
         fontFamily: theme.fontFamily.regular,
         fontSize: 14,
-        color: theme.colors.black,
+        color: theme.colors.background === '#fafafa' ? theme.colors.black : theme.colors.white,
         fontWeight: '600',
       },
       sectionTitle: {

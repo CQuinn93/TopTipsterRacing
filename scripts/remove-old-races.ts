@@ -1,8 +1,7 @@
 /**
- * Remove race days whose last race was more than 2 days ago, and only when every
- * competition linked to that race_day has festival_end_date more than 2 days ago.
- * So we never delete a race_day that is part of a competition still "active"
- * (e.g. Cheltenham 4-day festival: no day is deleted until the whole festival is over + 2 days).
+ * 1) Remove race days whose last race was more than 2 days ago, and only when every
+ *    competition linked to that race_day has festival_end_date more than 2 days ago.
+ * 2) Remove competitions that have been finished for 2 or more days (festival_end_date < today - 2).
  *
  * Env: SUPABASE_URL, SUPABASE_SERVICE_KEY
  *
@@ -134,6 +133,35 @@ async function main() {
       console.log(`  - ${(d as { course: string; race_date: string }).course} ${(d as { race_date: string }).race_date}`);
     }
   }
+
+  // 4. Remove competitions finished 2+ days ago (cascade removes competition_race_days, daily_selections, etc.)
+  const { data: allComps } = await supabase
+    .from('competitions')
+    .select('id, name, festival_end_date');
+  const finishedCompIds = (allComps ?? [])
+    .filter((c) => c.festival_end_date && c.festival_end_date < cutoffDateStr)
+    .map((c) => c.id);
+
+  if (finishedCompIds.length > 0) {
+    const { data: deletedComps, error: compErr } = await supabase
+      .from('competitions')
+      .delete()
+      .in('id', finishedCompIds)
+      .select('id, name, festival_end_date');
+
+    if (compErr) {
+      console.error('Delete competitions', compErr);
+      process.exit(1);
+    }
+    const compCount = deletedComps?.length ?? 0;
+    if (compCount > 0) {
+      console.log(`Removed ${compCount} competition(s) finished ${DAYS_AFTER_LAST_RACE}+ days ago:`);
+      for (const c of deletedComps ?? []) {
+        console.log(`  - ${(c as { name: string }).name} (ended ${(c as { festival_end_date: string }).festival_end_date})`);
+      }
+    }
+  }
+
   console.log('Done');
 }
 

@@ -41,6 +41,7 @@ export default function HomeScreen() {
   const [participantCountByCompId, setParticipantCountByCompId] = useState<Record<string, number>>({});
   const [compDaysByCompId, setCompDaysByCompId] = useState<Record<string, number>>({});
   const [compDateRangeByCompId, setCompDateRangeByCompId] = useState<Record<string, { start: string; end: string }>>({});
+  const [compTab, setCompTab] = useState<'upcoming' | 'live' | 'complete'>('live');
   const scrollRef = useRef<ScrollView>(null);
   const compScrollRef = useRef<ScrollView>(null);
   const { width: windowWidth } = useWindowDimensions();
@@ -178,10 +179,11 @@ export default function HomeScreen() {
   const compList = summaryByComp
     ? participations.map((p) => ({ id: p.competition_id, name: summaryByComp.byComp[p.competition_id]?.name ?? p.competition_id }))
     : [];
+  const compListFiltered = compList.filter((c) => compStatusByCompId[c.id] === compTab);
   const effectiveCompId =
-    selectedCompId && compList.some((c) => c.id === selectedCompId)
+    selectedCompId && compListFiltered.some((c) => c.id === selectedCompId)
       ? selectedCompId
-      : compList[0]?.id ?? null;
+      : compListFiltered[0]?.id ?? null;
 
   const currentSummary = summaryByComp && effectiveCompId ? summaryByComp.byComp[effectiveCompId] : null;
 
@@ -191,9 +193,20 @@ export default function HomeScreen() {
     }
   }, [windowWidth]);
 
+  const compListFilteredIds = compListFiltered.map((c) => c.id).join(',');
   useEffect(() => {
-    if (compList.length === 0) return;
-    const index = compList.findIndex((c) => c.id === effectiveCompId);
+    if (compListFiltered.length === 0) {
+      setSelectedCompId(null);
+      return;
+    }
+    if (!compListFiltered.some((c) => c.id === selectedCompId)) {
+      setSelectedCompId(compListFiltered[0]?.id ?? null);
+    }
+  }, [compTab, compListFilteredIds]);
+
+  useEffect(() => {
+    if (compListFiltered.length === 0) return;
+    const index = compListFiltered.findIndex((c) => c.id === effectiveCompId);
     if (index <= 0) return;
     const t = setTimeout(() => {
       if (compScrollRef.current) {
@@ -201,7 +214,7 @@ export default function HomeScreen() {
       }
     }, 100);
     return () => clearTimeout(t);
-  }, [effectiveCompId, compList.length, windowWidth]);
+  }, [effectiveCompId, compListFiltered.length, windowWidth]);
 
   // Next race: show chronologically next race day (from DB) – open or closed. Data is from Supabase, cached in AsyncStorage.
   const nextRaceOff = (() => {
@@ -366,10 +379,11 @@ export default function HomeScreen() {
         nextRaceCardBtn: {
           flexDirection: 'row',
           alignItems: 'center',
-          gap: theme.spacing.xs,
+          justifyContent: 'center',
+          gap: theme.spacing.sm,
+          paddingVertical: theme.spacing.md,
+          paddingHorizontal: theme.spacing.lg,
           backgroundColor: theme.colors.accentMuted ?? 'rgba(21, 128, 61, 0.2)',
-          paddingVertical: theme.spacing.sm,
-          paddingHorizontal: theme.spacing.md,
           borderRadius: theme.radius.sm,
           alignSelf: 'flex-start',
           borderWidth: 1,
@@ -381,11 +395,25 @@ export default function HomeScreen() {
           fontWeight: '600',
           color: theme.colors.accent,
         },
+        nextRaceCardBtnCompact: {
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          backgroundColor: theme.colors.accent,
+        },
+        nextRaceCardBtnTextWhite: {
+          color: theme.colors.white,
+        },
         nextRaceCardMuted: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 14,
           color: theme.colors.textMuted,
           fontStyle: 'italic',
+        },
+        lockedNoteText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          color: theme.colors.text,
+          textAlign: 'center',
         },
         nextRaceCardEmptyMessage: {
           fontFamily: theme.fontFamily.regular,
@@ -506,6 +534,33 @@ export default function HomeScreen() {
           fontSize: 12,
           color: theme.colors.textMuted,
           marginBottom: theme.spacing.sm,
+        },
+        compTabsRow: {
+          flexDirection: 'row',
+          width: '100%',
+          marginBottom: theme.spacing.sm,
+          gap: theme.spacing.xs,
+        },
+        compTab: {
+          flex: 1,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.sm,
+          borderRadius: theme.radius.sm,
+          backgroundColor: theme.colors.surface,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        compTabActive: {
+          backgroundColor: theme.colors.accent,
+        },
+        compTabText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.textSecondary,
+        },
+        compTabTextActive: {
+          color: theme.colors.white,
+          fontWeight: '600',
         },
         compScroll: { marginHorizontal: -theme.spacing.md, marginBottom: theme.spacing.sm },
         compScrollInCard: { marginHorizontal: 0, marginBottom: theme.spacing.sm },
@@ -756,61 +811,77 @@ export default function HomeScreen() {
         {hasJoinedAny && (
           <>
             {/* Next race card – own card, above competitions */}
-            <TouchableOpacity
-              style={styles.nextRaceCard}
-              onPress={() => router.push('/(app)/selections')}
-              activeOpacity={0.8}
-            >
+            <View style={styles.nextRaceCard}>
               <Text style={styles.nextRaceCardTitle}>Next race</Text>
               {nextRaceOff ? (
-                <>
-                  <View style={styles.nextRaceCardHeaderRow}>
-                    <Text style={styles.nextRaceCardRaceName} numberOfLines={1}>{nextRaceOff.raceName}</Text>
-                    {nextRaceOff.isClosed && (
-                      <View style={styles.nextRaceCardClosedBadge}>
-                        <Text style={styles.nextRaceCardClosedBadgeText}>View only</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.nextRaceCardCourse}>{nextRaceOff.course} · {nextRaceOff.dateStr}</Text>
-                  <View style={styles.nextRaceCardRow}>
-                    <View style={styles.nextRaceCardMeta}>
-                      <Ionicons name="time-outline" size={14} color={theme.colors.textMuted} />
-                      <Text style={styles.nextRaceCardTime}>{nextRaceOff.timeStr}</Text>
+                nextRaceOff.isClosed ? (
+                  <Text style={styles.lockedNoteText}>Selections are locked in good luck.</Text>
+                ) : (
+                  <>
+                    <TouchableOpacity
+                      style={StyleSheet.absoluteFill}
+                      onPress={() => router.push('/(app)/selections')}
+                      activeOpacity={1}
+                    />
+                    <View style={styles.nextRaceCardHeaderRow}>
+                      <Text style={styles.nextRaceCardRaceName} numberOfLines={1}>{nextRaceOff.raceName}</Text>
                     </View>
-                    {nextRaceOff.runnerCount > 0 && (
+                    <Text style={styles.nextRaceCardCourse}>{nextRaceOff.course} · {nextRaceOff.dateStr}</Text>
+                    <View style={styles.nextRaceCardRow}>
                       <View style={styles.nextRaceCardMeta}>
-                        <Ionicons name="people-outline" size={14} color={theme.colors.textMuted} />
-                        <Text style={styles.nextRaceCardRunners}>{nextRaceOff.runnerCount} runners</Text>
+                        <Ionicons name="time-outline" size={14} color={theme.colors.textMuted} />
+                        <Text style={styles.nextRaceCardTime}>{nextRaceOff.timeStr}</Text>
                       </View>
-                    )}
-                  </View>
-                  <View style={styles.nextRaceCardBtn}>
-                    <Text style={styles.nextRaceCardBtnText}>My selections</Text>
-                    <Ionicons name="arrow-forward" size={14} color="#000000" />
-                  </View>
-                </>
+                      {nextRaceOff.runnerCount > 0 && (
+                        <View style={styles.nextRaceCardMeta}>
+                          <Ionicons name="people-outline" size={14} color={theme.colors.textMuted} />
+                          <Text style={styles.nextRaceCardRunners}>{nextRaceOff.runnerCount} runners</Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={[styles.nextRaceCardBtn, styles.nextRaceCardBtnCompact]}>
+                      <Text style={[styles.nextRaceCardBtnText, styles.nextRaceCardBtnTextWhite]}>My selections</Text>
+                      <Ionicons name="arrow-forward" size={14} color={theme.colors.white} />
+                    </View>
+                  </>
+                )
               ) : (
                 <Text style={styles.nextRaceCardMuted}>No upcoming races</Text>
               )}
-            </TouchableOpacity>
+            </View>
 
-            {/* Your competitions – title and icons outside card */}
+            {/* Your competitions – title and tabs */}
             <Text style={[styles.sectionTitle, styles.sectionTitleFirst]}>Your competitions</Text>
+            <View style={styles.compTabsRow}>
+              {(['upcoming', 'live', 'complete'] as const).map((tab) => {
+                const isActive = compTab === tab;
+                const label = tab === 'upcoming' ? 'Upcoming' : tab === 'live' ? 'Live' : 'Complete';
+                return (
+                  <TouchableOpacity
+                    key={tab}
+                    style={[styles.compTab, isActive && styles.compTabActive]}
+                    onPress={() => setCompTab(tab)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.compTabText, isActive && styles.compTabTextActive]}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.compScrollContent}
               style={styles.compScroll}
             >
-              {compList.map((c) => {
+              {compListFiltered.map((c) => {
                 const isSelected = effectiveCompId === c.id;
                 return (
                   <TouchableOpacity
                     key={c.id}
                     style={[styles.compCircle, isSelected && styles.compCircleSelected]}
                     onPress={() => {
-                      const index = compList.findIndex((x) => x.id === c.id);
+                      const index = compListFiltered.findIndex((x) => x.id === c.id);
                       setSelectedCompId(c.id);
                       scrollToCompIndex(index);
                     }}
@@ -832,7 +903,7 @@ export default function HomeScreen() {
             </ScrollView>
 
             {/* Horizontal snap scroll: one slide per competition (meeting name + meta above, stats-only card) */}
-            {compList.length > 0 && (
+            {compListFiltered.length > 0 && (
               <ScrollView
                 ref={compScrollRef}
                 horizontal
@@ -842,13 +913,13 @@ export default function HomeScreen() {
                   const x = e.nativeEvent.contentOffset.x;
                   const slideWidth = windowWidth;
                   const index = Math.round(x / slideWidth);
-                  const comp = compList[index];
+                  const comp = compListFiltered[index];
                   if (comp) setSelectedCompId(comp.id);
                 }}
                 contentContainerStyle={{ flexDirection: 'row' }}
                 style={{ marginHorizontal: -theme.spacing.md, marginBottom: theme.spacing.sm }}
               >
-                {compList.map((c) => {
+                {compListFiltered.map((c) => {
                   const summary = summaryByComp?.byComp[c.id];
                   const isComplete = compStatusByCompId[c.id] === 'complete';
                   const position = compPositionByCompId[c.id] ?? null;

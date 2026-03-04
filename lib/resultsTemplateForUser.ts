@@ -15,6 +15,10 @@ export type ResultRow = {
   name: string;
   sp: number;
   earnedPoints: boolean;
+  /** Position points from DB (points_system). */
+  pos_points?: number;
+  /** SP/odds bonus points from DB (points_system). */
+  sp_points?: number;
 };
 
 export type RaceResultTemplate = {
@@ -130,6 +134,8 @@ export async function fetchResultsTemplateForUser(
               name: r.name ?? '',
               sp: res.sp ?? 0,
               earnedPoints: false,
+              pos_points: res.pos_points,
+              sp_points: res.sp_points,
             });
           } else if (res.resultCode) {
             fullResult.push({
@@ -138,6 +144,8 @@ export async function fetchResultsTemplateForUser(
               name: r.name ?? '',
               sp: res.sp ?? 0,
               earnedPoints: false,
+              pos_points: res.pos_points,
+              sp_points: res.sp_points,
             });
           }
         }

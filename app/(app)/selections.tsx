@@ -57,8 +57,7 @@ export default function SelectionsScreen() {
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [expandedDrawer, setExpandedDrawer] = useState<{
     cardKey: string;
-    raceName: string;
-    meeting: string;
+    raceTimeUtc: string;
     others: OtherUserSelection[];
   } | null>(null);
   const [selectionsBulk, setSelectionsBulk] = useState<SelectionsBulkData | null>(null);
@@ -235,7 +234,7 @@ export default function SelectionsScreen() {
       );
       if (error) throw error;
       Alert.alert('Saved', 'Your selections have been saved.', [
-        { text: 'OK', onPress: () => router.replace('/(app)') },
+        { text: 'OK', onPress: () => router.replace('/(app)/selections') },
       ]);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to save';
@@ -281,8 +280,7 @@ export default function SelectionsScreen() {
     );
     setExpandedDrawer({
       cardKey,
-      raceName: item.raceName,
-      meeting: item.meeting,
+      raceTimeUtc: item.raceTimeUtc,
       others,
     });
   };
@@ -439,6 +437,22 @@ export default function SelectionsScreen() {
           color: theme.colors.black,
           fontWeight: '600',
         },
+        lockedNoteBlock: {
+          marginTop: theme.spacing.md,
+          marginBottom: theme.spacing.lg,
+          paddingVertical: theme.spacing.lg,
+          paddingHorizontal: theme.spacing.md,
+          backgroundColor: theme.colors.backgroundSecondary,
+          borderRadius: theme.radius.md,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        lockedNoteText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          color: theme.colors.text,
+          textAlign: 'center',
+        },
         makePicksSection: {
           marginBottom: theme.spacing.lg,
         },
@@ -533,6 +547,7 @@ export default function SelectionsScreen() {
         },
         sectionTitleWithTopMargin: {
           marginTop: theme.spacing.lg,
+          marginBottom: theme.spacing.md,
         },
         courseDropdown: {
           flexDirection: 'row',
@@ -540,8 +555,8 @@ export default function SelectionsScreen() {
           justifyContent: 'space-between',
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.sm,
-          paddingVertical: theme.spacing.sm,
-          paddingHorizontal: theme.spacing.md,
+          paddingVertical: theme.spacing.md,
+          paddingHorizontal: theme.spacing.lg,
           borderWidth: 1,
           borderColor: theme.colors.border,
           marginBottom: theme.spacing.md,
@@ -566,14 +581,14 @@ export default function SelectionsScreen() {
         dropdownContent: {
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.md,
-          padding: theme.spacing.sm,
+          padding: theme.spacing.md,
           width: '100%',
           maxWidth: 320,
           maxHeight: 320,
         },
         dropdownOption: {
           paddingVertical: theme.spacing.md,
-          paddingHorizontal: theme.spacing.md,
+          paddingHorizontal: theme.spacing.lg,
           borderRadius: theme.radius.sm,
         },
         dropdownOptionActive: {
@@ -734,41 +749,40 @@ export default function SelectionsScreen() {
           color: theme.colors.textMuted,
           marginBottom: theme.spacing.sm,
         },
-        othersCardsContainer: { gap: theme.spacing.xs },
-        othersCard: {
-          position: 'relative',
+        othersCardsContainer: {
           flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: theme.spacing.sm,
+        },
+        othersCard: {
+          width: '100%',
+          flexDirection: 'row',
+          alignItems: 'center',
           backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.md,
-          paddingVertical: theme.spacing.sm,
-          paddingHorizontal: theme.spacing.md,
+          borderRadius: theme.radius.sm,
+          paddingVertical: theme.spacing.xs,
+          paddingHorizontal: theme.spacing.sm,
           borderWidth: 1,
           borderColor: theme.colors.border,
-          overflow: 'hidden',
         },
         othersCardHighlight: { backgroundColor: theme.colors.accentMuted },
-        othersCardFade: {
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: 12,
-          borderTopLeftRadius: theme.radius.md - 1,
-          borderBottomLeftRadius: theme.radius.md - 1,
-        },
         othersCardRow: {
           flex: 1,
           flexDirection: 'row',
           alignItems: 'center',
+          justifyContent: 'space-between',
+          minWidth: 0,
         },
-        othersCardCenter: { flex: 1, minWidth: 0 },
-        othersCardName: { fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.text },
+        othersCardName: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.text },
         othersCardNameBold: { fontWeight: '600' },
         othersCardPick: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 12,
           color: theme.colors.textSecondary,
-          marginTop: 2,
+          marginLeft: theme.spacing.sm,
+          flex: 1,
+          textAlign: 'right',
+          minWidth: 0,
         },
         othersDrawer: {
           backgroundColor: theme.colors.background,
@@ -782,19 +796,6 @@ export default function SelectionsScreen() {
           paddingHorizontal: theme.spacing.md,
           paddingTop: theme.spacing.sm,
           paddingBottom: theme.spacing.md,
-        },
-        othersDrawerTitle: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
-          fontWeight: '600',
-          color: theme.colors.text,
-          marginBottom: 2,
-        },
-        othersDrawerSubtitle: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
-          color: theme.colors.textMuted,
-          marginBottom: theme.spacing.sm,
         },
         othersDrawerLabel: {
           fontFamily: theme.fontFamily.regular,
@@ -1022,8 +1023,6 @@ export default function SelectionsScreen() {
             />
           }
         >
-          <Text style={styles.sectionTitle}>My selections</Text>
-
           {userCompetitions.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyStateTitle}>Join a competition</Text>
@@ -1038,12 +1037,23 @@ export default function SelectionsScreen() {
                 const today = new Date().toISOString().slice(0, 10);
                 const nonExpiredRaces = availableRaces.filter((item) => item.raceDate >= today);
                 const openRaces = nonExpiredRaces.filter((item) => !isSelectionClosed(item.firstRaceUtc));
-                return openRaces.length > 0 && (
+                const showableRaces = openRaces.filter((item) => !item.isLocked);
+                if (showableRaces.length === 0) {
+                  return (
+                    <View style={styles.makePicksSection}>
+                      <Text style={styles.makePicksSectionTitle}>Make your picks</Text>
+                      <View style={styles.lockedNoteBlock}>
+                        <Text style={styles.lockedNoteText}>Selections are locked in good luck.</Text>
+                      </View>
+                    </View>
+                  );
+                }
+                return (
                 <View style={styles.makePicksSection}>
                   <Text style={styles.makePicksSectionTitle}>Make your picks</Text>
                   <Text style={styles.makePicksSectionSubtitle}>Select a meeting to make or view your selections</Text>
                   <View style={styles.raceCardsList}>
-                    {openRaces.map((item) => {
+                    {showableRaces.map((item) => {
                       const closed = isSelectionClosed(item.firstRaceUtc);
                       const cardKey = `${item.competitionId}-${item.raceDate}`;
                       const isLocking = lockingId === cardKey;
@@ -1056,9 +1066,7 @@ export default function SelectionsScreen() {
                             item.hasAnyPicks && styles.raceCardHasPicks,
                           ]}
                           onPress={() =>
-                            closed || item.isLocked
-                              ? router.push({ pathname: '/(app)/selections', params: { competitionId: item.competitionId, raceDate: item.raceDate } })
-                              : router.push({ pathname: '/(app)/selections', params: { competitionId: item.competitionId, raceDate: item.raceDate } })
+                            router.push({ pathname: '/(app)/selections', params: { competitionId: item.competitionId, raceDate: item.raceDate } })
                           }
                           activeOpacity={0.8}
                           disabled={isLocking}
@@ -1071,8 +1079,6 @@ export default function SelectionsScreen() {
                               </Text>
                               {closed ? (
                                 <Text style={styles.raceCardStatusClosed}>Closed – view only</Text>
-                              ) : item.isLocked ? (
-                                <Text style={styles.raceCardStatus}>Locked – tap to view</Text>
                               ) : item.hasAllPicks ? (
                                 <Text style={styles.raceCardStatus}>Lock in to view others</Text>
                               ) : (
@@ -1081,7 +1087,7 @@ export default function SelectionsScreen() {
                                 </Text>
                               )}
                             </View>
-                            {!closed && !item.isLocked && (
+                            {!closed && (
                               <View style={styles.raceCardRight}>
                                 {item.hasAllPicks ? (
                                   <TouchableOpacity
@@ -1112,6 +1118,9 @@ export default function SelectionsScreen() {
               );
               })()}
 
+              {(() => {
+                return (
+                    <>
               <Text style={[styles.sectionTitle, styles.sectionTitleWithTopMargin]}>Your selections</Text>
 
           {mySelectionsList.length === 0 ? (
@@ -1257,8 +1266,6 @@ export default function SelectionsScreen() {
                             </TouchableOpacity>
                             {isExpanded && expandedDrawer && (
                               <View style={styles.othersDrawer}>
-                                <Text style={styles.othersDrawerTitle}>{expandedDrawer.raceName}</Text>
-                                <Text style={styles.othersDrawerSubtitle}>{expandedDrawer.meeting}</Text>
                                 <Text style={styles.othersDrawerLabel}>Other picks in this race</Text>
                                 <View style={styles.othersCardsContainer}>
                                   {expandedDrawer.others.map((o, i) => (
@@ -1267,35 +1274,10 @@ export default function SelectionsScreen() {
                                       style={[styles.othersCard, o.isCurrentUser && styles.othersCardHighlight]}
                                     >
                                       <View style={styles.othersCardRow}>
-                                        <View style={styles.othersCardCenter}>
-                                          <Text style={[styles.othersCardName, o.isCurrentUser && styles.othersCardNameBold]} numberOfLines={1}>
-                                            {o.displayName}{o.isCurrentUser ? ' (you)' : ''}
-                                          </Text>
-                                          <Text style={styles.othersCardPick} numberOfLines={1}>{displayHorseName(o.runnerName)}</Text>
-                                        </View>
-                                        {o.positionLabel ? (
-                                          <View
-                                            style={[
-                                              styles.wplBadge,
-                                              o.positionLabel === 'won' && styles.wplWon,
-                                              o.positionLabel === 'place' && styles.wplPlace,
-                                              o.positionLabel === 'lost' && styles.wplLost,
-                                            ]}
-                                          >
-                                            <Text
-                                              style={[
-                                                styles.wplBadgeText,
-                                                o.positionLabel === 'won' && styles.wplWonText,
-                                                o.positionLabel === 'place' && styles.wplPlaceText,
-                                                o.positionLabel === 'lost' && styles.wplLostText,
-                                              ]}
-                                            >
-                                              {o.positionLabel === 'won' ? 'Win' : o.positionLabel === 'place' ? 'Place' : 'Lost'}
-                                            </Text>
-                                          </View>
-                                        ) : (
-                                          <Text style={styles.mySelectionCardPending}>—</Text>
-                                        )}
+                                        <Text style={[styles.othersCardName, o.isCurrentUser && styles.othersCardNameBold]} numberOfLines={1}>
+                                          {o.displayName}{o.isCurrentUser ? ' (you)' : ''}
+                                        </Text>
+                                        <Text style={styles.othersCardPick} numberOfLines={1}>{displayHorseName(o.runnerName)}</Text>
                                       </View>
                                     </View>
                                   ))}
@@ -1310,6 +1292,9 @@ export default function SelectionsScreen() {
               )}
             </>
           )}
+                    </>
+                );
+              })()}
             </>
           )}
         </ScrollView>

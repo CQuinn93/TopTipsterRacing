@@ -5,8 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Modal,
-  Pressable,
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
@@ -17,6 +15,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { lightTheme } from '@/constants/theme';
 import { displayHorseName } from '@/lib/displayHorseName';
 import { decimalToFractional } from '@/lib/oddsFormat';
+import { POSITION_POINTS } from '@/lib/appUtils';
 import { getLatestResultsForUser } from '@/lib/latestResultsCache';
 import type { MeetingResults, RaceResultTemplate } from '@/lib/resultsTemplateForUser';
 import { useRealtimeRaces } from '@/lib/useRealtimeRaces';
@@ -26,10 +25,9 @@ export default function ResultsScreen() {
   const { userId } = useAuth();
   const [compIds, setCompIds] = useState<string[]>([]);
   const [meetingResults, setMeetingResults] = useState<MeetingResults[]>([]);
-  const [selectedMeetingCourse, setSelectedMeetingCourse] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [selectedRaceIndex, setSelectedRaceIndex] = useState(0);
-  const [meetingDropdownOpen, setMeetingDropdownOpen] = useState(false);
+  const [selectedRaceByCourse, setSelectedRaceByCourse] = useState<Record<string, number>>({});
+  const [expandedRunnerKey, setExpandedRunnerKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastManualRefreshAt, setLastManualRefreshAt] = useState<number | null>(null);
@@ -53,9 +51,6 @@ export default function ResultsScreen() {
       }
       const results = await getLatestResultsForUser(supabase, userId, ids, forceRefresh);
       setMeetingResults(results);
-      if (results.length > 0 && !selectedMeetingCourse) {
-        setSelectedMeetingCourse(results[0].course);
-      }
       setLoading(false);
       setRefreshing(false);
     },
@@ -82,9 +77,6 @@ export default function ResultsScreen() {
       return;
     }
     setResultsRaceApiIds(meetingResults.flatMap((m) => m.races.map((r) => r.raceId)));
-    const courses = meetingResults.map((m) => m.course);
-    setSelectedMeetingCourse((prev) => (prev && courses.includes(prev) ? prev : meetingResults[0].course));
-    setSelectedRaceIndex(0);
     const today = new Date().toISOString().slice(0, 10);
     const dates = new Set<string>();
     meetingResults.forEach((m) =>
@@ -103,6 +95,20 @@ export default function ResultsScreen() {
 
   useRealtimeRaces(resultsRaceApiIds, () => loadResults(true));
 
+  useEffect(() => {
+    setSelectedRaceByCourse({});
+    setExpandedRunnerKey(null);
+  }, [selectedDate]);
+
+  const getPointsForRunner = (
+    r: { position: number | null; earnedPoints: boolean },
+    placedPositions: number[]
+  ): number => {
+    if (r.position == null || !placedPositions.includes(r.position)) return POSITION_POINTS.lost;
+    if (r.position === 1) return POSITION_POINTS.won;
+    return POSITION_POINTS.place;
+  };
+
   const availableDates = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     const dates = new Set<string>();
@@ -115,13 +121,18 @@ export default function ResultsScreen() {
     return [...dates].sort((a, b) => b.localeCompare(a));
   }, [meetingResults]);
 
-  const currentMeeting = meetingResults.find((m) => m.course === selectedMeetingCourse);
-  const racesForSelectedDate = useMemo(() => {
-    if (!currentMeeting || !selectedDate) return [];
-    return currentMeeting.races.filter((r) => r.raceTimeUtc.slice(0, 10) === selectedDate);
-  }, [currentMeeting, selectedDate]);
-  const races = racesForSelectedDate;
-  const selectedRace: RaceResultTemplate | null = races[selectedRaceIndex] ?? races[0] ?? null;
+  const racesGroupedByMeeting = useMemo(() => {
+    if (!selectedDate) return [];
+    return meetingResults
+      .map((m) => ({
+        course: m.course,
+        races: m.races
+          .filter((r) => r.raceTimeUtc.slice(0, 10) === selectedDate)
+          .sort((a, b) => a.raceTimeUtc.localeCompare(b.raceTimeUtc)),
+      }))
+      .filter((g) => g.races.length > 0)
+      .sort((a, b) => a.course.localeCompare(b.course));
+  }, [meetingResults, selectedDate]);
 
   const formatDateLabel = (dateStr: string) => {
     const today = new Date().toISOString().slice(0, 10);
@@ -159,45 +170,15 @@ export default function ResultsScreen() {
         fontSize: 14,
         color: theme.colors.textMuted,
       },
-      meetingDropdown: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: theme.colors.surface,
-        borderWidth: cardBorderWidth,
-        borderColor: cardBorder,
-        borderRadius: theme.radius.sm,
-        paddingVertical: theme.spacing.sm,
-        paddingHorizontal: theme.spacing.md,
-        marginBottom: theme.spacing.sm,
+      groupSection: {
+        marginBottom: theme.spacing.md,
       },
-      meetingDropdownText: {
+      groupHeader: {
         fontFamily: theme.fontFamily.regular,
         fontSize: 15,
-        color: theme.colors.text,
-      },
-      meetingDropdownChevron: { fontSize: 12, color: theme.colors.textMuted },
-      modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'center',
-        padding: theme.spacing.lg,
-      },
-      modalContent: {
-        backgroundColor: theme.colors.surface,
-        borderRadius: theme.radius.md,
-        padding: theme.spacing.sm,
-        borderWidth: cardBorderWidth,
-        borderColor: cardBorder,
-      },
-      meetingOption: {
-        paddingVertical: theme.spacing.md,
-        paddingHorizontal: theme.spacing.md,
-      },
-      meetingOptionText: {
-        fontFamily: theme.fontFamily.regular,
-        fontSize: 16,
-        color: theme.colors.text,
+        fontWeight: '600',
+        color: theme.colors.accent,
+        marginBottom: theme.spacing.xs,
       },
       dateFilterRow: {
         flexDirection: 'row',
@@ -239,14 +220,13 @@ export default function ResultsScreen() {
         color: theme.colors.black,
         fontWeight: '600',
       },
+      raceTabsScroll: { marginBottom: theme.spacing.sm },
       raceTabsRow: {
         flexDirection: 'row',
         alignItems: 'center',
         flexWrap: 'wrap',
-        marginBottom: theme.spacing.sm,
         gap: theme.spacing.sm,
       },
-      raceTabWrap: { flexDirection: 'row', alignItems: 'center' },
       raceTab: {
         paddingVertical: theme.spacing.sm,
         paddingHorizontal: theme.spacing.md,
@@ -270,37 +250,79 @@ export default function ResultsScreen() {
       },
       resultCard: {
         backgroundColor: theme.colors.surface,
-        borderRadius: theme.radius.lg,
-        padding: theme.spacing.md,
-        marginBottom: theme.spacing.lg,
+        borderRadius: theme.radius.md,
+        padding: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.md,
+        marginBottom: theme.spacing.md,
         borderWidth: cardBorderWidth,
         borderColor: cardBorder,
         overflow: 'hidden',
+        justifyContent: 'center',
       },
       resultCardRaceName: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 18,
+        fontSize: 16,
         color: theme.colors.text,
         fontWeight: '600',
-        marginBottom: theme.spacing.sm,
+        marginBottom: theme.spacing.xs,
       },
       resultCardTime: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: 12,
         color: theme.colors.textMuted,
-        marginBottom: theme.spacing.md,
+        marginBottom: theme.spacing.sm,
       },
-      runnerCardList: { gap: theme.spacing.sm },
+      runnerCardList: { gap: theme.spacing.xs },
       runnerCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        justifyContent: 'center',
         backgroundColor: theme.colors.background,
-        borderRadius: theme.radius.md,
-        paddingVertical: theme.spacing.sm,
-        paddingHorizontal: theme.spacing.md,
+        borderRadius: theme.radius.sm,
+        paddingVertical: theme.spacing.xs,
+        paddingHorizontal: theme.spacing.sm,
         borderWidth: 1,
         borderColor: theme.colors.border,
-        minHeight: 56,
+        minHeight: 44,
+      },
+      runnerCardRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+      },
+      runnerCardChevron: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 10,
+        color: theme.colors.textMuted,
+        marginLeft: theme.spacing.xs,
+      },
+      runnerCardPointsBlock: {
+        marginTop: theme.spacing.xs,
+        paddingTop: theme.spacing.xs,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: theme.colors.border,
+      },
+      runnerCardPointsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginTop: 2,
+      },
+      runnerCardPointsTotalRow: {
+        marginTop: theme.spacing.xs,
+        paddingTop: theme.spacing.xs,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: theme.colors.border,
+      },
+      runnerCardPointsLabel: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 12,
+        color: theme.colors.textMuted,
+      },
+      runnerCardPointsValue: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 13,
+        fontWeight: '600',
+        color: theme.colors.accent,
       },
       runnerCardEarned: {
         borderLeftWidth: 4,
@@ -308,33 +330,33 @@ export default function ResultsScreen() {
         backgroundColor: theme.colors.accentMuted,
       },
       runnerCardPosition: {
-        width: 44,
+        width: 36,
         alignItems: 'center',
         justifyContent: 'center',
       },
       runnerCardPositionBadge: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: 12,
         fontWeight: '700',
         color: theme.colors.textSecondary,
       },
       runnerCardPositionWon: { color: theme.colors.accent },
-      runnerCardCenter: { flex: 1, minWidth: 0, marginLeft: theme.spacing.sm },
+      runnerCardCenter: { flex: 1, minWidth: 0, marginLeft: theme.spacing.xs },
       runnerCardName: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 16,
+        fontSize: 14,
         color: theme.colors.text,
         fontWeight: '500',
       },
       runnerCardOdds: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 15,
+        fontSize: 13,
         color: theme.colors.textSecondary,
-        marginLeft: theme.spacing.sm,
+        marginLeft: theme.spacing.xs,
       },
       awaitingRow: {
-        paddingVertical: theme.spacing.md,
-        paddingHorizontal: theme.spacing.md,
+        paddingVertical: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.sm,
         backgroundColor: theme.colors.background,
         borderRadius: theme.radius.md,
         borderWidth: 1,
@@ -342,16 +364,16 @@ export default function ResultsScreen() {
       },
       awaitingText: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 15,
+        fontSize: 13,
         color: theme.colors.textMuted,
         textAlign: 'center',
       },
       yourSelection: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: 12,
         color: theme.colors.textMuted,
-        marginTop: theme.spacing.md,
-        paddingTop: theme.spacing.sm,
+        marginTop: theme.spacing.sm,
+        paddingTop: theme.spacing.xs,
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: theme.colors.border,
       },
@@ -379,33 +401,6 @@ export default function ResultsScreen() {
         <Text style={styles.muted}>Join a competition and make selections to see results here.</Text>
       ) : (
         <>
-          <TouchableOpacity
-            style={styles.meetingDropdown}
-            onPress={() => setMeetingDropdownOpen(true)}
-          >
-            <Text style={styles.meetingDropdownText}>{selectedMeetingCourse ?? 'Select meeting'}</Text>
-            <Text style={styles.meetingDropdownChevron}>▼</Text>
-          </TouchableOpacity>
-          <Modal visible={meetingDropdownOpen} transparent animationType="fade">
-            <Pressable style={styles.modalOverlay} onPress={() => setMeetingDropdownOpen(false)}>
-              <Pressable style={styles.modalContent} onPress={(e) => e.stopPropagation()}>
-                {meetingResults.map((m) => (
-                  <TouchableOpacity
-                    key={m.course}
-                    style={styles.meetingOption}
-                    onPress={() => {
-                      setSelectedMeetingCourse(m.course);
-                      setSelectedRaceIndex(0);
-                      setMeetingDropdownOpen(false);
-                    }}
-                  >
-                    <Text style={styles.meetingOptionText}>{m.course}</Text>
-                  </TouchableOpacity>
-                ))}
-              </Pressable>
-            </Pressable>
-          </Modal>
-
           {availableDates.length > 0 && selectedDate && (
             <View style={styles.dateFilterRow}>
               <Text style={styles.dateFilterLabel}>Date</Text>
@@ -421,10 +416,7 @@ export default function ResultsScreen() {
                     <TouchableOpacity
                       key={d}
                       style={[styles.datePill, isSelected && styles.datePillSelected]}
-                      onPress={() => {
-                        setSelectedDate(d);
-                        setSelectedRaceIndex(0);
-                      }}
+                      onPress={() => setSelectedDate(d)}
                       activeOpacity={0.8}
                     >
                       <Text style={[styles.datePillText, isSelected && styles.datePillTextSelected]}>
@@ -437,76 +429,130 @@ export default function ResultsScreen() {
             </View>
           )}
 
-          {races.length > 0 && (
-            <>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.raceTabsRow}>
-                {races.map((r, i) => (
-                  <TouchableOpacity
-                    key={r.raceId}
-                    style={[styles.raceTab, selectedRaceIndex === i && styles.raceTabActive]}
-                    onPress={() => setSelectedRaceIndex(i)}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={[styles.raceTabText, selectedRaceIndex === i && styles.raceTabTextActive]}>
-                      {new Date(r.raceTimeUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-
-              {selectedRace && (() => {
-                const fullResult = selectedRace.fullResult ?? [];
-                const awaiting = fullResult.length === 0;
-
-                return (
-                  <View style={styles.resultCard}>
-                    <Text style={styles.resultCardRaceName}>{selectedRace.raceName}</Text>
-                    <Text style={styles.resultCardTime}>
-                      {new Date(selectedRace.raceTimeUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                    {awaiting ? (
-                      <View style={styles.awaitingRow}>
-                        <Text style={styles.awaitingText}>Awaiting results</Text>
-                      </View>
-                    ) : (
-                      <View style={styles.runnerCardList}>
-                        {fullResult.map((r, idx) => (
-                          <View
-                            key={`${r.label}-${r.name}-${idx}`}
-                            style={[styles.runnerCard, r.earnedPoints && styles.runnerCardEarned]}
-                          >
-                            <View style={styles.runnerCardPosition}>
-                              <Text
-                                style={[
-                                  styles.runnerCardPositionBadge,
-                                  r.position === 1 && styles.runnerCardPositionWon,
-                                ]}
+          {racesGroupedByMeeting.map((group) => {
+            const selectedIdx = selectedRaceByCourse[group.course] ?? 0;
+            const selectedRace = group.races[selectedIdx] ?? group.races[0] ?? null;
+            return (
+              <View key={group.course} style={styles.groupSection}>
+                <Text style={styles.groupHeader}>{group.course}</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.raceTabsRow}
+                  style={styles.raceTabsScroll}
+                >
+                  {group.races.map((race, i) => {
+                    const isSelected = selectedIdx === i;
+                    return (
+                      <TouchableOpacity
+                        key={race.raceId}
+                        style={[styles.raceTab, isSelected && styles.raceTabActive]}
+                        onPress={() => {
+                          setSelectedRaceByCourse((prev) => ({ ...prev, [group.course]: i }));
+                          setExpandedRunnerKey(null);
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[styles.raceTabText, isSelected && styles.raceTabTextActive]}>
+                          {new Date(race.raceTimeUtc).toLocaleTimeString(undefined, {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+                {selectedRace && (() => {
+                  const fullResult = selectedRace.fullResult ?? [];
+                  const awaiting = fullResult.length === 0;
+                  return (
+                    <View style={styles.resultCard}>
+                      <Text style={styles.resultCardRaceName}>{selectedRace.raceName}</Text>
+                      <Text style={styles.resultCardTime}>
+                        {new Date(selectedRace.raceTimeUtc).toLocaleTimeString(undefined, {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </Text>
+                      {awaiting ? (
+                        <View style={styles.awaitingRow}>
+                          <Text style={styles.awaitingText}>Awaiting results</Text>
+                        </View>
+                      ) : (
+                        <View style={styles.runnerCardList}>
+                          {fullResult.map((r, idx) => {
+                            const runnerKey = `${selectedRace.raceId}-${idx}`;
+                            const isExpanded = expandedRunnerKey === runnerKey;
+                            const points = getPointsForRunner(r, selectedRace.placedPositions ?? []);
+                            return (
+                              <TouchableOpacity
+                                key={`${r.label}-${r.name}-${idx}`}
+                                style={[styles.runnerCard, r.earnedPoints && styles.runnerCardEarned]}
+                                onPress={() =>
+                                  setExpandedRunnerKey((prev) => (prev === runnerKey ? null : runnerKey))
+                                }
+                                activeOpacity={0.8}
                               >
-                                {r.label}
-                              </Text>
-                            </View>
-                            <View style={styles.runnerCardCenter}>
-                              <Text style={styles.runnerCardName} numberOfLines={1}>
-                                {displayHorseName(r.name)}
-                              </Text>
-                            </View>
-                            <Text style={styles.runnerCardOdds}>{decimalToFractional(r.sp)}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-                    <Text style={styles.yourSelection}>Your selection: {displayHorseName(selectedRace.userSelection)}</Text>
-                  </View>
-                );
-              })()}
-            </>
-          )}
+                                <View style={styles.runnerCardRow}>
+                                  <View style={styles.runnerCardPosition}>
+                                    <Text
+                                      style={[
+                                        styles.runnerCardPositionBadge,
+                                        r.position === 1 && styles.runnerCardPositionWon,
+                                      ]}
+                                    >
+                                      {r.label}
+                                    </Text>
+                                  </View>
+                                  <View style={styles.runnerCardCenter}>
+                                    <Text style={styles.runnerCardName} numberOfLines={1}>
+                                      {displayHorseName(r.name)}
+                                    </Text>
+                                  </View>
+                                  <Text style={styles.runnerCardOdds}>{decimalToFractional(r.sp)}</Text>
+                                  <Text style={styles.runnerCardChevron}>{isExpanded ? '▲' : '▼'}</Text>
+                                </View>
+                                {isExpanded && (
+                                  <View style={styles.runnerCardPointsBlock}>
+                                    <View style={styles.runnerCardPointsRow}>
+                                      <Text style={styles.runnerCardPointsLabel}>Position points</Text>
+                                      <Text style={styles.runnerCardPointsValue}>
+                                        {r.pos_points != null ? r.pos_points : points}
+                                      </Text>
+                                    </View>
+                                    <View style={styles.runnerCardPointsRow}>
+                                      <Text style={styles.runnerCardPointsLabel}>Odds points</Text>
+                                      <Text style={styles.runnerCardPointsValue}>
+                                        {r.sp_points != null ? r.sp_points : 0}
+                                      </Text>
+                                    </View>
+                                    <View style={[styles.runnerCardPointsRow, styles.runnerCardPointsTotalRow]}>
+                                      <Text style={styles.runnerCardPointsLabel}>Total</Text>
+                                      <Text style={styles.runnerCardPointsValue}>
+                                        {(r.pos_points ?? points) + (r.sp_points ?? 0)}
+                                      </Text>
+                                    </View>
+                                  </View>
+                                )}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      )}
+                      <Text style={styles.yourSelection}>
+                        Your selection: {displayHorseName(selectedRace.userSelection)}
+                      </Text>
+                    </View>
+                  );
+                })()}
+              </View>
+            );
+          })}
 
-          {currentMeeting && races.length === 0 && availableDates.length > 0 && selectedDate && (
+          {racesGroupedByMeeting.length === 0 && availableDates.length > 0 && selectedDate && (
             <View style={styles.resultCard}>
-              <Text style={styles.awaitingText}>
-                No races at {currentMeeting.course} on {formatDateLabel(selectedDate)}.
-              </Text>
+              <Text style={styles.awaitingText}>No races on {formatDateLabel(selectedDate)}.</Text>
             </View>
           )}
         </>

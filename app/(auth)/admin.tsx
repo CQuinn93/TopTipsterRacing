@@ -31,7 +31,7 @@ const IRISH_COURSES = [
 ].sort((a, b) => a.localeCompare(b));
 
 const ENGLAND_COURSES = [
-  'Aintree', 'Ascot', 'Bath', 'Beverley', 'Brighton', 'Carlisle', 'Cartmel', 'Catterick', 'Chelmsford City',
+  'Aintree', 'Ascot', 'Bath', 'Beverley', 'Brighton', 'Carlisle', 'Cartmel', 'Catterick Bridge', 'Chelmsford City',
   'Cheltenham', 'Chester', 'Doncaster', 'Epsom Downs', 'Exeter', 'Fakenham', 'Fontwell Park', 'Goodwood',
   'Great Yarmouth', 'Haydock Park', 'Hereford', 'Hexham', 'Huntingdon', 'Kempton Park', 'Leicester',
   'Lingfield Park', 'Ludlow', 'Market Rasen', 'Newbury', 'Newcastle', 'Newmarket', 'Newton Abbot', 'Nottingham',
