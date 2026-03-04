@@ -221,10 +221,12 @@ export default function HomeScreen() {
     if (availableRaces.length === 0) return null;
     const sorted = [...availableRaces].sort((a, b) => new Date(a.firstRaceUtc).getTime() - new Date(b.firstRaceUtc).getTime());
     const now = Date.now();
+    const RACE_FINISHED_BUFFER_MS = 20 * 60 * 1000; // 20 min after first race we treat as "races finished"
     const next = sorted.find((d) => new Date(d.firstRaceUtc).getTime() > now) ?? sorted[sorted.length - 1];
     const dateStr = new Date(next.raceDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
     const timeStr = new Date(next.firstRaceUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
     const closed = isSelectionClosed(next.firstRaceUtc);
+    const raceTimePassed = new Date(next.firstRaceUtc).getTime() + RACE_FINISHED_BUFFER_MS < now;
     return {
       label: 'Next race off',
       course: next.course,
@@ -233,6 +235,7 @@ export default function HomeScreen() {
       raceName: next.firstRaceName ?? 'Race',
       runnerCount: next.firstRaceRunnerCount ?? 0,
       isClosed: closed,
+      raceTimePassed,
     };
   })();
 
@@ -819,7 +822,7 @@ export default function HomeScreen() {
           <>
             {/* Next race card – own card, above competitions */}
             <View style={styles.nextRaceCard}>
-              {nextRaceOff ? (
+              {nextRaceOff && !nextRaceOff.raceTimePassed ? (
                 nextRaceOff.isClosed ? (
                   <>
                     <Text style={styles.nextRaceCardTitle}>Next race</Text>
@@ -858,7 +861,17 @@ export default function HomeScreen() {
               ) : (
                 <>
                   <Text style={styles.nextRaceCardTitle}>Next race</Text>
-                  <Text style={styles.nextRaceCardMuted}>No upcoming races</Text>
+                  <Text style={styles.nextRaceCardEmptyMessage}>
+                    All of today's races have finished. Don't forget to check the leaderboard to see how you got on.
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.nextRaceCardBtn, styles.nextRaceCardBtnCompact]}
+                    onPress={() => router.push('/(app)/competitions')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.nextRaceCardBtnTextWhite}>My Competitions</Text>
+                    <Ionicons name="arrow-forward" size={14} color="#ffffff" />
+                  </TouchableOpacity>
                 </>
               )}
             </View>
