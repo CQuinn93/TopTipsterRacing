@@ -1,12 +1,9 @@
-# Pull following day's race data. Runs at 5pm and 6pm UK time (and manually).
-# Cron is UTC only: 17:00, 18:00 UTC = 5pm, 6pm GMT (winter); 6pm, 7pm BST (summer). Second run is backup.
+# Pull following day's race data. Triggered by cron-job.org at 17:00 and 18:00 UTC (5pm/6pm UK GMT, 6pm/7pm BST).
 # Competitions for the following day must be created before 8pm UK to get races that night.
 # GitHub Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY_PULL_RACES. Optional: RESEND_API_KEY, PULL_RACES_NOTIFICATION_EMAIL for email report.
 name: Pull races
 
 on:
-  schedule:
-    - cron: '0 16-19 * * *'
   workflow_dispatch:
 
 jobs:

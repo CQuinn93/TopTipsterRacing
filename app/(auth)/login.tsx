@@ -9,6 +9,7 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -44,10 +45,10 @@ export default function LoginScreen() {
           textAlign: 'center',
           marginBottom: theme.spacing.xs,
         },
-        subtitle: {
+        slogan: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          color: theme.colors.textSecondary,
+          fontSize: 14,
+          color: theme.colors.textMuted,
           textAlign: 'center',
           marginBottom: theme.spacing.xl,
         },
@@ -85,6 +86,20 @@ export default function LoginScreen() {
           fontSize: 14,
           color: theme.colors.accent,
           textAlign: 'center',
+        },
+        policyRow: {
+          flexDirection: 'row',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: theme.spacing.md,
+          marginTop: theme.spacing.lg,
+          marginBottom: theme.spacing.sm,
+        },
+        policyLink: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+          textDecorationLine: 'underline',
         },
         tabletModeRow: {
           flexDirection: 'row',
@@ -176,7 +191,7 @@ export default function LoginScreen() {
     >
       <View style={styles.content}>
         <Text style={styles.title}>Top Tipster Racing</Text>
-        <Text style={styles.subtitle}>Sign in to enter the competition</Text>
+        <Text style={styles.slogan}>A Fantasy Sports Racing App</Text>
 
         <TextInput
           style={styles.input}
@@ -229,20 +244,35 @@ export default function LoginScreen() {
           </Text>
         </TouchableOpacity>
 
+        <View style={styles.policyRow}>
+          <TouchableOpacity
+            onPress={() => Linking.openURL('https://doc-hosting.flycricket.io/top-tipster-racing-fantasy-sports-privacy-policy/98fbb3c4-4795-4774-bba7-c2ebb872eb92/privacy')}
+            disabled={loading}
+          >
+            <Text style={styles.policyLink}>Privacy Policy</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => Linking.openURL('https://doc-hosting.flycricket.io/top-tipster-racing-terms-of-use/bf206b6c-02a2-4394-aedc-dbf95f95d955/terms')}
+            disabled={loading}
+          >
+            <Text style={styles.policyLink}>Terms of Use</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.tabletModeRow}>
           <TouchableOpacity
             style={styles.tabletModeButton}
             onPress={() => router.push('/(auth)/tablet-mode')}
             disabled={loading}
           >
-            <Text style={styles.tabletModeButtonText}>Go to Tablet Mode</Text>
+            <Text style={styles.tabletModeButtonText}>Quick access</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.tabletModeInfoHit}
             onPress={() =>
               Alert.alert(
-                'Tablet Mode',
-                "You'll need your 6-digit tablet code on the next screen.\n\nYou must have an account to use this feature.",
+                'Quick access',
+                "You'll need your 6-digit quick access code on the next screen.\n\nYou must have an account to use this feature.",
                 [{ text: 'OK' }]
               )
             }

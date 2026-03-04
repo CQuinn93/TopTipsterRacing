@@ -161,6 +161,13 @@ function AppTabs() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="reminders"
+        options={{
+          title: 'Reminders',
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

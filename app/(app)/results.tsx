@@ -20,6 +20,9 @@ import { getLatestResultsForUser } from '@/lib/latestResultsCache';
 import type { MeetingResults, RaceResultTemplate } from '@/lib/resultsTemplateForUser';
 import { useRealtimeRaces } from '@/lib/useRealtimeRaces';
 
+const RESULTS_COMP_IDS_TTL_MS = 60 * 1000; // 1 min – avoid refetching competition_participants on every load
+let resultsCompIdsCache: { userId: string; compIds: string[]; fetchedAt: number } | null = null;
+
 export default function ResultsScreen() {
   const theme = useTheme();
   const { userId } = useAuth();
@@ -37,11 +40,21 @@ export default function ResultsScreen() {
   const loadResults = useCallback(
     async (forceRefresh = false) => {
       if (!userId) return;
-      const { data: parts } = await supabase
-        .from('competition_participants')
-        .select('competition_id')
-        .eq('user_id', userId);
-      const ids = (parts ?? []).map((p: { competition_id: string }) => p.competition_id);
+      let ids: string[];
+      if (
+        !forceRefresh &&
+        resultsCompIdsCache?.userId === userId &&
+        Date.now() - resultsCompIdsCache.fetchedAt < RESULTS_COMP_IDS_TTL_MS
+      ) {
+        ids = resultsCompIdsCache.compIds;
+      } else {
+        const { data: parts } = await supabase
+          .from('competition_participants')
+          .select('competition_id')
+          .eq('user_id', userId);
+        ids = (parts ?? []).map((p: { competition_id: string }) => p.competition_id);
+        resultsCompIdsCache = { userId, compIds: ids, fetchedAt: Date.now() };
+      }
       setCompIds(ids);
       if (ids.length === 0) {
         setMeetingResults([]);
@@ -301,17 +314,20 @@ export default function ResultsScreen() {
         borderTopWidth: StyleSheet.hairlineWidth,
         borderTopColor: theme.colors.border,
       },
-      runnerCardPointsRow: {
+      runnerCardThreeBoxRow: {
         flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginTop: 2,
+        alignItems: 'stretch',
+        gap: theme.spacing.sm,
       },
-      runnerCardPointsTotalRow: {
-        marginTop: theme.spacing.xs,
-        paddingTop: theme.spacing.xs,
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: theme.colors.border,
+      runnerCardPointsBox: {
+        flex: 1,
+        backgroundColor: theme.colors.surface,
+        borderRadius: theme.radius.sm,
+        paddingVertical: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.xs,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: theme.spacing.sm,
       },
       runnerCardPointsLabel: {
         fontFamily: theme.fontFamily.regular,
@@ -348,10 +364,11 @@ export default function ResultsScreen() {
         color: theme.colors.text,
         fontWeight: '500',
       },
-      runnerCardOdds: {
+      runnerCardTotalPts: {
         fontFamily: theme.fontFamily.regular,
         fontSize: 13,
-        color: theme.colors.textSecondary,
+        fontWeight: '600',
+        color: theme.colors.accent,
         marginLeft: theme.spacing.xs,
       },
       awaitingRow: {
@@ -510,28 +527,30 @@ export default function ResultsScreen() {
                                       {displayHorseName(r.name)}
                                     </Text>
                                   </View>
-                                  <Text style={styles.runnerCardOdds}>{decimalToFractional(r.sp)}</Text>
+                                  <Text style={styles.runnerCardTotalPts}>
+                                    {(r.pos_points ?? points) + (r.sp_points ?? 0)} pts
+                                  </Text>
                                   <Text style={styles.runnerCardChevron}>{isExpanded ? '▲' : '▼'}</Text>
                                 </View>
                                 {isExpanded && (
                                   <View style={styles.runnerCardPointsBlock}>
-                                    <View style={styles.runnerCardPointsRow}>
-                                      <Text style={styles.runnerCardPointsLabel}>Position points</Text>
-                                      <Text style={styles.runnerCardPointsValue}>
-                                        {r.pos_points != null ? r.pos_points : points}
-                                      </Text>
-                                    </View>
-                                    <View style={styles.runnerCardPointsRow}>
-                                      <Text style={styles.runnerCardPointsLabel}>Odds points</Text>
-                                      <Text style={styles.runnerCardPointsValue}>
-                                        {r.sp_points != null ? r.sp_points : 0}
-                                      </Text>
-                                    </View>
-                                    <View style={[styles.runnerCardPointsRow, styles.runnerCardPointsTotalRow]}>
-                                      <Text style={styles.runnerCardPointsLabel}>Total</Text>
-                                      <Text style={styles.runnerCardPointsValue}>
-                                        {(r.pos_points ?? points) + (r.sp_points ?? 0)}
-                                      </Text>
+                                    <View style={styles.runnerCardThreeBoxRow}>
+                                      <View style={styles.runnerCardPointsBox}>
+                                        <Text style={styles.runnerCardPointsLabel}>Pos points</Text>
+                                        <Text style={styles.runnerCardPointsValue}>
+                                          {r.pos_points != null ? r.pos_points : points}
+                                        </Text>
+                                      </View>
+                                      <View style={styles.runnerCardPointsBox}>
+                                        <Text style={styles.runnerCardPointsLabel}>SP</Text>
+                                        <Text style={styles.runnerCardPointsValue}>{decimalToFractional(r.sp)}</Text>
+                                      </View>
+                                      <View style={styles.runnerCardPointsBox}>
+                                        <Text style={styles.runnerCardPointsLabel}>Bonus points</Text>
+                                        <Text style={styles.runnerCardPointsValue}>
+                                          {r.sp_points != null ? r.sp_points : 0}
+                                        </Text>
+                                      </View>
                                     </View>
                                   </View>
                                 )}

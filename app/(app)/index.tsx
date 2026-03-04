@@ -314,8 +314,8 @@ export default function HomeScreen() {
           borderRadius: theme.radius.lg,
           padding: theme.spacing.md,
           marginBottom: theme.spacing.md,
-          borderWidth: cardBorderWidth,
-          borderColor: cardBorder,
+          borderWidth: 2,
+          borderColor: theme.colors.accent,
           overflow: 'hidden',
         },
         nextRaceCardTitle: {
@@ -325,6 +325,18 @@ export default function HomeScreen() {
           marginBottom: theme.spacing.xs,
           textTransform: 'uppercase',
           letterSpacing: 0.8,
+        },
+        nextRaceCardTouchable: {},
+        nextRaceCardContentRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+        },
+        nextRaceCardContent: {
+          flex: 1,
+          minWidth: 0,
+        },
+        nextRaceCardArrow: {
+          marginLeft: theme.spacing.sm,
         },
         nextRaceCardHeaderRow: {
           flexDirection: 'row',
@@ -379,15 +391,9 @@ export default function HomeScreen() {
         nextRaceCardBtn: {
           flexDirection: 'row',
           alignItems: 'center',
-          justifyContent: 'center',
-          gap: theme.spacing.sm,
-          paddingVertical: theme.spacing.md,
-          paddingHorizontal: theme.spacing.lg,
-          backgroundColor: theme.colors.accentMuted ?? 'rgba(21, 128, 61, 0.2)',
-          borderRadius: theme.radius.sm,
-          alignSelf: 'flex-start',
-          borderWidth: 1,
-          borderColor: theme.colors.accentDim ?? theme.colors.accent,
+          justifyContent: 'flex-end',
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
         },
         nextRaceCardBtnText: {
           fontFamily: theme.fontFamily.regular,
@@ -513,7 +519,8 @@ export default function HomeScreen() {
           fontSize: 12,
           fontWeight: '600',
           color: theme.colors.textMuted,
-          marginBottom: theme.spacing.xs,
+          marginTop: theme.spacing.sm,
+          marginBottom: theme.spacing.sm,
           textTransform: 'uppercase',
           letterSpacing: 0.5,
         },
@@ -812,41 +819,47 @@ export default function HomeScreen() {
           <>
             {/* Next race card – own card, above competitions */}
             <View style={styles.nextRaceCard}>
-              <Text style={styles.nextRaceCardTitle}>Next race</Text>
               {nextRaceOff ? (
                 nextRaceOff.isClosed ? (
-                  <Text style={styles.lockedNoteText}>Selections are locked in good luck.</Text>
-                ) : (
                   <>
-                    <TouchableOpacity
-                      style={StyleSheet.absoluteFill}
-                      onPress={() => router.push('/(app)/selections')}
-                      activeOpacity={1}
-                    />
-                    <View style={styles.nextRaceCardHeaderRow}>
-                      <Text style={styles.nextRaceCardRaceName} numberOfLines={1}>{nextRaceOff.raceName}</Text>
-                    </View>
-                    <Text style={styles.nextRaceCardCourse}>{nextRaceOff.course} · {nextRaceOff.dateStr}</Text>
-                    <View style={styles.nextRaceCardRow}>
-                      <View style={styles.nextRaceCardMeta}>
-                        <Ionicons name="time-outline" size={14} color={theme.colors.textMuted} />
-                        <Text style={styles.nextRaceCardTime}>{nextRaceOff.timeStr}</Text>
-                      </View>
-                      {nextRaceOff.runnerCount > 0 && (
-                        <View style={styles.nextRaceCardMeta}>
-                          <Ionicons name="people-outline" size={14} color={theme.colors.textMuted} />
-                          <Text style={styles.nextRaceCardRunners}>{nextRaceOff.runnerCount} runners</Text>
-                        </View>
-                      )}
-                    </View>
-                    <View style={[styles.nextRaceCardBtn, styles.nextRaceCardBtnCompact]}>
-                      <Text style={[styles.nextRaceCardBtnText, styles.nextRaceCardBtnTextWhite]}>My selections</Text>
-                      <Ionicons name="arrow-forward" size={14} color={theme.colors.white} />
-                    </View>
+                    <Text style={styles.nextRaceCardTitle}>Next race</Text>
+                    <Text style={styles.lockedNoteText}>All selections have been made and are locked in. Good luck!</Text>
                   </>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.nextRaceCardTouchable}
+                    onPress={() => router.push('/(app)/selections')}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.nextRaceCardTitle}>Next race</Text>
+                    <View style={styles.nextRaceCardContentRow}>
+                      <View style={styles.nextRaceCardContent}>
+                        <View style={styles.nextRaceCardHeaderRow}>
+                          <Text style={styles.nextRaceCardRaceName} numberOfLines={1}>{nextRaceOff.raceName}</Text>
+                        </View>
+                        <Text style={styles.nextRaceCardCourse}>{nextRaceOff.course} · {nextRaceOff.dateStr}</Text>
+                        <View style={styles.nextRaceCardRow}>
+                          <View style={styles.nextRaceCardMeta}>
+                            <Ionicons name="time-outline" size={14} color={theme.colors.textMuted} />
+                            <Text style={styles.nextRaceCardTime}>{nextRaceOff.timeStr}</Text>
+                          </View>
+                          {nextRaceOff.runnerCount > 0 && (
+                            <View style={styles.nextRaceCardMeta}>
+                              <Ionicons name="people-outline" size={14} color={theme.colors.textMuted} />
+                              <Text style={styles.nextRaceCardRunners}>{nextRaceOff.runnerCount} runners</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color={theme.colors.accent} style={styles.nextRaceCardArrow} />
+                    </View>
+                  </TouchableOpacity>
                 )
               ) : (
-                <Text style={styles.nextRaceCardMuted}>No upcoming races</Text>
+                <>
+                  <Text style={styles.nextRaceCardTitle}>Next race</Text>
+                  <Text style={styles.nextRaceCardMuted}>No upcoming races</Text>
+                </>
               )}
             </View>
 
@@ -953,7 +966,7 @@ export default function HomeScreen() {
                           </View>
                           <View style={styles.statsRow}>
                             <StatBox
-                              label="Best odds"
+                              label="Top pick"
                               value={summary?.highestSpWin != null ? decimalToFractional(summary.highestSpWin) : '—'}
                             />
                             <StatBox label="Participants" value={participantCountByCompId[c.id] ?? 0} />

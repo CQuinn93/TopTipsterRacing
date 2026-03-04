@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { isSelectionClosed } from '@/lib/appUtils';
@@ -42,10 +42,16 @@ export default function ParticipantSelectionsScreen() {
   const activeTheme = useTheme();
   const { userId: currentUserId } = useAuth();
   const router = useRouter();
+  const navigation = useNavigation();
   const params = useLocalSearchParams<{ competitionId: string; participantUserId: string; displayName: string }>();
   const competitionId = params.competitionId ?? '';
   const participantUserId = params.participantUserId ?? '';
   const displayName = params.displayName ?? 'Selections';
+
+  const headerTitle = displayName === 'Selections' ? 'Selections' : `${displayName}'s Selections`;
+  useLayoutEffect(() => {
+    navigation.setOptions({ title: headerTitle });
+  }, [navigation, headerTitle]);
 
   const [raceDays, setRaceDays] = useState<RaceDayRow[]>([]);
   const [selectionsByDate, setSelectionsByDate] = useState<Record<string, Record<string, SelectionEntry>>>({});
@@ -352,8 +358,12 @@ export default function ParticipantSelectionsScreen() {
       if (days.length && participantUserId) {
         const next: Record<string, Record<string, SelectionEntry>> = {};
         const datesToFetch: string[] = [];
-        for (const d of days) {
-          const cached = await getCached(competitionId, participantUserId, d.race_date);
+        const cacheResults = await Promise.all(
+          days.map((d) => getCached(competitionId, participantUserId, d.race_date))
+        );
+        for (let i = 0; i < days.length; i++) {
+          const d = days[i];
+          const cached = cacheResults[i];
           if (cached) {
             next[d.race_date] = {};
             for (const [raceId, v] of Object.entries(cached.selections)) {
@@ -557,9 +567,10 @@ export default function ParticipantSelectionsScreen() {
                     const pick = selections[race.id];
                     const result = pick ? getResultForPick(race as Race, pick.runnerId) : null;
                     const position = result?.positionLabel ?? pick?.position;
+                    // Only show SP when race has results (needed for points system)
                     const oddsDecimal = result?.sp != null && Number.isFinite(result.sp) && result.sp > 0
                       ? result.sp
-                      : (pick?.oddsDecimal ?? null);
+                      : null;
                     const runner = pick ? (race.runners ?? []).find((r) => r.id === pick.runnerId) : null;
                     const horseNumber = runner?.number != null ? String(runner.number) : pick?.runnerId === 'FAV' ? 'F' : null;
                     const pts = pick ? pointsFromResult(result) : 0;
@@ -598,9 +609,6 @@ export default function ParticipantSelectionsScreen() {
                             <View style={styles.pickRow}>
                               <Text style={styles.pickNumber}>{horseNumber ?? '—'}</Text>
                               <Text style={styles.pickName}>{pick ? displayHorseName(pick.runnerName) : 'No selection'}</Text>
-                              {pick && oddsDecimal != null ? (
-                                <Text style={styles.oddsText}>{decimalToFractional(oddsDecimal)}</Text>
-                              ) : null}
                             </View>
                           </View>
                           <View style={styles.selectionRight}>
@@ -653,7 +661,7 @@ export default function ParticipantSelectionsScreen() {
                   </Text>
                 </View>
                 <View style={styles.breakdownRow}>
-                  <Text style={styles.breakdownLabel}>Odds points</Text>
+                  <Text style={styles.breakdownLabel}>SP bonus</Text>
                   <Text style={styles.breakdownValue}>
                     {breakdownModal.oddsPoints != null ? breakdownModal.oddsPoints : '—'}
                   </Text>

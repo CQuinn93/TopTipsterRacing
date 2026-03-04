@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Modal,
   Pressable,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -135,11 +136,44 @@ export function AppSidebar() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuButton}
+              onPress={() => goTo('/(app)/reminders')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="notifications-outline" size={22} color={theme.colors.accent} />
+              <Text style={styles.menuButtonText}>Reminders</Text>
+              <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuButton}
               onPress={() => goTo('/(app)/account')}
               activeOpacity={0.7}
             >
               <Ionicons name="person-outline" size={22} color={theme.colors.accent} />
               <Text style={styles.menuButtonText}>Account</Text>
+              <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuButton}
+              onPress={() => {
+                closeSidebar();
+                Linking.openURL('https://doc-hosting.flycricket.io/top-tipster-racing-fantasy-sports-privacy-policy/98fbb3c4-4795-4774-bba7-c2ebb872eb92/privacy');
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="shield-checkmark-outline" size={22} color={theme.colors.accent} />
+              <Text style={styles.menuButtonText}>Privacy Policy</Text>
+              <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuButton}
+              onPress={() => {
+                closeSidebar();
+                Linking.openURL('https://doc-hosting.flycricket.io/top-tipster-racing-terms-of-use/bf206b6c-02a2-4394-aedc-dbf95f95d955/terms');
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="document-outline" size={22} color={theme.colors.accent} />
+              <Text style={styles.menuButtonText}>Terms of Use</Text>
               <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
             </TouchableOpacity>
           </View>

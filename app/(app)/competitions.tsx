@@ -1,16 +1,13 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Alert } from 'react-native';
 import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
 import { lightTheme } from '@/constants/theme';
 import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
 import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
-import { getCompetitionDisplayStatus, isCompletedMoreThanOneDay } from '@/lib/appUtils';
-import { getNotificationCompetitionIds, addNotificationCompetition, removeNotificationCompetition } from '@/lib/notificationCompetitionPrefs';
-import { requestPermissionsAndSetup, scheduleRemindersForCompetition, cancelRemindersForCompetition } from '@/lib/selectionReminderNotifications';
+import { getCompetitionDisplayStatus } from '@/lib/appUtils';
 
 type UserCompetition = {
   competition_id: string;
@@ -36,9 +33,13 @@ export default function MyCompetitionsScreen() {
   const [pendingList, setPendingList] = useState<PendingCompetition[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [newlyApprovedNames, setNewlyApprovedNames] = useState<string[]>([]);
-  const [notificationCompIds, setNotificationCompIds] = useState<Set<string>>(new Set());
-  const [togglingCompId, setTogglingCompId] = useState<string | null>(null);
+  const [compFilter, setCompFilter] = useState<'live' | 'upcoming' | 'complete'>('live');
   const pendingListRef = useRef<PendingCompetition[]>([]);
+
+  const listFiltered = useMemo(
+    () => list.filter((c) => c.status.toLowerCase() === compFilter),
+    [list, compFilter]
+  );
 
   useEffect(() => {
     pendingListRef.current = pendingList;
@@ -75,9 +76,7 @@ export default function MyCompetitionsScreen() {
           .select('id, name, festival_start_date, festival_end_date')
           .in('id', compIds);
         if (compsError) throw compsError;
-        const joined: UserCompetition[] = (comps ?? [])
-          .filter((c) => !isCompletedMoreThanOneDay(c.festival_end_date))
-          .map((c) => {
+        const joined: UserCompetition[] = (comps ?? []).map((c) => {
             const displayStatus = getCompetitionDisplayStatus(c.festival_start_date, c.festival_end_date);
             const statusLabel = displayStatus === 'upcoming' ? 'Upcoming' : displayStatus === 'live' ? 'Live' : 'Complete';
             return {
@@ -149,17 +148,10 @@ export default function MyCompetitionsScreen() {
     } finally {
       setRefreshing(false);
     }
-    const ids = await getNotificationCompetitionIds(userId);
-    setNotificationCompIds(new Set(ids));
   };
 
   useEffect(() => {
     load();
-  }, [userId]);
-
-  useEffect(() => {
-    if (!userId) return;
-    getNotificationCompetitionIds(userId).then((ids) => setNotificationCompIds(new Set(ids)));
   }, [userId]);
 
   useEffect(() => {
@@ -179,30 +171,6 @@ export default function MyCompetitionsScreen() {
       },
     ]);
   }, [newlyApprovedNames, userId]);
-
-  const toggleNotificationsForCompetition = async (c: UserCompetition, enabled: boolean) => {
-    if (!userId) return;
-    setTogglingCompId(c.competition_id);
-    try {
-      if (enabled) {
-        const granted = await requestPermissionsAndSetup();
-        if (!granted) return;
-        await addNotificationCompetition(userId, c.competition_id);
-        await scheduleRemindersForCompetition(supabase, userId, c.competition_id, c.name);
-        setNotificationCompIds((prev) => new Set([...prev, c.competition_id]));
-      } else {
-        await removeNotificationCompetition(userId, c.competition_id);
-        await cancelRemindersForCompetition(c.competition_id);
-        setNotificationCompIds((prev) => {
-          const next = new Set(prev);
-          next.delete(c.competition_id);
-          return next;
-        });
-      }
-    } finally {
-      setTogglingCompId(null);
-    }
-  };
 
   const styles = useMemo(() => {
     const isLight = theme.colors.background === lightTheme.colors.background;
@@ -255,9 +223,9 @@ export default function MyCompetitionsScreen() {
       },
       pendingBadge: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 11,
+        fontSize: 12,
         color: theme.colors.textMuted,
-        marginTop: 2,
+        marginTop: theme.spacing.xs,
         fontStyle: 'italic',
       },
       emptyMessage: {
@@ -270,33 +238,53 @@ export default function MyCompetitionsScreen() {
       card: {
         backgroundColor: theme.colors.surface,
         borderRadius: theme.radius.md,
-        padding: theme.spacing.sm,
-        paddingHorizontal: theme.spacing.md,
-        marginBottom: theme.spacing.sm,
+        padding: theme.spacing.md,
+        paddingHorizontal: theme.spacing.lg,
+        marginBottom: theme.spacing.md,
         borderWidth: cardBorderWidth,
         borderColor: cardBorder,
       },
       cardTitle: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 15,
+        fontSize: 16,
         color: theme.colors.text,
       },
-      cardMeta: { fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textMuted, marginTop: 2 },
-      cardFooter: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm, marginTop: 2, flexWrap: 'wrap' },
-      cardStatus: { fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.accent },
-      cardPosition: { fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textSecondary },
+      cardMeta: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textMuted, marginTop: theme.spacing.xs },
+      cardFooter: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm, marginTop: theme.spacing.sm, flexWrap: 'wrap' },
+      cardStatus: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.accent },
+      cardPosition: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary },
       tapHint: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 11,
+        fontSize: 12,
         color: theme.colors.textMuted,
-        marginTop: theme.spacing.xs,
+        marginTop: theme.spacing.sm,
       },
-      cardRow: { flexDirection: 'row', alignItems: 'flex-start', gap: theme.spacing.sm },
-      cardMain: { flex: 1, minWidth: 0 },
-      bellBtn: {
-        padding: theme.spacing.xs,
-        marginTop: -theme.spacing.xs,
-        marginRight: -theme.spacing.xs,
+      compTabsRow: {
+        flexDirection: 'row',
+        width: '100%',
+        marginBottom: theme.spacing.sm,
+        gap: theme.spacing.xs,
+      },
+      compTab: {
+        flex: 1,
+        paddingVertical: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.sm,
+        borderRadius: theme.radius.sm,
+        backgroundColor: theme.colors.surface,
+        alignItems: 'center',
+        justifyContent: 'center',
+      },
+      compTabActive: {
+        backgroundColor: theme.colors.accent,
+      },
+      compTabText: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 13,
+        color: theme.colors.textSecondary,
+      },
+      compTabTextActive: {
+        color: theme.colors.white,
+        fontWeight: '600',
       },
     });
   }, [theme]);
@@ -331,49 +319,51 @@ export default function MyCompetitionsScreen() {
         </>
       )}
 
-      {list.length > 0 && <Text style={styles.sectionTitle}>Your competitions</Text>}
+      {list.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>Competitions</Text>
+          <View style={styles.compTabsRow}>
+            {(['complete', 'live', 'upcoming'] as const).map((tab) => {
+              const isActive = compFilter === tab;
+              const label = tab === 'complete' ? 'Complete' : tab === 'live' ? 'Live' : 'Upcoming';
+              return (
+                <TouchableOpacity
+                  key={tab}
+                  style={[styles.compTab, isActive && styles.compTabActive]}
+                  onPress={() => setCompFilter(tab)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.compTabText, isActive && styles.compTabTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </>
+      )}
 
       {list.length === 0 && pendingList.length === 0 ? (
         <Text style={styles.emptyMessage}>You're not part of any competitions yet. Press the button below to enter one.</Text>
       ) : list.length === 0 ? null : (
-        list.map((c) => {
-          const notificationsOn = notificationCompIds.has(c.competition_id);
-          const toggling = togglingCompId === c.competition_id;
-          return (
-            <View key={c.competition_id} style={[styles.card, styles.cardRow]}>
-              <TouchableOpacity
-                style={styles.cardMain}
-                onPress={() => router.push({ pathname: '/(app)/leaderboard', params: { competitionId: c.competition_id } })}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.cardTitle}>{c.name}</Text>
-                <Text style={styles.cardMeta}>
-                  {new Date(c.festival_start_date).toLocaleDateString()} – {new Date(c.festival_end_date).toLocaleDateString()}
-                </Text>
-                <View style={styles.cardFooter}>
-                  <Text style={styles.cardStatus}>{c.status}</Text>
-                  {c.position != null && (
-                    <Text style={styles.cardPosition}>Your position: {c.position}{c.position === 1 ? 'st' : c.position === 2 ? 'nd' : c.position === 3 ? 'rd' : 'th'}</Text>
-                  )}
-                </View>
-                <Text style={styles.tapHint}>Tap to open leaderboard</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.bellBtn}
-                onPress={() => toggleNotificationsForCompetition(c, !notificationsOn)}
-                disabled={toggling}
-                accessibilityLabel={notificationsOn ? 'Turn off reminders for this competition' : 'Turn on reminders for this competition'}
-                accessibilityRole="button"
-              >
-                <Ionicons
-                  name={notificationsOn ? 'notifications' : 'notifications-outline'}
-                  size={24}
-                  color={notificationsOn ? theme.colors.accent : theme.colors.textMuted}
-                />
-              </TouchableOpacity>
-            </View>
-          );
-        })
+        listFiltered.map((c) => (
+            <TouchableOpacity
+              key={c.competition_id}
+              style={styles.card}
+              onPress={() => router.push({ pathname: '/(app)/leaderboard', params: { competitionId: c.competition_id } })}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.cardTitle}>{c.name}</Text>
+              <Text style={styles.cardMeta}>
+                {new Date(c.festival_start_date).toLocaleDateString()} – {new Date(c.festival_end_date).toLocaleDateString()}
+              </Text>
+              <View style={styles.cardFooter}>
+                <Text style={styles.cardStatus}>{c.status}</Text>
+                {c.position != null && (
+                  <Text style={styles.cardPosition}>Your position: {c.position}{c.position === 1 ? 'st' : c.position === 2 ? 'nd' : c.position === 3 ? 'rd' : 'th'}</Text>
+                )}
+              </View>
+              <Text style={styles.tapHint}>Tap to open leaderboard</Text>
+            </TouchableOpacity>
+          ))
       )}
     </ScrollView>
   );

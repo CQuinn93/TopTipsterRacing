@@ -25,7 +25,7 @@ import { getSelectionsBulk, type SelectionsBulkData } from '@/lib/selectionsBulk
 import { useTheme } from '@/contexts/ThemeContext';
 import { displayHorseName } from '@/lib/displayHorseName';
 import type { Race } from '@/types/races';
-import { formatDayDate, isSelectionClosed, isCompletedMoreThanOneDay, formatTimeUntilDeadline } from '@/lib/appUtils';
+import { formatDayDate, isSelectionClosed, isCompletedMoreThanOneDay, formatTimeUntilDeadline, getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { getAvailableRacesForUser } from '@/lib/availableRacesCache';
 import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
 
@@ -67,6 +67,8 @@ export default function SelectionsScreen() {
   const [pickingDayIndex, setPickingDayIndex] = useState(0);
   const [selectedRaceIndex, setSelectedRaceIndex] = useState(0);
   const [userLockedInForPickingDay, setUserLockedInForPickingDay] = useState(false);
+  const [compTab, setCompTab] = useState<'upcoming' | 'live' | 'complete'>('live');
+  const [compStatusByCompId, setCompStatusByCompId] = useState<Record<string, 'upcoming' | 'live' | 'complete'>>({});
   const cameFromRaceDayRef = useRef(false);
 
   useEffect(() => {
@@ -142,14 +144,18 @@ export default function SelectionsScreen() {
       const allCompIds = (parts as { competition_id: string }[]).map((p) => p.competition_id);
       const { data: comps } = await supabase
         .from('competitions')
-        .select('id, name, festival_end_date')
+        .select('id, name, festival_start_date, festival_end_date')
         .in('id', allCompIds);
-      const ongoing = (comps ?? []).filter(
-        (c: { id: string; name: string; festival_end_date: string }) => !isCompletedMoreThanOneDay(c.festival_end_date)
-      );
-      const compIds = ongoing.map((c: { id: string }) => c.id);
-      setUserCompetitions(ongoing.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })));
-      const compNames = new Map(ongoing.map((c: { id: string; name: string }) => [c.id, c.name]));
+      const compList = (comps ?? []) as { id: string; name: string; festival_start_date: string; festival_end_date: string }[];
+      const statusByComp: Record<string, 'upcoming' | 'live' | 'complete'> = {};
+      for (const c of compList) {
+        const status = getCompetitionDisplayStatus(c.festival_start_date, c.festival_end_date);
+        if (status) statusByComp[c.id] = status;
+      }
+      setCompStatusByCompId(statusByComp);
+      setUserCompetitions(compList.map((c) => ({ id: c.id, name: c.name })));
+      const compNames = new Map(compList.map((c) => [c.id, c.name]));
+      const compIds = allCompIds;
       const [bulk, { availableRaces: races }] = await Promise.all([
         getSelectionsBulk(supabase, userId, compIds, forceRefresh),
         getAvailableRacesForUser(supabase, userId, forceRefresh),
@@ -285,7 +291,9 @@ export default function SelectionsScreen() {
     });
   };
 
-  const filteredList = mySelectionsList;
+  const filteredList = mySelectionsList.filter(
+    (item) => compStatusByCompId[item.competitionId] === compTab
+  );
 
   const dayNumbersByCompDate = new Map<string, number>();
   if (selectionsBulk) {
@@ -452,6 +460,33 @@ export default function SelectionsScreen() {
           fontSize: 16,
           color: theme.colors.text,
           textAlign: 'center',
+        },
+        compTabsRow: {
+          flexDirection: 'row',
+          width: '100%',
+          marginBottom: theme.spacing.sm,
+          gap: theme.spacing.xs,
+        },
+        compTab: {
+          flex: 1,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.sm,
+          borderRadius: theme.radius.sm,
+          backgroundColor: theme.colors.surface,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        compTabActive: {
+          backgroundColor: theme.colors.accent,
+        },
+        compTabText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.textSecondary,
+        },
+        compTabTextActive: {
+          color: theme.colors.white,
+          fontWeight: '600',
         },
         makePicksSection: {
           marginBottom: theme.spacing.lg,
@@ -1037,13 +1072,31 @@ export default function SelectionsScreen() {
                 const today = new Date().toISOString().slice(0, 10);
                 const nonExpiredRaces = availableRaces.filter((item) => item.raceDate >= today);
                 const openRaces = nonExpiredRaces.filter((item) => !isSelectionClosed(item.firstRaceUtc));
-                const showableRaces = openRaces.filter((item) => !item.isLocked);
+                const showableRaces = openRaces.filter(
+                  (item) => !item.isLocked && compStatusByCompId[item.competitionId] === compTab
+                );
                 if (showableRaces.length === 0) {
                   return (
                     <View style={styles.makePicksSection}>
                       <Text style={styles.makePicksSectionTitle}>Make your picks</Text>
+                      <View style={styles.compTabsRow}>
+                        {(['upcoming', 'live', 'complete'] as const).map((tab) => {
+                          const isActive = compTab === tab;
+                          const label = tab === 'upcoming' ? 'Upcoming' : tab === 'live' ? 'Live' : 'Complete';
+                          return (
+                            <TouchableOpacity
+                              key={tab}
+                              style={[styles.compTab, isActive && styles.compTabActive]}
+                              onPress={() => setCompTab(tab)}
+                              activeOpacity={0.8}
+                            >
+                              <Text style={[styles.compTabText, isActive && styles.compTabTextActive]}>{label}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
                       <View style={styles.lockedNoteBlock}>
-                        <Text style={styles.lockedNoteText}>Selections are locked in good luck.</Text>
+                        <Text style={styles.lockedNoteText}>All selections have been made and are locked in. Good luck!</Text>
                       </View>
                     </View>
                   );
@@ -1051,6 +1104,22 @@ export default function SelectionsScreen() {
                 return (
                 <View style={styles.makePicksSection}>
                   <Text style={styles.makePicksSectionTitle}>Make your picks</Text>
+                  <View style={styles.compTabsRow}>
+                    {(['upcoming', 'live', 'complete'] as const).map((tab) => {
+                      const isActive = compTab === tab;
+                      const label = tab === 'upcoming' ? 'Upcoming' : tab === 'live' ? 'Live' : 'Complete';
+                      return (
+                        <TouchableOpacity
+                          key={tab}
+                          style={[styles.compTab, isActive && styles.compTabActive]}
+                          onPress={() => setCompTab(tab)}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={[styles.compTabText, isActive && styles.compTabTextActive]}>{label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
                   <Text style={styles.makePicksSectionSubtitle}>Select a meeting to make or view your selections</Text>
                   <View style={styles.raceCardsList}>
                     {showableRaces.map((item) => {

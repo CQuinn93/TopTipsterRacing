@@ -18,6 +18,11 @@ export type LeaderboardBulkCache = {
   raceDays: Array<{ id: string; race_date: string; races: Race[] }>;
   /** userId -> race_date -> raceId -> selection */
   selectionsByUser: Record<string, Record<string, Record<string, SelectionEntry>>>;
+  /** When set, leaderboard can skip competitions + competition_participants fetches on cache hit */
+  competitionName?: string;
+  festivalStart?: string | null;
+  festivalEnd?: string | null;
+  participants?: Array<{ user_id: string; display_name: string }>;
 };
 
 function cacheKey(competitionId: string): string {

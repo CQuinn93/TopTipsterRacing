@@ -94,12 +94,17 @@ export default function LeaderboardScreen() {
             selectionsDataForPoints.push({ user_id: uid, race_date: date, selections: sel });
           }
         }
-        const [compResF, partsResF] = await Promise.all([
-          supabase.from('competitions').select('name, festival_start_date, festival_end_date').eq('id', selectedId).maybeSingle(),
-          supabase.from('competition_participants').select('user_id, display_name').eq('competition_id', selectedId),
-        ]);
-        compRes = compResF;
-        partsRes = partsResF;
+        if (cached.competitionName != null && cached.participants != null) {
+          compRes = { data: { name: cached.competitionName, festival_start_date: cached.festivalStart ?? undefined, festival_end_date: cached.festivalEnd ?? undefined } };
+          partsRes = { data: cached.participants };
+        } else {
+          const [compResF, partsResF] = await Promise.all([
+            supabase.from('competitions').select('name, festival_start_date, festival_end_date').eq('id', selectedId).maybeSingle(),
+            supabase.from('competition_participants').select('user_id, display_name').eq('competition_id', selectedId),
+          ]);
+          compRes = compResF;
+          partsRes = partsResF;
+        }
       } else {
         const [raceDaysData, partsResF, selectionsRes, compResF] = await Promise.all([
           fetchRaceDaysForCompetition(supabase, selectedId, 'id, race_date, races'),
@@ -124,7 +129,16 @@ export default function LeaderboardScreen() {
           }
           selectionsByUser[s.user_id][s.race_date] = normalized;
         }
-        await setLeaderboardBulkCache(selectedId, { raceDays: raceDaysRows.slice(0, 4).map((d) => ({ id: d.id, race_date: d.race_date, races: d.races ?? [] })), selectionsByUser });
+        const compRowForCache = compRes.data as { name?: string; festival_start_date?: string | null; festival_end_date?: string | null } | null;
+        const partsForCache = (partsRes.data ?? []) as { user_id: string; display_name: string }[];
+        await setLeaderboardBulkCache(selectedId, {
+          raceDays: raceDaysRows.slice(0, 4).map((d) => ({ id: d.id, race_date: d.race_date, races: d.races ?? [] })),
+          selectionsByUser,
+          competitionName: compRowForCache?.name,
+          festivalStart: compRowForCache?.festival_start_date ?? null,
+          festivalEnd: compRowForCache?.festival_end_date ?? null,
+          participants: partsForCache,
+        });
       }
 
       const compRow = compRes.data as { name?: string; festival_start_date?: string; festival_end_date?: string } | null;
@@ -692,12 +706,7 @@ export default function LeaderboardScreen() {
                   style={[styles.heroCircle, styles.heroCircleSp, { width: circleSize, height: circleSize, borderRadius: circleSize / 2 }, leaderboardFilter === 'sp' && styles.heroCircleSelected]}
                 >
                   <Text style={styles.heroName} numberOfLines={1}>{spHeroLabel}</Text>
-                  <Text style={styles.heroDesc}>Highest SP winner</Text>
-                  {hasAnyRaceResult && spLeader != null && spLeader.max_odds > 0 ? (
-                    <Text style={styles.heroStat}>SP {decimalToFractional(spLeader.max_odds)}</Text>
-                  ) : (
-                    <Text style={styles.heroStat}>—</Text>
-                  )}
+                  <Text style={styles.heroDesc}>Top Tipster Pick</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -744,7 +753,7 @@ export default function LeaderboardScreen() {
               {leaderboardFilter === 'daily'
                 ? `Daily leaderboard${raceDates.length > 1 ? ` · Day ${selectedDayIndex + 1}` : ''}`
                 : leaderboardFilter === 'sp'
-                  ? 'Highest SP'
+                  ? 'Top Tipster Pick'
                   : 'Overall leaderboard'}
             </Text>
           )}
@@ -767,14 +776,14 @@ export default function LeaderboardScreen() {
                   const circleColor = rank <= 3 ? rankColors[rank as 1 | 2 | 3] : theme.colors.border;
                   const showPrevDayArrow = leaderboardFilter === 'overall' && item.rank_prev_day != null;
                   const subtitleSp =
-                    leaderboardFilter === 'sp' && item.best_sp_runner_name && item.best_sp_race_name
-                      ? `${displayHorseName(item.best_sp_runner_name)} · ${item.best_sp_race_name}`
-                      : leaderboardFilter === 'sp' ? (item.best_sp_runner_name || item.best_sp_race_name || '—') : null;
+                    leaderboardFilter === 'sp' && item.best_sp_runner_name
+                      ? `Race 1 – ${displayHorseName(item.best_sp_runner_name)}`
+                      : leaderboardFilter === 'sp' ? (item.best_sp_runner_name ? `Race 1 – ${displayHorseName(item.best_sp_runner_name)}` : '—') : null;
                   const rightValue =
                     leaderboardFilter === 'daily'
                       ? `${getDailyPoints(item)} pts`
                       : leaderboardFilter === 'sp'
-                        ? (hasAnyRaceResult && item.max_odds > 0 ? `SP ${decimalToFractional(item.max_odds)}` : '—')
+                        ? '—'
                         : `${item.total} pts`;
 
                   const rowContent = (
@@ -812,7 +821,7 @@ export default function LeaderboardScreen() {
                               <Text style={[styles.expandedStatValue, styles.expandedStatValueOverall]}>{item.total}</Text>
                             </View>
                             <View style={styles.expandedStat}>
-                              <Text style={styles.expandedStatLabel}>Best SP</Text>
+                              <Text style={styles.expandedStatLabel}>TT Pick</Text>
                               <Text style={[styles.expandedStatValue, styles.expandedStatValueSp]}>{hasAnyRaceResult && item.max_odds > 0 ? decimalToFractional(item.max_odds) : '—'}</Text>
                             </View>
                           </View>

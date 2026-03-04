@@ -37,14 +37,29 @@ export function formatDayDate(raceDate: string): string {
   return `${day} ${date}${suffix}`;
 }
 
+/** Add days to a YYYY-MM-DD date string; returns YYYY-MM-DD. */
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Group competitions for display:
+ * - Complete: 1+ days after the last race date (festival_end_date).
+ * - Live: Not complete, and start date is yesterday, today, or tomorrow (selections are open or relevant).
+ * - Upcoming: Start date is today + 2 or later (starts in 2+ days).
+ */
 export function getCompetitionDisplayStatus(
   startDate: string,
   endDate: string
 ): 'upcoming' | 'live' | 'complete' | null {
   const today = new Date().toISOString().slice(0, 10);
-  if (today < startDate) return 'upcoming';
-  if (today >= startDate && today <= endDate) return 'live';
-  return 'complete';
+  const dayAfterEnd = addDays(endDate, 1);
+  if (today >= dayAfterEnd) return 'complete';
+  const tomorrow = addDays(today, 1);
+  if (startDate > tomorrow) return 'upcoming';
+  return 'live';
 }
 
 export function isCompletedMoreThanOneDay(endDate: string): boolean {

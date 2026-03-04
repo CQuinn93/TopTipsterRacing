@@ -48,13 +48,13 @@ export default function AccountScreen() {
           alignItems: 'center',
         },
         buttonText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.text },
-        deleteButton: {
-          marginTop: theme.spacing.lg,
-          backgroundColor: 'transparent',
-          borderWidth: 1,
-          borderColor: theme.colors.error,
+        bottomSpacer: { flex: 1, minHeight: theme.spacing.lg },
+        deleteTextButton: {
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: 0,
+          alignSelf: 'center',
         },
-        deleteButtonText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.error },
+        deleteButtonText: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.error },
       }),
     [theme]
   );
@@ -137,7 +137,7 @@ export default function AccountScreen() {
         <Text style={styles.email} numberOfLines={1}>{session?.user?.email ?? '—'}</Text>
       </View>
       <View style={styles.section}>
-        <Text style={styles.label}>Tablet mode code</Text>
+        <Text style={styles.label}>Quick access code</Text>
         <Text style={styles.hint}>Use this code on a shared device to make selections without logging in.</Text>
         {codeLoading ? (
           <ActivityIndicator size="small" color={theme.colors.accent} style={styles.codeLoader} />
@@ -150,8 +150,9 @@ export default function AccountScreen() {
       <TouchableOpacity style={styles.button} onPress={handleSignOut}>
         <Text style={styles.buttonText}>Sign out</Text>
       </TouchableOpacity>
+      <View style={styles.bottomSpacer} />
       <TouchableOpacity
-        style={[styles.button, styles.deleteButton]}
+        style={styles.deleteTextButton}
         onPress={handleDeleteAccount}
         disabled={deleteAccountLoading}
       >

@@ -28,8 +28,9 @@ These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/hor
 
 ## Place rules (update-race-results)
 
-- **Handicap** (title contains "Handicap"): if total runners (non_runner = 0) **≥ 16** → store positions 1, 2, 3, **4**; if **< 16** → 1, 2, 3.
-- **Not Handicap**: **≥ 15** → 1, 2, 3; **8–14** → 1, 2; **4–7** → 1.
+- **Handicap** (title contains "Handicap"): **≥ 16** runners → 1, 2, 3, 4; **8–15** → 1, 2, 3; **5–7** → 1, 2; **< 5** → win only (1st).
+- **Not Handicap**: **≥ 8** → 1, 2, 3; **5–7** → 1, 2; **< 5** → win only (1st).
+- **Bonus points**: Place bonus is capped at 8 pts (top range 23.01–999 in `points_system`). Win bonus uses ranges from the DB (top range 26.01–999, 15 pts).
 
 ## Environment variables
 

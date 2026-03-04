@@ -153,7 +153,6 @@ export default function AdminEditSelectionScreen() {
                 onPress={() => setSelection(race.id, r.id, r.name, r.oddsDecimal)}
               >
                 <Text style={styles.runnerName}>{displayHorseName(r.name)}</Text>
-                <Text style={styles.runnerOdds}>{r.oddsDecimal.toFixed(2)}</Text>
               </TouchableOpacity>
             ))}
           </View>

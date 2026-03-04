@@ -61,7 +61,11 @@ async function fetchRaceDetail(idRace: string): Promise<RaceDetailResponse> {
 /** Returns placed positions (1–4) for this race type. Only horses in these positions get points. */
 function getPlacedPositions(isHandicap: boolean, totalRunners: number): number[] {
   if (isHandicap) {
-    return totalRunners >= 16 ? [1, 2, 3, 4] : [1, 2, 3];
+    if (totalRunners >= 16) return [1, 2, 3, 4];
+    if (totalRunners >= 8) return [1, 2, 3];
+    if (totalRunners >= 5) return [1, 2];   // 5–7 runners: 1st and 2nd only
+    if (totalRunners >= 1) return [1];       // <5 runners: win only
+    return [];
   }
   // Non-handicap: <5 = win only; 5–7 = 1st & 2nd; 8+ = 1st, 2nd, 3rd
   if (totalRunners >= 8) return [1, 2, 3];

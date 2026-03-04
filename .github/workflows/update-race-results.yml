@@ -1,11 +1,9 @@
-# Update race results. Runs every 30 mins 13:30–21:00 UTC (and manually).
+# Update race results. Triggered by cron-job.org every 10 min (e.g. 12:00–19:59 UTC).
 # GitHub Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY, RAPIDAPI_KEY_UPDATE_RESULTS.
 # Optional: RESEND_API_KEY, UPDATE_RESULTS_NOTIFICATION_EMAIL for email report (API call count, races updated).
 name: Update race results
 
 on:
-  schedule:
-    - cron: '0/12 12-18 * * *'
   workflow_dispatch:
 
 jobs:
