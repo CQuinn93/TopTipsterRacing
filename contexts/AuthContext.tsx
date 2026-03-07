@@ -17,10 +17,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s ?? null);
-      setIsLoading(false);
-    });
+    let cancelled = false;
+    const timeoutId = setTimeout(() => {
+      if (!cancelled) setIsLoading(false);
+    }, 10000);
+
+    const clearTimeoutAndDone = () => {
+      clearTimeout(timeoutId);
+    };
+
+    supabase.auth.getSession().then(
+      ({ data: { session: s } }) => {
+        if (!cancelled) {
+          setSession(s ?? null);
+          setIsLoading(false);
+        }
+        clearTimeoutAndDone();
+      },
+      () => {
+        if (!cancelled) setIsLoading(false);
+        clearTimeoutAndDone();
+      }
+    );
 
     const {
       data: { subscription },
@@ -28,7 +46,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(s ?? null);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signOut = async () => {
