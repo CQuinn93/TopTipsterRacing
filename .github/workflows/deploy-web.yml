@@ -6,6 +6,20 @@ name: Deploy web to GitHub Pages
 on:
   push:
     branches: [main]
+    paths:
+      - '.github/workflows/deploy-web.yml'
+      - 'app/**'
+      - 'lib/**'
+      - 'components/**'
+      - 'contexts/**'
+      - 'constants/**'
+      - 'assets/**'
+      - 'app.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'babel.config.js'
+      - 'metro.config.js'
+      - 'global.css'
 
 permissions:
   contents: read
@@ -34,6 +48,9 @@ jobs:
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+      - name: Add .nojekyll (required so _expo folder is served)
+        run: touch dist/.nojekyll
 
       - uses: actions/upload-pages-artifact@v3
         with:
