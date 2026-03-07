@@ -187,6 +187,12 @@ export default function SelectionsScreen() {
     })();
   }, [competitionId, initialRaceDate]);
 
+  const currentRaceDay = raceDays[pickingDayIndex] ?? raceDays[0];
+  const selectedDate = currentRaceDay?.race_date ?? null;
+  const currentRaces = currentRaceDay?.races ?? [];
+  const selectedRace = currentRaces[selectedRaceIndex] ?? currentRaces[0];
+  const selectionsClosed = currentRaceDay ? isSelectionClosed(currentRaceDay.first_race_utc) : false;
+
   useEffect(() => {
     if (!userId || !competitionId || !selectedDate) return;
     (async () => {
@@ -209,12 +215,6 @@ export default function SelectionsScreen() {
       }
     })();
   }, [userId, competitionId, selectedDate]);
-
-  const currentRaceDay = raceDays[pickingDayIndex] ?? raceDays[0];
-  const selectedDate = currentRaceDay?.race_date ?? null;
-  const currentRaces = currentRaceDay?.races ?? [];
-  const selectedRace = currentRaces[selectedRaceIndex] ?? currentRaces[0];
-  const selectionsClosed = currentRaceDay ? isSelectionClosed(currentRaceDay.first_race_utc) : false;
 
   useEffect(() => {
     setSelectedRaceIndex(0);

@@ -1,6 +1,5 @@
-import { useRef } from 'react';
-import { View, Pressable, Alert, TouchableOpacity } from 'react-native';
-import { Tabs, useRouter } from 'expo-router';
+import { View, TouchableOpacity } from 'react-native';
+import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { lightTheme } from '@/constants/theme';
@@ -19,65 +18,9 @@ function MenuHeaderButton() {
   );
 }
 
-function SelectionsTabButton(props: React.ComponentProps<typeof Pressable>) {
-  const router = useRouter();
-  return (
-    <Pressable
-      {...props}
-      onPress={() => {
-        router.replace('/(app)/selections');
-      }}
-    />
-  );
-}
-import { useAuth } from '@/contexts/AuthContext';
-import { ForceRefreshProvider, useForceRefresh } from '@/contexts/ForceRefreshContext';
-import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
-import { clearLatestResultsCache } from '@/lib/latestResultsCache';
+import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { OnboardingProvider } from '@/contexts/OnboardingContext';
-
-const HOME_TAB_HOLD_MS = 10_000;
-
-function HomeTabButton(props: React.ComponentProps<typeof Pressable> & { onPress?: () => void }) {
-  const { userId } = useAuth();
-  const { triggerHomeForceRefresh } = useForceRefresh();
-  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handlePressIn = () => {
-    holdTimerRef.current = setTimeout(() => {
-      holdTimerRef.current = null;
-      if (userId) {
-        clearAvailableRacesCache(userId);
-        clearLatestResultsCache(userId);
-        triggerHomeForceRefresh();
-        Alert.alert('Cache cleared', 'Home cache cleared. Data will refresh.');
-      }
-    }, HOME_TAB_HOLD_MS);
-  };
-
-  const handlePressOut = () => {
-    if (holdTimerRef.current) {
-      clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-  };
-
-  return (
-    <Pressable
-      {...props}
-      onPressIn={(e) => {
-        handlePressIn();
-        props.onPressIn?.(e);
-      }}
-      onPressOut={(e) => {
-        handlePressOut();
-        props.onPressOut?.(e);
-      }}
-      onPress={props.onPress}
-    />
-  );
-}
 
 function AppTabs() {
   const theme = useTheme();
@@ -103,7 +46,6 @@ function AppTabs() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
-          tabBarButton: (props) => <HomeTabButton {...props} />,
         }}
       />
       <Tabs.Screen
@@ -111,7 +53,6 @@ function AppTabs() {
         options={{
           title: 'My selections',
           tabBarIcon: ({ color, size }) => <Ionicons name="list" size={size} color={color} />,
-          tabBarButton: (props) => <SelectionsTabButton {...props} />,
         }}
       />
       <Tabs.Screen

@@ -79,7 +79,7 @@ export default function HomeScreen() {
         const optedInSet = new Set(optedIn);
         const toSchedule = r.filter((day) => optedInSet.has(day.competitionId));
         if (toSchedule.length > 0) {
-          requestPermissionsAndSetup().then((granted) => {
+          requestPermissionsAndSetup().then((granted: boolean) => {
             if (granted) scheduleSelectionReminders(toSchedule);
           });
         }
