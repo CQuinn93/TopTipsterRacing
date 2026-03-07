@@ -48,7 +48,8 @@
       "@react-native-community/datetimepicker"
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": true,
+      "baseUrl": "/TopTipsterRacing"
     },
     "extra": {
       "router": {},
