@@ -9,6 +9,7 @@ import {
   useWindowDimensions,
   NativeSyntheticEvent,
   NativeScrollEvent,
+  Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { router } from 'expo-router';
@@ -20,15 +21,19 @@ import { lightTheme } from '@/constants/theme';
 import { getAvailableRacesForUser } from '@/lib/availableRacesCache';
 import { fetchHomeSummaryByComp, type HomeSummaryByComp } from '@/lib/homeSummary';
 import { useForceRefresh } from '@/contexts/ForceRefreshContext';
+import { useSidebar } from '@/contexts/SidebarContext';
 import type { ParticipationRow } from '@/lib/availableRacesCache';
 import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
 import { isSelectionClosed, getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { decimalToFractional } from '@/lib/oddsFormat';
 import { requestPermissionsAndSetup, scheduleSelectionReminders } from '@/lib/selectionReminderNotifications';
 import { getNotificationCompetitionIds } from '@/lib/notificationCompetitionPrefs';
+import { HomeLeaderboardPanel } from '@/components/HomeLeaderboardPanel';
+import { HomeSelectionsAndResults } from '@/components/HomeSelectionsAndResults';
 
 export default function HomeScreen() {
   const theme = useTheme();
+  const { openSidebar } = useSidebar();
   const { userId, session } = useAuth();
   const [displayName, setDisplayName] = useState<string>('');
   const [participations, setParticipations] = useState<ParticipationRow[]>([]);
@@ -45,6 +50,7 @@ export default function HomeScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const compScrollRef = useRef<ScrollView>(null);
   const { width: windowWidth } = useWindowDimensions();
+  const isNarrowWeb = Platform.OS === 'web' && windowWidth < 768;
 
   useEffect(() => {
     if (!userId) return;
@@ -239,15 +245,17 @@ export default function HomeScreen() {
     };
   })();
 
+  const isWeb = Platform.OS === 'web';
   const styles = useMemo(
     () => {
       const isLight = String(theme.colors.background) === String(lightTheme.colors.background);
       const cardBorder = isLight ? theme.colors.white : theme.colors.border;
       const cardBorderWidth = isLight ? 2 : 1;
+      const webCard = isWeb ? { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 } : {};
       return StyleSheet.create({
-        wrapper: { flex: 1, backgroundColor: theme.colors.background },
+        wrapper: { flex: 1, backgroundColor: theme.colors.background, ...(isWeb && { paddingHorizontal: 0 }) },
         container: { flex: 1 },
-        content: { padding: theme.spacing.md },
+        content: { padding: theme.spacing.md, ...(isWeb && { padding: 24, paddingBottom: 48 }) },
         sectionTitle: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 15,
@@ -314,12 +322,13 @@ export default function HomeScreen() {
         },
         nextRaceCard: {
           backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.lg,
-          padding: theme.spacing.md,
+          borderRadius: isWeb ? 16 : theme.radius.lg,
+          padding: isWeb ? 24 : theme.spacing.md,
           marginBottom: theme.spacing.md,
           borderWidth: 2,
           borderColor: theme.colors.accent,
           overflow: 'hidden',
+          ...webCard,
         },
         nextRaceCardTitle: {
           fontFamily: theme.fontFamily.regular,
@@ -435,13 +444,14 @@ export default function HomeScreen() {
         },
         competitionsCard: {
           backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.lg,
-          padding: theme.spacing.sm,
+          borderRadius: isWeb ? 14 : theme.radius.lg,
+          padding: isWeb ? 20 : theme.spacing.sm,
           marginBottom: theme.spacing.sm,
           marginTop: theme.spacing.xs,
           borderWidth: cardBorderWidth,
           borderColor: cardBorder,
           overflow: 'hidden',
+          ...webCard,
         },
         compInfoInnerCard: {
           flexDirection: 'row',
@@ -777,12 +787,11 @@ export default function HomeScreen() {
         },
       });
     },
-    [theme]
+    [theme, isWeb]
   );
 
-  return (
-    <View style={styles.wrapper}>
-      <ScrollView
+  const mainContent = (
+    <ScrollView
         ref={scrollRef}
         style={styles.container}
         contentContainerStyle={[styles.content, { paddingBottom: theme.spacing.lg, paddingTop: theme.spacing.sm }]}
@@ -795,7 +804,7 @@ export default function HomeScreen() {
               <Text style={styles.headerWelcome}>Top Tipster Racing</Text>
               <Text style={styles.headerHello}>Hello {displayName || '…'}</Text>
             </View>
-            <TouchableOpacity style={styles.accountLink} onPress={() => router.push('/(app)/account')} activeOpacity={0.7}>
+            <TouchableOpacity style={styles.accountLink} onPress={openSidebar} activeOpacity={0.7}>
               <Ionicons name="person-circle-outline" size={28} color={theme.colors.text} />
             </TouchableOpacity>
           </View>
@@ -928,71 +937,90 @@ export default function HomeScreen() {
               })}
             </ScrollView>
 
-            {/* Horizontal snap scroll: one slide per competition (meeting name + meta above, stats-only card) */}
-            {compListFiltered.length > 0 && (
-              <ScrollView
-                ref={compScrollRef}
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                onMomentumScrollEnd={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
-                  const x = e.nativeEvent.contentOffset.x;
-                  const slideWidth = windowWidth;
-                  const index = Math.round(x / slideWidth);
-                  const comp = compListFiltered[index];
-                  if (comp) setSelectedCompId(comp.id);
-                }}
-                contentContainerStyle={{ flexDirection: 'row' }}
-                style={{ marginHorizontal: -theme.spacing.md, marginBottom: theme.spacing.sm }}
-              >
-                {compListFiltered.map((c) => {
-                  const summary = summaryByComp?.byComp[c.id];
-                  const isComplete = compStatusByCompId[c.id] === 'complete';
-                  const position = compPositionByCompId[c.id] ?? null;
-                  const secondLabel = isComplete ? 'Final position' : 'Daily points';
-                  const secondValue = isComplete
-                    ? (position != null ? `${position}${position === 1 ? 'st' : position === 2 ? 'nd' : position === 3 ? 'rd' : 'th'}` : '—')
-                    : (summary?.dailyPoints ?? 0);
-                  const StatBox = ({ label, value }: { label: string; value: React.ReactNode }) => (
-                    <View style={[styles.statCard, styles.statCardHalf]}>
-                      <Text style={styles.statCardValue}>{value}</Text>
-                      <Text style={styles.statCardLabel}>{label}</Text>
-                    </View>
-                  );
-                  return (
-                    <View key={c.id} style={[styles.compSlide, { width: windowWidth }]}>
-                      <Text style={styles.compMeetingNameAbove} numberOfLines={1}>
-                        {summary?.name ?? c.name}
-                      </Text>
-                      <Text style={styles.compMetaAbove}>
-                        {compDaysByCompId[c.id] ?? 1} day event
-                        {compDateRangeByCompId[c.id]
-                          ? ` · ${compDateRangeByCompId[c.id].start} – ${compDateRangeByCompId[c.id].end}`
-                          : ''}
-                      </Text>
-                      <View style={styles.competitionsCard}>
-                        <Text style={styles.statsTitle}>Your stats</Text>
-                        <View style={styles.statsGrid}>
-                          <View style={styles.statsRow}>
-                            <StatBox label="Points" value={summary?.totalPoints ?? 0} />
-                            <StatBox label={secondLabel} value={typeof secondValue === 'number' ? secondValue : secondValue} />
-                          </View>
-                          <View style={styles.statsRow}>
-                            <StatBox
-                              label="Top pick"
-                              value={summary?.highestSpWin != null ? decimalToFractional(summary.highestSpWin) : '—'}
-                            />
-                            <StatBox label="Participants" value={participantCountByCompId[c.id] ?? 0} />
-                          </View>
+            {/* Your stats: on web with leaderboard, single card that fits; otherwise horizontal scroll */}
+            {compListFiltered.length > 0 && (() => {
+              const StatBox = ({ label, value }: { label: string; value: React.ReactNode }) => (
+                <View style={[styles.statCard, styles.statCardHalf]}>
+                  <Text style={styles.statCardValue}>{value}</Text>
+                  <Text style={styles.statCardLabel}>{label}</Text>
+                </View>
+              );
+              const renderStatsCard = (c: { id: string; name: string }) => {
+                const summary = summaryByComp?.byComp[c.id];
+                const isComplete = compStatusByCompId[c.id] === 'complete';
+                const position = compPositionByCompId[c.id] ?? null;
+                const secondLabel = isComplete ? 'Final position' : 'Daily points';
+                const secondValue = isComplete
+                  ? (position != null ? `${position}${position === 1 ? 'st' : position === 2 ? 'nd' : position === 3 ? 'rd' : 'th'}` : '—')
+                  : (summary?.dailyPoints ?? 0);
+                return (
+                  <>
+                    <Text style={styles.compMeetingNameAbove} numberOfLines={1}>
+                      {summary?.name ?? c.name}
+                    </Text>
+                    <Text style={styles.compMetaAbove}>
+                      {compDaysByCompId[c.id] ?? 1} day event
+                      {compDateRangeByCompId[c.id]
+                        ? ` · ${compDateRangeByCompId[c.id].start} – ${compDateRangeByCompId[c.id].end}`
+                        : ''}
+                    </Text>
+                    <View style={styles.competitionsCard}>
+                      <Text style={styles.statsTitle}>Your stats</Text>
+                      <View style={styles.statsGrid}>
+                        <View style={styles.statsRow}>
+                          <StatBox label="Points" value={summary?.totalPoints ?? 0} />
+                          <StatBox label={secondLabel} value={typeof secondValue === 'number' ? secondValue : secondValue} />
+                        </View>
+                        <View style={styles.statsRow}>
+                          <StatBox
+                            label="Top pick"
+                            value={summary?.highestSpWin != null ? decimalToFractional(summary.highestSpWin) : '—'}
+                          />
+                          <StatBox label="Participants" value={participantCountByCompId[c.id] ?? 0} />
                         </View>
                       </View>
                     </View>
-                  );
-                })}
-              </ScrollView>
-            )}
+                  </>
+                );
+              };
 
-            {/* Quick links */}
+              if (isWeb && hasJoinedAny && effectiveCompId) {
+                const c = compListFiltered.find((x) => x.id === effectiveCompId) ?? compListFiltered[0];
+                if (!c) return null;
+                return (
+                  <View key={c.id} style={[styles.compSlide, { width: '100%' }]}>
+                    {renderStatsCard(c)}
+                  </View>
+                );
+              }
+
+              return (
+                <ScrollView
+                  ref={compScrollRef}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  onMomentumScrollEnd={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
+                    const x = e.nativeEvent.contentOffset.x;
+                    const slideWidth = windowWidth;
+                    const index = Math.round(x / slideWidth);
+                    const comp = compListFiltered[index];
+                    if (comp) setSelectedCompId(comp.id);
+                  }}
+                  contentContainerStyle={{ flexDirection: 'row' }}
+                  style={{ marginHorizontal: -theme.spacing.md, marginBottom: theme.spacing.sm }}
+                >
+                  {compListFiltered.map((c) => (
+                    <View key={c.id} style={[styles.compSlide, { width: windowWidth }]}>
+                      {renderStatsCard(c)}
+                    </View>
+                  ))}
+                </ScrollView>
+              );
+            })()}
+
+            {/* Quick links: hidden on web (leaderboard is in sidebar; selections+results below) */}
+            {(!isWeb || isNarrowWeb) && (
             <View style={styles.quickLinksRow}>
               <TouchableOpacity
                 style={styles.quickLinkBtn}
@@ -1011,10 +1039,27 @@ export default function HomeScreen() {
                 <Text style={styles.quickLinkBtnText}>Results</Text>
               </TouchableOpacity>
             </View>
+            )}
+
+            {/* Web: selections by day + results with points breakdown */}
+            {isWeb && hasJoinedAny && effectiveCompId && (
+              <HomeSelectionsAndResults competitionId={effectiveCompId} />
+            )}
 
           </>
         )}
-      </ScrollView>
-    </View>
+    </ScrollView>
   );
+
+  if (Platform.OS === 'web' && hasJoinedAny && effectiveCompId && !isNarrowWeb) {
+    const compName = summaryByComp?.byComp[effectiveCompId]?.name ?? compListFiltered.find((c) => c.id === effectiveCompId)?.name ?? 'Competition';
+    return (
+      <View style={[styles.wrapper, { flexDirection: 'row', gap: 24, paddingRight: 24 }]}>
+        <View style={{ flex: 1, minWidth: 0 }}>{mainContent}</View>
+        <HomeLeaderboardPanel competitionId={effectiveCompId} competitionName={compName} />
+      </View>
+    );
+  }
+
+  return <View style={styles.wrapper}>{mainContent}</View>;
 }

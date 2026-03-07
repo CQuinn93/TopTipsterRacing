@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,9 @@ import {
   Modal,
   Pressable,
   Linking,
+  Alert,
+  ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,13 +17,89 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { getOrCreateTabletCode } from '@/lib/tabletCode';
+import { clearTabletCodeCache } from '@/lib/tabletCode';
+import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
+import { clearLatestResultsCache } from '@/lib/latestResultsCache';
+import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
+import { supabase, getSupabaseUrl } from '@/lib/supabase';
+
+async function doSignOut(signOut: () => Promise<void>, userId: string | null, router: ReturnType<typeof useRouter>) {
+  await clearTabletCodeCache();
+  if (userId) {
+    await clearAvailableRacesCache(userId);
+    await clearLatestResultsCache(userId);
+    await clearSelectionsBulkCache(userId);
+  }
+  await signOut();
+  router.replace('/(auth)/login');
+}
 
 export function AppSidebar() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { open, closeSidebar } = useSidebar();
   const { startGuidedTour } = useOnboarding();
-  const router = useRouter();
+  const { session, signOut } = useAuth();
+  const userId = session?.user?.id ?? null;
+  const [accountExpanded, setAccountExpanded] = useState(false);
+  const [accessCode, setAccessCode] = useState<string | null>(null);
+  const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
+
+  useEffect(() => {
+    if (!userId || !open) return;
+    getOrCreateTabletCode(userId).then(setAccessCode).catch(() => setAccessCode(null));
+  }, [userId, open]);
+
+  const handleSignOut = () => {
+    closeSidebar();
+    Alert.alert('Sign out', 'Are you sure?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign out', style: 'destructive', onPress: () => doSignOut(signOut, userId, router) },
+    ]);
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete account',
+      'This will permanently delete your account and all your data. You will not be able to sign in again. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete my account',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleteAccountLoading(true);
+            try {
+              const { data: { session: s } } = await supabase.auth.getSession();
+              const token = s?.access_token;
+              if (!token) {
+                Alert.alert('Error', 'Not signed in.');
+                return;
+              }
+              const res = await fetch(`${getSupabaseUrl()}/functions/v1/delete-account`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+              });
+              const body = await res.json().catch(() => ({}));
+              if (!res.ok) {
+                Alert.alert('Error', (body as { error?: string })?.error ?? 'Could not delete account.');
+                return;
+              }
+              await doSignOut(signOut, userId, router);
+              Alert.alert('Account deleted', 'Your account has been permanently deleted.');
+            } catch (e) {
+              Alert.alert('Error', e instanceof Error ? e.message : 'Something went wrong.');
+            } finally {
+              setDeleteAccountLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const styles = useMemo(
     () =>
@@ -34,6 +113,8 @@ export function AppSidebar() {
         panel: {
           width: '85%',
           maxWidth: 340,
+          flex: 1,
+          flexDirection: 'column',
           backgroundColor: theme.colors.surface,
           borderRightWidth: 1,
           borderRightColor: theme.colors.border,
@@ -77,6 +158,30 @@ export function AppSidebar() {
           fontSize: 15,
           color: theme.colors.text,
         },
+        accountFolderHeader: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor: theme.colors.background,
+          borderRadius: theme.radius.sm,
+          paddingVertical: theme.spacing.md,
+          paddingHorizontal: theme.spacing.md,
+          marginBottom: theme.spacing.sm,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          gap: theme.spacing.sm,
+        },
+        accountFolderContent: { paddingHorizontal: theme.spacing.md, paddingBottom: theme.spacing.sm },
+        accountFolderItem: { paddingVertical: theme.spacing.sm },
+        deleteAccountText: { fontFamily: theme.fontFamily.regular, fontSize: 15, color: theme.colors.error },
+        footer: {
+          borderTopWidth: 1,
+          borderTopColor: theme.colors.border,
+          paddingHorizontal: theme.spacing.md,
+          paddingVertical: theme.spacing.md,
+          paddingBottom: theme.spacing.lg,
+        },
+        footerCodeLabel: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textMuted, marginBottom: 4 },
+        footerCodeValue: { fontFamily: theme.fontFamily.regular, fontSize: 18, letterSpacing: 4, color: theme.colors.accent, fontWeight: '600', marginBottom: theme.spacing.md },
       }),
     [theme]
   );
@@ -106,7 +211,7 @@ export function AppSidebar() {
               <Ionicons name="close" size={24} color={theme.colors.text} />
             </TouchableOpacity>
           </View>
-          <View style={styles.buttons}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.buttons} showsVerticalScrollIndicator={false}>
             <TouchableOpacity
               style={styles.menuButton}
               onPress={showTour}
@@ -144,14 +249,35 @@ export function AppSidebar() {
               <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.menuButton}
-              onPress={() => goTo('/(app)/account')}
+              style={[styles.menuButton, styles.accountFolderHeader]}
+              onPress={() => setAccountExpanded((e) => !e)}
               activeOpacity={0.7}
             >
               <Ionicons name="person-outline" size={22} color={theme.colors.accent} />
               <Text style={styles.menuButtonText}>Account</Text>
-              <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+              <Ionicons
+                name="chevron-down"
+                size={20}
+                color={theme.colors.textMuted}
+                style={{ transform: [{ rotate: accountExpanded ? '0deg' : '-90deg' }] }}
+              />
             </TouchableOpacity>
+            {accountExpanded && (
+              <View style={styles.accountFolderContent}>
+                <TouchableOpacity
+                  style={styles.accountFolderItem}
+                  onPress={handleDeleteAccount}
+                  disabled={deleteAccountLoading}
+                  activeOpacity={0.7}
+                >
+                  {deleteAccountLoading ? (
+                    <ActivityIndicator size="small" color={theme.colors.error} />
+                  ) : (
+                    <Text style={styles.deleteAccountText}>Delete account</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            )}
             <TouchableOpacity
               style={styles.menuButton}
               onPress={() => {
@@ -175,6 +301,18 @@ export function AppSidebar() {
               <Ionicons name="document-outline" size={22} color={theme.colors.accent} />
               <Text style={styles.menuButtonText}>Terms of Use</Text>
               <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+            </TouchableOpacity>
+          </ScrollView>
+          <View style={[styles.footer, { paddingBottom: Math.max(theme.spacing.lg, insets.bottom) }]}>
+            {accessCode && (
+              <View style={styles.accountFolderItem}>
+                <Text style={styles.footerCodeLabel}>Your access code</Text>
+                <Text style={styles.footerCodeValue}>{accessCode}</Text>
+              </View>
+            )}
+            <TouchableOpacity style={styles.menuButton} onPress={handleSignOut} activeOpacity={0.7}>
+              <Ionicons name="log-out-outline" size={22} color={theme.colors.accent} />
+              <Text style={styles.menuButtonText}>Sign out</Text>
             </TouchableOpacity>
           </View>
         </Pressable>

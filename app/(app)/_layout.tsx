@@ -98,7 +98,6 @@ function AppTabs() {
       <Tabs.Screen
         name="account"
         options={{
-          title: 'Account',
           href: null,
         }}
       />

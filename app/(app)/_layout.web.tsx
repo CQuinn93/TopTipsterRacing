@@ -1,14 +1,24 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions, type ViewStyle, type DimensionValue } from 'react-native';
+import { useState, useEffect } from 'react';
+import { Slot, useRouter, useSegments } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { lightTheme } from '@/constants/theme';
+import { useAuth } from '@/contexts/AuthContext';
 import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
 import { SidebarProvider, useSidebar } from '@/contexts/SidebarContext';
 import { OnboardingProvider } from '@/contexts/OnboardingContext';
 import { AppSidebar } from '@/components/AppSidebar';
+import { clearTabletCodeCache, getOrCreateTabletCode } from '@/lib/tabletCode';
+import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
+import { clearLatestResultsCache } from '@/lib/latestResultsCache';
+import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
+import { supabase, getSupabaseUrl } from '@/lib/supabase';
 
 const SIDEBAR_WIDTH = 260;
+const MOBILE_BREAKPOINT = 768;
+
 const NAV_ITEMS = [
   { href: '/(app)', label: 'Home', icon: 'home' as const },
   { href: '/(app)/selections', label: 'My Selections', icon: 'list' as const },
@@ -20,24 +30,39 @@ const MENU_ITEMS = [
   { href: '/(app)/rules', label: 'Rules', icon: 'document-text-outline' as const },
   { href: '/(app)/points', label: 'Points System', icon: 'stats-chart-outline' as const },
   { href: '/(app)/reminders', label: 'Reminders', icon: 'notifications-outline' as const },
-  { href: '/(app)/account', label: 'Account', icon: 'person-outline' as const },
 ];
+
+async function doSignOut(
+  signOut: () => Promise<void>,
+  userId: string | null,
+  router: ReturnType<typeof useRouter>
+) {
+  await clearTabletCodeCache();
+  if (userId) {
+    await clearAvailableRacesCache(userId);
+    await clearLatestResultsCache(userId);
+    await clearSelectionsBulkCache(userId);
+  }
+  await signOut();
+  router.replace('/(auth)/login');
+}
 
 function WebSidebar() {
   const theme = useTheme();
   const router = useRouter();
   const segments = useSegments();
-  const isLight = theme.colors.background === lightTheme.colors.background;
+  const isLight = String(theme.colors.background) === String(lightTheme.colors.background);
 
   const styles = StyleSheet.create({
     sidebar: {
       width: SIDEBAR_WIDTH,
+      flexShrink: 0,
       backgroundColor: isLight ? '#ffffff' : theme.colors.surface,
       borderRightWidth: 1,
       borderRightColor: theme.colors.border,
-      paddingTop: 28,
-      paddingBottom: 24,
-      paddingHorizontal: 16,
+      paddingTop: 24,
+      paddingBottom: 20,
+      paddingHorizontal: 12,
       shadowColor: '#000',
       shadowOffset: { width: 2, height: 0 },
       shadowOpacity: 0.05,
@@ -46,47 +71,47 @@ function WebSidebar() {
     },
     logo: {
       fontFamily: theme.fontFamily.regular,
-      fontSize: 20,
+      fontSize: 16,
       fontWeight: '700',
       color: theme.colors.text,
-      marginBottom: 8,
-      paddingHorizontal: 12,
+      marginBottom: 4,
+      paddingHorizontal: 8,
     },
     tagline: {
       fontFamily: theme.fontFamily.light,
-      fontSize: 12,
+      fontSize: 11,
       color: theme.colors.textSecondary,
-      marginBottom: 32,
-      paddingHorizontal: 12,
+      marginBottom: 20,
+      paddingHorizontal: 8,
     },
     navSection: {
-      marginBottom: 24,
+      marginBottom: 16,
     },
     navLabel: {
       fontFamily: theme.fontFamily.regular,
-      fontSize: 11,
+      fontSize: 10,
       fontWeight: '600',
       color: theme.colors.textMuted,
       textTransform: 'uppercase',
       letterSpacing: 0.5,
-      marginBottom: 8,
-      paddingHorizontal: 12,
+      marginBottom: 6,
+      paddingHorizontal: 8,
     },
     navItem: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingVertical: 12,
-      paddingHorizontal: 12,
-      borderRadius: 10,
-      marginBottom: 4,
-      gap: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 8,
+      borderRadius: 8,
+      marginBottom: 2,
+      gap: 8,
     },
     navItemActive: {
       backgroundColor: theme.colors.accentMuted,
     },
     navItemText: {
       fontFamily: theme.fontFamily.regular,
-      fontSize: 15,
+      fontSize: 13,
       color: theme.colors.text,
     },
     navItemTextActive: {
@@ -97,12 +122,12 @@ function WebSidebar() {
 
   const isActive = (href: string) => {
     const target = href.replace('/(app)', '').replace(/^\/+/, '') || 'index';
-    const current = segments[segments.length - 1] ?? 'index';
-    return current === target || (target === 'index' && (current === 'index' || !current));
+    const current = String(segments[segments.length - 1] ?? 'index');
+    return current === target || (target === 'index' && (current === 'index' || current === '(app)' || !current));
   };
 
   return (
-    <View style={[styles.sidebar, { flex: 1 }]}>
+    <View style={styles.sidebar}>
       <View style={{ flex: 1, minHeight: 0 }}>
       <Text style={styles.logo}>Top Tipster Racing</Text>
       <Text style={styles.tagline}>Fantasy racing tips</Text>
@@ -117,7 +142,7 @@ function WebSidebar() {
               onPress={() => router.push(item.href as any)}
               activeOpacity={0.7}
             >
-              <Ionicons name={item.icon} size={22} color={active ? theme.colors.accent : theme.colors.textSecondary} />
+              <Ionicons name={item.icon} size={20} color={active ? theme.colors.accent : theme.colors.textSecondary} />
               <Text style={[styles.navItemText, active && styles.navItemTextActive]}>{item.label}</Text>
             </TouchableOpacity>
           );
@@ -148,25 +173,259 @@ function WebSidebar() {
 
 function WebSidebarFooter() {
   const theme = useTheme();
+  const router = useRouter();
+  const { session, signOut } = useAuth();
   const { openSidebar } = useSidebar();
+  const userId = session?.user?.id ?? null;
+  const [accessCode, setAccessCode] = useState<string | null>(null);
+  const [accountExpanded, setAccountExpanded] = useState(false);
+  const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
+
+  useEffect(() => {
+    if (!userId) {
+      setAccessCode(null);
+      return;
+    }
+    getOrCreateTabletCode(userId)
+      .then(setAccessCode)
+      .catch(() => setAccessCode(null));
+  }, [userId]);
+
+  const handleSignOut = () => {
+    if (typeof window !== 'undefined' && window.confirm('Are you sure you want to sign out?')) {
+      doSignOut(signOut, userId, router);
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    if (typeof window === 'undefined') return;
+    if (!window.confirm('This will permanently delete your account and all your data (selections, competition entries). You will not be able to sign in again with this email. This cannot be undone. Are you sure?')) {
+      return;
+    }
+    setDeleteAccountLoading(true);
+    (async () => {
+      try {
+        const { data: { session: s } } = await supabase.auth.getSession();
+        const token = s?.access_token;
+        if (!token) {
+          window.alert('Not signed in.');
+          return;
+        }
+        const url = `${getSupabaseUrl()}/functions/v1/delete-account`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          window.alert((body as { error?: string })?.error ?? 'Could not delete account. Try again later.');
+          return;
+        }
+        await doSignOut(signOut, userId, router);
+        window.alert('Your account has been permanently deleted.');
+      } catch (e) {
+        window.alert(e instanceof Error ? e.message : 'Something went wrong.');
+      } finally {
+        setDeleteAccountLoading(false);
+      }
+    })();
+  };
+
   return (
     <View style={{ marginTop: 'auto', paddingTop: 24, borderTopWidth: 1, borderTopColor: theme.colors.border }}>
+      <View style={{ paddingVertical: 10, paddingHorizontal: 12 }}>
+        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 10, color: theme.colors.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          Your access code
+        </Text>
+        {accessCode ? (
+          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 18, letterSpacing: 4, color: theme.colors.accent, fontWeight: '600' }}>
+            {accessCode}
+          </Text>
+        ) : (
+          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.textMuted }}>…</Text>
+        )}
+      </View>
+      <TouchableOpacity
+        onPress={handleSignOut}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingVertical: 10,
+          paddingHorizontal: 12,
+          gap: 10,
+        }}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="log-out-outline" size={20} color={theme.colors.textSecondary} />
+        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.textSecondary }}>
+          Sign out
+        </Text>
+      </TouchableOpacity>
+
+      <View style={{ paddingVertical: 4, paddingHorizontal: 12 }}>
+        <TouchableOpacity
+          onPress={() => setAccountExpanded((e) => !e)}
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 }}
+          activeOpacity={0.7}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Ionicons name="person-outline" size={20} color={theme.colors.textSecondary} />
+            <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.textSecondary }}>
+              Account
+            </Text>
+          </View>
+          <Ionicons
+            name="chevron-down"
+            size={18}
+            color={theme.colors.textMuted}
+            style={{ transform: [{ rotate: accountExpanded ? '0deg' : '-90deg' }] }}
+          />
+        </TouchableOpacity>
+        {accountExpanded && (
+          <View style={{ paddingLeft: 30, paddingBottom: 8 }}>
+            <TouchableOpacity
+              onPress={handleDeleteAccount}
+              disabled={deleteAccountLoading}
+              style={{ paddingVertical: 6 }}
+              activeOpacity={0.7}
+            >
+              {deleteAccountLoading ? (
+                <ActivityIndicator size="small" color={theme.colors.error} />
+              ) : (
+                <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.error }}>
+                  Delete account
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
       <TouchableOpacity
         onPress={openSidebar}
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          paddingVertical: 12,
+          paddingVertical: 10,
           paddingHorizontal: 12,
-          gap: 12,
+          gap: 10,
         }}
         activeOpacity={0.7}
       >
         <Ionicons name="menu" size={20} color={theme.colors.textSecondary} />
-        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textSecondary }}>
+        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.textSecondary }}>
           More options
         </Text>
       </TouchableOpacity>
+    </View>
+  );
+}
+
+function MobileWebLayout() {
+  const theme = useTheme();
+  const router = useRouter();
+  const segments = useSegments();
+  const { openSidebar } = useSidebar();
+  const insets = useSafeAreaInsets();
+  const isLight = String(theme.colors.background) === String(lightTheme.colors.background);
+
+  const currentSegment = String(segments[segments.length - 1] ?? 'index');
+  const tabTitles: Record<string, string> = {
+    index: 'Home',
+    '(app)': 'Home',
+    selections: 'My Selections',
+    competitions: 'Competitions',
+    results: 'Results',
+  };
+  const headerTitle = tabTitles[currentSegment] ?? 'Top Tipster Racing';
+
+  const isActive = (href: string) => {
+    const target = href.replace('/(app)', '').replace(/^\/+/, '') || 'index';
+    return currentSegment === target || (target === 'index' && (currentSegment === 'index' || currentSegment === '(app)'));
+  };
+
+  const styles = StyleSheet.create({
+    wrapper: {
+      flex: 1,
+      minHeight: '100vh' as DimensionValue,
+      backgroundColor: theme.colors.background,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+      paddingTop: Math.max(12, insets.top),
+      backgroundColor: isLight ? theme.colors.accent : theme.colors.background,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    headerTitle: {
+      flex: 1,
+      fontFamily: theme.fontFamily.regular,
+      fontSize: 18,
+      fontWeight: '600',
+      color: isLight ? theme.colors.white : theme.colors.text,
+      marginLeft: 8,
+    },
+    content: {
+      flex: 1,
+      minHeight: 0,
+    },
+    tabBar: {
+      flexDirection: 'row',
+      backgroundColor: theme.colors.accent,
+      paddingBottom: Math.max(8, insets.bottom),
+      paddingTop: 8,
+      borderTopWidth: 0,
+    },
+    tabItem: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 8,
+    },
+    tabLabel: {
+      fontFamily: theme.fontFamily.regular,
+      fontSize: 11,
+      marginTop: 4,
+    },
+  });
+
+  return (
+    <View style={styles.wrapper}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={openSidebar} hitSlop={12} style={{ padding: 4 }}>
+          <Ionicons name="menu" size={24} color={isLight ? theme.colors.white : theme.colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle} numberOfLines={1}>{headerTitle}</Text>
+      </View>
+      <View style={styles.content}>
+        <Slot />
+      </View>
+      <View style={styles.tabBar}>
+        {NAV_ITEMS.map((item) => {
+          const active = isActive(item.href);
+          const color = active ? '#ffffff' : 'rgba(255, 255, 255, 0.7)';
+          return (
+            <TouchableOpacity
+              key={item.href}
+              style={styles.tabItem}
+              onPress={() => router.push(item.href as any)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name={item.icon} size={24} color={color} />
+              <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      <AppSidebar />
     </View>
   );
 }
@@ -179,46 +438,29 @@ function WebLayoutContent() {
       flex: 1,
       flexDirection: 'row',
       backgroundColor: theme.colors.background,
-      minHeight: '100vh',
+      minHeight: '100vh' as DimensionValue,
       minWidth: '100%',
     },
     main: {
       flex: 1,
       minWidth: 0,
-      padding: 32,
+      minHeight: 0,
+      padding: 24,
       paddingTop: 24,
     },
     content: {
-      maxWidth: 880,
+      flex: 1,
       width: '100%',
-      marginLeft: 'auto',
-      marginRight: 'auto',
+      minHeight: 0,
     },
   });
 
   return (
-    <View style={styles.wrapper}>
+    <View style={styles.wrapper as ViewStyle}>
       <WebSidebar />
-      <View style={styles.main}>
-        <View style={styles.content}>
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: 'transparent' },
-              animation: 'fade',
-            }}
-          >
-            <Stack.Screen name="index" />
-            <Stack.Screen name="selections" />
-            <Stack.Screen name="competitions" />
-            <Stack.Screen name="results" />
-            <Stack.Screen name="leaderboard" />
-            <Stack.Screen name="participant-selections" />
-            <Stack.Screen name="rules" />
-            <Stack.Screen name="points" />
-            <Stack.Screen name="account" />
-            <Stack.Screen name="reminders" />
-          </Stack>
+      <View style={styles.main as ViewStyle}>
+        <View style={[styles.content, { flex: 1 }]}>
+          <Slot />
         </View>
       </View>
       <AppSidebar />
@@ -227,11 +469,14 @@ function WebLayoutContent() {
 }
 
 export default function AppLayoutWeb() {
+  const { width } = useWindowDimensions();
+  const isNarrow = width < MOBILE_BREAKPOINT;
+
   return (
     <ForceRefreshProvider>
       <SidebarProvider>
         <OnboardingProvider>
-          <WebLayoutContent />
+          {isNarrow ? <MobileWebLayout /> : <WebLayoutContent />}
         </OnboardingProvider>
       </SidebarProvider>
     </ForceRefreshProvider>
