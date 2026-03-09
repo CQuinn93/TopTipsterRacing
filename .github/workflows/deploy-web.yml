@@ -21,6 +21,7 @@ on:
       - 'babel.config.js'
       - 'metro.config.js'
       - 'global.css'
+  workflow_dispatch:
 
 permissions:
   contents: read
