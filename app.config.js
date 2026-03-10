@@ -40,7 +40,7 @@ module.exports = {
     web: {
       bundler: 'metro',
       output: 'static',
-      favicon: './assets/favicon.png',
+      favicon: './assets/logo/TopTipster_Logo-Light.png',
     },
     plugins: [
       'expo-router',
