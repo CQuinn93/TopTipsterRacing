@@ -21,6 +21,7 @@ on:
       - 'babel.config.js'
       - 'metro.config.js'
       - 'global.css'
+      - 'app.config.js'
   workflow_dispatch:
 
 permissions:
@@ -50,6 +51,7 @@ jobs:
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          EXPO_PUBLIC_WEB_BASE_URL: ''
 
       - name: Inject CSP (allow unsafe-eval for bundled code)
         run: node scripts/inject-csp-meta.js

@@ -1,5 +1,6 @@
 import '../global.css';
 import { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -41,13 +42,16 @@ export default function RootLayout() {
     'Polygon-Italic': require('../assets/fonts/Polygon-Italic.otf'),
   });
 
+  const isWeb = Platform.OS === 'web';
+
   useEffect(() => {
-    if (fontsLoaded || fontError) {
+    if (isWeb || fontsLoaded || fontError) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError]);
+  }, [isWeb, fontsLoaded, fontError]);
 
-  if (!fontsLoaded && !fontError) {
+  const ready = isWeb || fontsLoaded || fontError;
+  if (!ready) {
     return null;
   }
 
