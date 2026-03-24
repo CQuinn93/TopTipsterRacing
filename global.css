@@ -12,6 +12,8 @@ body {
   margin: 0;
   background-color: #0a0a0a;
   color: #fafafa;
+  /* Slightly smaller base font on web for a more compact feel */
+  font-size: 14px;
 }
 
 /* Web: smooth scrolling and selection */

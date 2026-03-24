@@ -16,13 +16,11 @@ import {
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
 import { theme } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
-
-const ADMIN_CODE = '777777';
 
 const IRISH_COURSES = [
   'Ballinrobe', 'Bellewstown', 'Clonmel', 'Cork', 'The Curragh', 'Down Royal', 'Downpatrick', 'Dundalk',
@@ -124,12 +122,27 @@ type AdminSelectionRow = {
   selections: Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }>;
 };
 
-type TabId = 'requests' | 'create' | 'selections';
+type AdminAccessRequest = {
+  id: string;
+  user_id: string;
+  username: string | null;
+  created_at: string;
+};
+
+type TabId = 'requests' | 'admins' | 'create' | 'selections';
 
 export default function AdminScreen() {
   const activeTheme = useTheme();
+  const params = useLocalSearchParams<{ code?: string; returnTo?: string }>();
+  const adminCode = String(params.code ?? '').trim();
+  const returnToRaw = String(params.returnTo ?? '').trim();
+  const returnTo =
+    returnToRaw === '/(auth)/tablet-mode' || returnToRaw.startsWith('/(app)')
+      ? returnToRaw
+      : '/(auth)/tablet-mode';
   const [tab, setTab] = useState<TabId>('requests');
   const [list, setList] = useState<PendingRequest[]>([]);
+  const [adminRequests, setAdminRequests] = useState<AdminAccessRequest[]>([]);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [selectionsList, setSelectionsList] = useState<AdminSelectionRow[]>([]);
   const [selectedCompId, setSelectedCompId] = useState<string | null>(null);
@@ -153,18 +166,27 @@ export default function AdminScreen() {
   const [createLoading, setCreateLoading] = useState(false);
 
   const load = async () => {
+    if (!adminCode) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     setRefreshing(true);
     try {
-      const [pendingRes, compsRes] = await Promise.all([
-        supabase.rpc('admin_list_pending', { p_admin_code: ADMIN_CODE }),
+      const [pendingRes, adminReqRes, compsRes] = await Promise.all([
+        supabase.rpc('admin_list_pending', { p_code: adminCode }),
+        supabase.rpc('admin_list_access_requests', { p_code: adminCode }),
         supabase.from('competitions').select('id, name').order('name'),
       ]);
       if (pendingRes.error) throw pendingRes.error;
+      if (adminReqRes.error) throw adminReqRes.error;
       if (compsRes.error) throw compsRes.error;
       setList((pendingRes.data as PendingRequest[]) ?? []);
+      setAdminRequests((adminReqRes.data as AdminAccessRequest[]) ?? []);
       setCompetitions((compsRes.data as Competition[]) ?? []);
     } catch {
       setList([]);
+      setAdminRequests([]);
       setCompetitions([]);
     } finally {
       setRefreshing(false);
@@ -174,7 +196,7 @@ export default function AdminScreen() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [adminCode]);
 
   useEffect(() => {
     if (coursePickerOpen) {
@@ -204,7 +226,7 @@ export default function AdminScreen() {
     }
     (async () => {
       const { data, error } = await supabase.rpc('admin_list_selections', {
-        p_admin_code: ADMIN_CODE,
+        p_code: adminCode,
         p_competition_id: selectedCompId,
       });
       if (error) {
@@ -219,7 +241,7 @@ export default function AdminScreen() {
           : (Array.isArray(raw) ? (raw as AdminSelectionRow[]) : []);
       setSelectionsList(all.filter((s) => String(s.race_date) === String(selectedRaceDate)));
     })();
-  }, [tab, selectedCompId, selectedRaceDate]);
+  }, [tab, selectedCompId, selectedRaceDate, adminCode]);
 
   const requestsByCompetition = useMemo(() => {
     const map = new Map<string, PendingRequest[]>();
@@ -247,7 +269,7 @@ export default function AdminScreen() {
     setActingId(id);
     try {
       const { data, error } = await supabase.rpc('admin_approve_request', {
-        p_admin_code: ADMIN_CODE,
+        p_code: adminCode,
         p_request_id: id,
       });
       if (error) throw error;
@@ -264,11 +286,32 @@ export default function AdminScreen() {
     }
   };
 
+  const handleApproveAdmin = async (id: string) => {
+    setActingId(id);
+    try {
+      const { data, error } = await supabase.rpc('admin_approve_access_request', {
+        p_code: adminCode,
+        p_request_id: id,
+      });
+      if (error) throw error;
+      const result = data as { success?: boolean; error?: string };
+      if (!result?.success) {
+        Alert.alert('Error', result?.error ?? 'Could not approve admin request');
+        return;
+      }
+      setAdminRequests((prev) => prev.filter((r) => r.id !== id));
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not approve admin request');
+    } finally {
+      setActingId(null);
+    }
+  };
+
   const handleReject = async (id: string) => {
     setActingId(id);
     try {
       const { data, error } = await supabase.rpc('admin_reject_request', {
-        p_admin_code: ADMIN_CODE,
+        p_code: adminCode,
         p_request_id: id,
       });
       if (error) throw error;
@@ -277,6 +320,24 @@ export default function AdminScreen() {
       setList((prev) => prev.filter((r) => r.id !== id));
     } catch (e: unknown) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not reject');
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const handleRejectAdmin = async (id: string) => {
+    setActingId(id);
+    try {
+      const { data, error } = await supabase.rpc('admin_reject_access_request', {
+        p_code: adminCode,
+        p_request_id: id,
+      });
+      if (error) throw error;
+      const result = data as { success?: boolean };
+      if (!result?.success) return;
+      setAdminRequests((prev) => prev.filter((r) => r.id !== id));
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not reject admin request');
     } finally {
       setActingId(null);
     }
@@ -312,7 +373,7 @@ export default function AdminScreen() {
     setCreateLoading(true);
     try {
       const { data, error } = await supabase.rpc('admin_create_competition', {
-        p_admin_code: ADMIN_CODE,
+        p_code: adminCode,
         p_name: name,
         p_festival_start_date: start,
         p_festival_end_date: end,
@@ -344,15 +405,25 @@ export default function AdminScreen() {
   const openEditSelection = (selectionId: string, competitionId: string, raceDate: string) => {
     router.push({
       pathname: '/(auth)/admin-edit-selection',
-      params: { selectionId, competitionId, raceDate },
+      params: { selectionId, competitionId, raceDate, code: adminCode, returnTo },
     });
   };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: activeTheme.colors.background }]} edges={['top']}>
+      {!adminCode ? (
+        <View style={styles.scrollContent}>
+          <Text style={styles.empty}>Admin session expired. Please reopen Admin tools from the menu.</Text>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.replace(returnTo as any)}>
+            <Text style={styles.backButtonText}>Back</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+      <>
       <View style={styles.header}>
         <Text style={styles.title}>Admin</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.replace('/(auth)/tablet-mode')}>
+        <Text style={styles.adminSubTitle}>Manage join requests, admin access, competitions, and edits.</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.replace(returnTo as any)}>
           <Text style={styles.backButtonText}>Exit admin</Text>
         </TouchableOpacity>
       </View>
@@ -363,6 +434,12 @@ export default function AdminScreen() {
           onPress={() => setTab('requests')}
         >
           <Text style={[styles.tabText, tab === 'requests' && styles.tabTextActive]}>Join requests</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, tab === 'admins' && styles.tabActive]}
+          onPress={() => setTab('admins')}
+        >
+          <Text style={[styles.tabText, tab === 'admins' && styles.tabTextActive]}>Admin access</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tab, tab === 'create' && styles.tabActive]}
@@ -421,6 +498,46 @@ export default function AdminScreen() {
                     </View>
                   </View>
                 ))}
+              </View>
+            ))
+          )}
+        </ScrollView>
+      ) : tab === 'admins' ? (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={theme.colors.accent} />
+          }
+        >
+          <Text style={styles.pullToRefreshHint}>Pull down to refresh</Text>
+          {adminRequests.length === 0 ? (
+            <Text style={styles.empty}>No pending admin requests</Text>
+          ) : (
+            adminRequests.map((r) => (
+              <View key={r.id} style={styles.card}>
+                <Text style={styles.cardName}>{r.username || 'Unknown user'}</Text>
+                <Text style={styles.cardDate}>{new Date(r.created_at).toLocaleString()}</Text>
+                <View style={styles.actions}>
+                  <TouchableOpacity
+                    style={[styles.approveBtn, actingId === r.id && styles.buttonDisabled]}
+                    onPress={() => handleApproveAdmin(r.id)}
+                    disabled={actingId !== null}
+                  >
+                    {actingId === r.id ? (
+                      <ActivityIndicator size="small" color={theme.colors.black} />
+                    ) : (
+                      <Text style={styles.approveBtnText}>Grant admin</Text>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.rejectBtn, actingId === r.id && styles.buttonDisabled]}
+                    onPress={() => handleRejectAdmin(r.id)}
+                    disabled={actingId !== null}
+                  >
+                    <Text style={styles.rejectBtnText}>Reject</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             ))
           )}
@@ -724,6 +841,8 @@ export default function AdminScreen() {
           )}
         </ScrollView>
       )}
+      </>
+      )}
     </SafeAreaView>
   );
 }
@@ -736,6 +855,12 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: theme.colors.text,
     marginBottom: theme.spacing.xs,
+  },
+  adminSubTitle: {
+    fontFamily: theme.fontFamily.regular,
+    fontSize: 12,
+    color: theme.colors.textMuted,
+    marginBottom: theme.spacing.sm,
   },
   backButton: {
     alignSelf: 'flex-start',

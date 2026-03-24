@@ -8,7 +8,7 @@ import {
   ScrollView,
   useWindowDimensions,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -19,6 +19,7 @@ import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
 import { useRealtimeRaces } from '@/lib/useRealtimeRaces';
 
 const LEADERBOARD_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes – use cache to save egress on repeat visits
+const LEADERBOARD_VISIT_REFRESH_COOLDOWN_MS = 30 * 1000; // avoid repeat refreshes on rapid revisits
 import type { Race, RaceResult } from '@/types/races';
 
 type LeaderboardRow = {
@@ -62,6 +63,7 @@ export default function LeaderboardScreen() {
   const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [lastManualRefreshAt, setLastManualRefreshAt] = useState<number | null>(null);
+  const [lastVisitRefreshAt, setLastVisitRefreshAt] = useState<number | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [leaderboardFilter, setLeaderboardFilter] = useState<'daily' | 'overall' | 'sp'>('overall');
@@ -328,6 +330,18 @@ export default function LeaderboardScreen() {
   useEffect(() => {
     loadLeaderboard();
   }, [selectedId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!selectedId) return;
+      const now = Date.now();
+      if (lastVisitRefreshAt != null && now - lastVisitRefreshAt < LEADERBOARD_VISIT_REFRESH_COOLDOWN_MS) {
+        return;
+      }
+      setLastVisitRefreshAt(now);
+      loadLeaderboard(false);
+    }, [selectedId, lastVisitRefreshAt, loadLeaderboard])
+  );
 
   useEffect(() => {
     if (raceDates.length > 0) {

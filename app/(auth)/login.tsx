@@ -15,14 +15,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ExpoLinking from 'expo-linking';
 
 export default function LoginScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
 
   const styles = useMemo(
     () =>
@@ -30,13 +34,17 @@ export default function LoginScreen() {
         container: {
           flex: 1,
           backgroundColor: theme.colors.background,
-          justifyContent: 'center',
           padding: theme.spacing.lg,
+          paddingBottom: Math.max(theme.spacing.lg, insets.bottom + theme.spacing.sm),
         },
         content: {
+          flex: 1,
           maxWidth: 400,
           width: '100%',
           alignSelf: 'center',
+        },
+        formArea: {
+          marginTop: 'auto',
         },
         title: {
           fontFamily: theme.fontFamily.regular,
@@ -78,7 +86,7 @@ export default function LoginScreen() {
         buttonText: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 18,
-          color: theme.colors.black,
+          color: theme.colors.white,
           fontWeight: '600',
         },
         switchText: {
@@ -86,6 +94,17 @@ export default function LoginScreen() {
           fontSize: 14,
           color: theme.colors.accent,
           textAlign: 'center',
+        },
+        switchTextWrap: {
+          marginTop: theme.spacing.lg,
+        },
+        forgotPasswordText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.textSecondary,
+          textAlign: 'center',
+          textDecorationLine: 'underline',
+          marginTop: theme.spacing.sm,
         },
         policyRow: {
           flexDirection: 'row',
@@ -104,14 +123,22 @@ export default function LoginScreen() {
         tabletModeRow: {
           flexDirection: 'row',
           alignItems: 'center',
-          marginTop: theme.spacing.lg,
           gap: theme.spacing.sm,
+        },
+        quickAccessCard: {
+          marginTop: 'auto',
+          marginBottom: Math.max(theme.spacing.sm, insets.bottom),
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.lg,
+          padding: theme.spacing.md,
+          borderWidth: 1,
+          borderColor: theme.colors.accentDim,
         },
         tabletModeButton: {
           flex: 1,
-          backgroundColor: theme.colors.surface,
+          backgroundColor: 'rgba(255, 255, 255, 0.16)',
           borderWidth: 1,
-          borderColor: theme.colors.border,
+          borderColor: 'rgba(255, 255, 255, 0.35)',
           borderRadius: theme.radius.md,
           paddingVertical: theme.spacing.sm,
           alignItems: 'center',
@@ -120,13 +147,21 @@ export default function LoginScreen() {
         tabletModeButtonText: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 14,
-          color: theme.colors.textSecondary,
+          color: theme.colors.white,
         },
         tabletModeInfoHit: {
           padding: theme.spacing.xs,
         },
+        quickAccessTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: 'rgba(255,255,255,0.85)',
+          marginBottom: theme.spacing.sm,
+          textTransform: 'uppercase',
+          letterSpacing: 0.6,
+        },
       }),
-    [theme]
+    [theme, insets.bottom]
   );
 
   const handleAuth = async () => {
@@ -184,65 +219,111 @@ export default function LoginScreen() {
     }
   };
 
+  const showMessage = (title: string, message: string) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.alert(`${title}\n\n${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      showMessage('Email required', 'Enter your email address first, then tap forgot password.');
+      return;
+    }
+
+    setResetLoading(true);
+    try {
+      const webBase = (process.env.EXPO_PUBLIC_WEB_BASE_URL ?? '').trim();
+      const webResetUrl = webBase
+        ? `https://www.toptipster.ie${webBase === '/' ? '' : webBase}/reset-password`
+        : 'https://www.toptipster.ie/reset-password';
+      const nativeResetUrl = ExpoLinking.createURL('/reset-password');
+      const redirectTo = Platform.OS === 'web' ? webResetUrl : nativeResetUrl;
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo,
+      });
+      if (error) throw error;
+      showMessage(
+        'Reset link sent',
+        'If this email exists, we have sent a password reset link. Please check your inbox and spam folder.'
+      );
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Could not send password reset email.';
+      showMessage('Error', message);
+    } finally {
+      setResetLoading(false);
+    }
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.content}>
-        <Text style={styles.title}>Top Tipster Racing</Text>
-        <Text style={styles.slogan}>A Fantasy Sports Racing App</Text>
+        <View style={styles.formArea}>
+          <Text style={styles.title}>Top Tipster Racing</Text>
+          <Text style={styles.slogan}>A Fantasy Sports Racing App</Text>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Email"
-          placeholderTextColor={theme.colors.textMuted}
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          editable={!loading}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          placeholderTextColor={theme.colors.textMuted}
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          editable={!loading}
-        />
-
-        {isSignUp && (
           <TextInput
             style={styles.input}
-            placeholder="Username (for leaderboard)"
+            placeholder="Email"
             placeholderTextColor={theme.colors.textMuted}
-            value={username}
-            onChangeText={setUsername}
+            value={email}
+            onChangeText={setEmail}
             autoCapitalize="none"
-            autoCorrect={false}
+            keyboardType="email-address"
             editable={!loading}
           />
-        )}
+          <TextInput
+            style={styles.input}
+            placeholder="Password"
+            placeholderTextColor={theme.colors.textMuted}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            editable={!loading}
+          />
 
-        <TouchableOpacity
-          style={[styles.button, loading && styles.buttonDisabled]}
-          onPress={handleAuth}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color={theme.colors.black} />
-          ) : (
-            <Text style={styles.buttonText}>{isSignUp ? 'Sign up' : 'Sign in'}</Text>
+          {isSignUp && (
+            <TextInput
+              style={styles.input}
+              placeholder="Username (for leaderboard)"
+              placeholderTextColor={theme.colors.textMuted}
+              value={username}
+              onChangeText={setUsername}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!loading}
+            />
           )}
-        </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => setIsSignUp(!isSignUp)} disabled={loading}>
-          <Text style={styles.switchText}>
-            {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
-          </Text>
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.button, loading && styles.buttonDisabled]}
+            onPress={handleAuth}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color={theme.colors.white} />
+            ) : (
+              <Text style={styles.buttonText}>{isSignUp ? 'Sign up' : 'Sign in'}</Text>
+            )}
+          </TouchableOpacity>
+
+          {!isSignUp && (
+            <TouchableOpacity onPress={handleForgotPassword} disabled={loading || resetLoading}>
+              <Text style={styles.forgotPasswordText}>{resetLoading ? 'Sending reset email...' : 'Forgot password?'}</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.switchTextWrap} onPress={() => setIsSignUp(!isSignUp)} disabled={loading}>
+            <Text style={styles.switchText}>
+              {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.policyRow}>
           <TouchableOpacity
@@ -259,7 +340,9 @@ export default function LoginScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.tabletModeRow}>
+        <View style={styles.quickAccessCard}>
+          <Text style={styles.quickAccessTitle}>Quick access</Text>
+          <View style={styles.tabletModeRow}>
           <TouchableOpacity
             style={styles.tabletModeButton}
             onPress={() => router.push('/(auth)/tablet-mode')}
@@ -279,8 +362,9 @@ export default function LoginScreen() {
             disabled={loading}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
-            <Ionicons name="information-circle-outline" size={24} color={theme.colors.textMuted} />
+            <Ionicons name="information-circle-outline" size={24} color={theme.colors.white} />
           </TouchableOpacity>
+          </View>
         </View>
       </View>
     </KeyboardAvoidingView>

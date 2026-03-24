@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -21,6 +22,7 @@ import type { MeetingResults, RaceResultTemplate } from '@/lib/resultsTemplateFo
 import { useRealtimeRaces } from '@/lib/useRealtimeRaces';
 
 const RESULTS_COMP_IDS_TTL_MS = 60 * 1000; // 1 min – avoid refetching competition_participants on every load
+const RESULTS_VISIT_REFRESH_COOLDOWN_MS = 30 * 1000; // avoid repeat refreshes on rapid revisits
 let resultsCompIdsCache: { userId: string; compIds: string[]; fetchedAt: number } | null = null;
 
 export default function ResultsScreen() {
@@ -34,6 +36,7 @@ export default function ResultsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastManualRefreshAt, setLastManualRefreshAt] = useState<number | null>(null);
+  const [lastVisitRefreshAt, setLastVisitRefreshAt] = useState<number | null>(null);
   /** Race api_race_ids currently shown; used by Realtime to refetch when results land. */
   const [resultsRaceApiIds, setResultsRaceApiIds] = useState<string[]>([]);
 
@@ -82,7 +85,20 @@ export default function ResultsScreen() {
   useEffect(() => {
     setLoading(true);
     loadResults(false);
-  }, [userId]);
+  }, [userId, loadResults]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return;
+      const now = Date.now();
+      if (lastVisitRefreshAt != null && now - lastVisitRefreshAt < RESULTS_VISIT_REFRESH_COOLDOWN_MS) {
+        return;
+      }
+      setLastVisitRefreshAt(now);
+      // On screen visit we auto-refresh (non-forced; cache rules still apply).
+      loadResults(false);
+    }, [userId, lastVisitRefreshAt, loadResults])
+  );
 
   useEffect(() => {
     if (meetingResults.length === 0) {

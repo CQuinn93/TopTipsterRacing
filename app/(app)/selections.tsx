@@ -10,8 +10,9 @@ import {
   Modal,
   Pressable,
   RefreshControl,
+  Platform,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
@@ -21,7 +22,7 @@ import {
   type MySelectionItem,
   type OtherUserSelection,
 } from '@/lib/mySelectionsView';
-import { getSelectionsBulk, type SelectionsBulkData } from '@/lib/selectionsBulkCache';
+import { getSelectionsBulk, clearSelectionsBulkCache, type SelectionsBulkData } from '@/lib/selectionsBulkCache';
 import { useTheme } from '@/contexts/ThemeContext';
 import { displayHorseName } from '@/lib/displayHorseName';
 import type { Race } from '@/types/races';
@@ -35,6 +36,8 @@ type RaceDay = {
   first_race_utc: string;
   races: Race[];
 };
+
+const SELECTIONS_VISIT_REFRESH_COOLDOWN_MS = 30 * 1000;
 
 export default function SelectionsScreen() {
   const theme = useTheme();
@@ -62,6 +65,7 @@ export default function SelectionsScreen() {
   } | null>(null);
   const [selectionsBulk, setSelectionsBulk] = useState<SelectionsBulkData | null>(null);
   const [refreshingMySelections, setRefreshingMySelections] = useState(false);
+  const [lastVisitRefreshAt, setLastVisitRefreshAt] = useState<number | null>(null);
   const [availableRaces, setAvailableRaces] = useState<AvailableRaceDay[]>([]);
   const [lockingId, setLockingId] = useState<string | null>(null);
   const [pickingDayIndex, setPickingDayIndex] = useState(0);
@@ -193,6 +197,57 @@ export default function SelectionsScreen() {
   const selectedRace = currentRaces[selectedRaceIndex] ?? currentRaces[0];
   const selectionsClosed = currentRaceDay ? isSelectionClosed(currentRaceDay.first_race_utc) : false;
 
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) return;
+      const now = Date.now();
+      if (lastVisitRefreshAt != null && now - lastVisitRefreshAt < SELECTIONS_VISIT_REFRESH_COOLDOWN_MS) {
+        return;
+      }
+      setLastVisitRefreshAt(now);
+
+      if (!competitionId) {
+        refreshMySelections();
+        return;
+      }
+
+      (async () => {
+        const days = await fetchRaceDaysForCompetition(supabase, competitionId, 'id, race_date, first_race_utc, races');
+        const raceDayRows = (days ?? []) as RaceDay[];
+        setRaceDays(raceDayRows);
+        if (!raceDayRows.length) {
+          setSelections({});
+          setUserLockedInForPickingDay(false);
+          return;
+        }
+
+        const nextDate = selectedDate && raceDayRows.some((d) => d.race_date === selectedDate)
+          ? selectedDate
+          : raceDayRows[0].race_date;
+        const nextIndex = raceDayRows.findIndex((d) => d.race_date === nextDate);
+        setPickingDayIndex(Math.max(0, nextIndex));
+
+        const { data } = await supabase
+          .from('daily_selections')
+          .select('selections, locked_at')
+          .eq('competition_id', competitionId)
+          .eq('user_id', userId)
+          .eq('race_date', nextDate)
+          .maybeSingle();
+        setUserLockedInForPickingDay(!!(data?.locked_at));
+        if (data?.selections && typeof data.selections === 'object') {
+          const sel: Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }> = {};
+          for (const [k, v] of Object.entries(data.selections as Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }>)) {
+            sel[k] = v;
+          }
+          setSelections(sel);
+        } else {
+          setSelections({});
+        }
+      })();
+    }, [userId, competitionId, lastVisitRefreshAt, selectedDate])
+  );
+
   useEffect(() => {
     if (!userId || !competitionId || !selectedDate) return;
     (async () => {
@@ -239,13 +294,23 @@ export default function SelectionsScreen() {
         { onConflict: 'competition_id,user_id,race_date' }
       );
       if (error) throw error;
-      Alert.alert('Saved', 'Your selections have been saved.', [
-        { text: 'OK', onPress: () => router.replace('/(app)/selections') },
-      ]);
+      await clearSelectionsBulkCache(userId);
+      if (Platform.OS === 'web') {
+        window.alert('Your selections have been saved.');
+        router.replace('/(app)/selections');
+      } else {
+        Alert.alert('Saved', 'Your selections have been saved.', [
+          { text: 'OK', onPress: () => router.replace('/(app)/selections') },
+        ]);
+      }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to save';
       const isLocked = /locked|1 hour|first race/i.test(msg);
-      Alert.alert(isLocked ? 'Selections locked' : 'Error', isLocked ? 'Selections are locked – less than 1 hour until the first race.' : msg);
+      if (Platform.OS === 'web') {
+        window.alert(isLocked ? 'Selections are locked – less than 1 hour until the first race.' : msg);
+      } else {
+        Alert.alert(isLocked ? 'Selections locked' : 'Error', isLocked ? 'Selections are locked – less than 1 hour until the first race.' : msg);
+      }
     } finally {
       setSaving(false);
     }

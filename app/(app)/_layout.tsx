@@ -3,8 +3,10 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
 import { lightTheme } from '@/constants/theme';
+import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { AppSidebar } from '@/components/AppSidebar';
+import { AppUnlockScreen } from '@/components/AppUnlockScreen';
 
 function MenuHeaderButton() {
   const theme = useTheme();
@@ -21,6 +23,7 @@ function MenuHeaderButton() {
 import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { OnboardingProvider } from '@/contexts/OnboardingContext';
+import { AppLockProvider, useAppLock } from '@/contexts/AppLockContext';
 
 function AppTabs() {
   const theme = useTheme();
@@ -112,15 +115,34 @@ function AppTabs() {
   );
 }
 
-export default function AppLayout() {
+function AppLayoutContent() {
+  const { session } = useAuth();
+  const { isLocked } = useAppLock();
+
   return (
     <ForceRefreshProvider>
       <SidebarProvider>
         <OnboardingProvider>
-          <AppTabs />
-          <AppSidebar />
+          {session && isLocked ? (
+            <AppUnlockScreen />
+          ) : (
+            <>
+              <AppTabs />
+              <AppSidebar />
+            </>
+          )}
         </OnboardingProvider>
       </SidebarProvider>
     </ForceRefreshProvider>
   );
 }
+
+export function AppLayoutWithLock() {
+  return (
+    <AppLockProvider>
+      <AppLayoutContent />
+    </AppLockProvider>
+  );
+}
+
+export default AppLayoutWithLock;

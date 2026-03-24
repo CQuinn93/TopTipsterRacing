@@ -122,10 +122,6 @@ export default function TabletModeScreen() {
       Alert.alert('Invalid code', 'Please enter your 6-digit quick access code.');
       return;
     }
-    if (trimmed === '777777') {
-      router.replace('/(auth)/admin');
-      return;
-    }
     setLoading(true);
     try {
       const { data: result, error } = await supabase.rpc('tablet_get_data', { p_code: trimmed });

@@ -46,12 +46,53 @@ export function AppSidebar() {
   const userId = session?.user?.id ?? null;
   const [accountExpanded, setAccountExpanded] = useState(false);
   const [accessCode, setAccessCode] = useState<string | null>(null);
+  const [role, setRole] = useState<'User' | 'Admin'>('User');
+  const [adminRequestPending, setAdminRequestPending] = useState(false);
+  const [adminRequestLoading, setAdminRequestLoading] = useState(false);
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
 
   useEffect(() => {
     if (!userId || !open) return;
     getOrCreateTabletCode(userId).then(setAccessCode).catch(() => setAccessCode(null));
   }, [userId, open]);
+
+  useEffect(() => {
+    if (!userId || !open) return;
+    (async () => {
+      const [{ data: profile }, { data: req }] = await Promise.all([
+        supabase.from('profiles').select('role').eq('id', userId).maybeSingle(),
+        supabase.from('admin_access_requests').select('status').eq('user_id', userId).maybeSingle(),
+      ]);
+      const roleValue = (profile?.role === 'Admin' ? 'Admin' : 'User') as 'User' | 'Admin';
+      setRole(roleValue);
+      setAdminRequestPending(req?.status === 'pending');
+    })();
+  }, [userId, open]);
+
+  const handleRequestAdmin = async () => {
+    if (!userId || role === 'Admin') return;
+    setAdminRequestLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('admin_request_access');
+      if (error) throw error;
+      const result = data as { success?: boolean; status?: string; error?: string } | null;
+      if (!result?.success) {
+        Alert.alert('Error', result?.error ?? 'Could not send admin request.');
+        return;
+      }
+      if (result.status === 'already_admin') {
+        setRole('Admin');
+        Alert.alert('Already admin', 'Your account already has admin access.');
+        return;
+      }
+      setAdminRequestPending(true);
+      Alert.alert('Request sent', 'Your admin access request has been sent for approval.');
+    } catch (e: unknown) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not request admin access.');
+    } finally {
+      setAdminRequestLoading(false);
+    }
+  };
 
   const handleSignOut = () => {
     closeSidebar();
@@ -99,6 +140,18 @@ export function AppSidebar() {
         },
       ]
     );
+  };
+
+  const openAdminTools = () => {
+    if (role !== 'Admin' || !accessCode) {
+      Alert.alert('Admin tools unavailable', 'Your admin quick access code is not ready yet. Please try again in a moment.');
+      return;
+    }
+    closeSidebar();
+    router.push({
+      pathname: '/(auth)/admin',
+      params: { code: accessCode, returnTo: '/(app)' },
+    });
   };
 
   const styles = useMemo(
@@ -248,6 +301,17 @@ export function AppSidebar() {
               <Text style={styles.menuButtonText}>Reminders</Text>
               <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
             </TouchableOpacity>
+            {role === 'Admin' && (
+              <TouchableOpacity
+                style={styles.menuButton}
+                onPress={openAdminTools}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="construct-outline" size={22} color={theme.colors.accent} />
+                <Text style={styles.menuButtonText}>Admin tools</Text>
+                <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={[styles.menuButton, styles.accountFolderHeader]}
               onPress={() => setAccountExpanded((e) => !e)}
@@ -264,6 +328,22 @@ export function AppSidebar() {
             </TouchableOpacity>
             {accountExpanded && (
               <View style={styles.accountFolderContent}>
+                {role !== 'Admin' && (
+                  <TouchableOpacity
+                    style={styles.accountFolderItem}
+                    onPress={handleRequestAdmin}
+                    disabled={adminRequestLoading || adminRequestPending}
+                    activeOpacity={0.7}
+                  >
+                    {adminRequestLoading ? (
+                      <ActivityIndicator size="small" color={theme.colors.accent} />
+                    ) : (
+                      <Text style={[styles.menuButtonText, { color: adminRequestPending ? theme.colors.textMuted : theme.colors.accent }]}>
+                        {adminRequestPending ? 'Admin request pending' : 'Request admin access'}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   style={styles.accountFolderItem}
                   onPress={handleDeleteAccount}
@@ -304,10 +384,18 @@ export function AppSidebar() {
             </TouchableOpacity>
           </ScrollView>
           <View style={[styles.footer, { paddingBottom: Math.max(theme.spacing.lg, insets.bottom) }]}>
+            {role === 'Admin' && (
+              <View style={{ marginBottom: theme.spacing.md, backgroundColor: theme.colors.accentMuted, borderRadius: theme.radius.sm, padding: theme.spacing.sm, borderWidth: 1, borderColor: theme.colors.accent }}>
+                <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.accent, fontWeight: '700' }}>Admin</Text>
+              </View>
+            )}
             {accessCode && (
               <View style={styles.accountFolderItem}>
                 <Text style={styles.footerCodeLabel}>Your access code</Text>
                 <Text style={styles.footerCodeValue}>{accessCode}</Text>
+                {role === 'Admin' && (
+                  <Text style={[styles.footerCodeLabel, { marginBottom: 0 }]}>This code also lets you manage competitions in Quick access.</Text>
+                )}
               </View>
             )}
             <TouchableOpacity style={styles.menuButton} onPress={handleSignOut} activeOpacity={0.7}>

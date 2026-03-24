@@ -17,8 +17,6 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { displayHorseName } from '@/lib/displayHorseName';
 import type { Race } from '@/types/races';
 
-const ADMIN_CODE = '777777';
-
 type RaceDayRow = {
   id: string;
   race_date: string;
@@ -28,10 +26,11 @@ type RaceDayRow = {
 
 export default function AdminEditSelectionScreen() {
   const activeTheme = useTheme();
-  const params = useLocalSearchParams<{ selectionId: string; competitionId: string; raceDate: string }>();
+  const params = useLocalSearchParams<{ selectionId: string; competitionId: string; raceDate: string; code?: string }>();
   const selectionId = params.selectionId as string;
   const competitionId = params.competitionId as string;
   const raceDate = params.raceDate as string;
+  const adminCode = String(params.code ?? '').trim();
 
   const [raceDay, setRaceDay] = useState<RaceDayRow | null>(null);
   const [selections, setSelections] = useState<Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }>>({});
@@ -79,7 +78,7 @@ export default function AdminEditSelectionScreen() {
     setSaving(true);
     try {
       const { data, error } = await supabase.rpc('admin_update_selection', {
-        p_admin_code: ADMIN_CODE,
+        p_code: adminCode,
         p_selection_id: selectionId,
         p_selections: selections as unknown as Record<string, unknown>,
       });

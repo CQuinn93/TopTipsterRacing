@@ -4,6 +4,7 @@ export default function AuthLayout() {
   return (
     <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
       <Stack.Screen name="login" />
+      <Stack.Screen name="reset-password" />
       <Stack.Screen name="access-code" />
       <Stack.Screen name="tablet-mode" />
       <Stack.Screen name="admin" />

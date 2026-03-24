@@ -6,10 +6,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { lightTheme } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
+import { AppLockProvider, useAppLock } from '@/contexts/AppLockContext';
 import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
 import { SidebarProvider, useSidebar } from '@/contexts/SidebarContext';
 import { OnboardingProvider } from '@/contexts/OnboardingContext';
 import { AppSidebar } from '@/components/AppSidebar';
+import { AppUnlockScreen } from '@/components/AppUnlockScreen';
 import { clearTabletCodeCache, getOrCreateTabletCode } from '@/lib/tabletCode';
 import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
 import { clearLatestResultsCache } from '@/lib/latestResultsCache';
@@ -71,7 +73,7 @@ function WebSidebar() {
     },
     logo: {
       fontFamily: theme.fontFamily.regular,
-      fontSize: 16,
+      fontSize: 14,
       fontWeight: '700',
       color: theme.colors.text,
       marginBottom: 4,
@@ -79,17 +81,17 @@ function WebSidebar() {
     },
     tagline: {
       fontFamily: theme.fontFamily.light,
-      fontSize: 11,
+      fontSize: 10,
       color: theme.colors.textSecondary,
       marginBottom: 20,
       paddingHorizontal: 8,
     },
     navSection: {
-      marginBottom: 16,
+      marginBottom: 14,
     },
     navLabel: {
       fontFamily: theme.fontFamily.regular,
-      fontSize: 10,
+      fontSize: 9,
       fontWeight: '600',
       color: theme.colors.textMuted,
       textTransform: 'uppercase',
@@ -100,18 +102,18 @@ function WebSidebar() {
     navItem: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingVertical: 10,
+      paddingVertical: 8,
       paddingHorizontal: 8,
       borderRadius: 8,
       marginBottom: 2,
-      gap: 8,
+      gap: 6,
     },
     navItemActive: {
       backgroundColor: theme.colors.accentMuted,
     },
     navItemText: {
       fontFamily: theme.fontFamily.regular,
-      fontSize: 13,
+      fontSize: 12,
       color: theme.colors.text,
     },
     navItemTextActive: {
@@ -178,6 +180,9 @@ function WebSidebarFooter() {
   const { openSidebar } = useSidebar();
   const userId = session?.user?.id ?? null;
   const [accessCode, setAccessCode] = useState<string | null>(null);
+  const [role, setRole] = useState<'User' | 'Admin'>('User');
+  const [adminRequestPending, setAdminRequestPending] = useState(false);
+  const [adminRequestLoading, setAdminRequestLoading] = useState(false);
   const [accountExpanded, setAccountExpanded] = useState(false);
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
 
@@ -190,6 +195,49 @@ function WebSidebarFooter() {
       .then(setAccessCode)
       .catch(() => setAccessCode(null));
   }, [userId]);
+
+  useEffect(() => {
+    if (!userId) {
+      setRole('User');
+      setAdminRequestPending(false);
+      return;
+    }
+    (async () => {
+      const [{ data: profile }, { data: req }] = await Promise.all([
+        supabase.from('profiles').select('role').eq('id', userId).maybeSingle(),
+        supabase.from('admin_access_requests').select('status').eq('user_id', userId).maybeSingle(),
+      ]);
+      const profileRow = profile as { role?: string } | null;
+      const requestRow = req as { status?: string } | null;
+      setRole(profileRow?.role === 'Admin' ? 'Admin' : 'User');
+      setAdminRequestPending(requestRow?.status === 'pending');
+    })();
+  }, [userId]);
+
+  const handleRequestAdmin = async () => {
+    if (!userId || role === 'Admin') return;
+    setAdminRequestLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('admin_request_access');
+      if (error) throw error;
+      const result = data as { success?: boolean; status?: string; error?: string } | null;
+      if (!result?.success) {
+        window.alert(result?.error ?? 'Could not request admin access.');
+        return;
+      }
+      if (result.status === 'already_admin') {
+        setRole('Admin');
+        window.alert('Your account already has admin access.');
+        return;
+      }
+      setAdminRequestPending(true);
+      window.alert('Your admin access request has been sent for approval.');
+    } catch (e: unknown) {
+      window.alert(e instanceof Error ? e.message : 'Could not request admin access.');
+    } finally {
+      setAdminRequestLoading(false);
+    }
+  };
 
   const handleSignOut = () => {
     if (typeof window !== 'undefined' && window.confirm('Are you sure you want to sign out?')) {
@@ -234,68 +282,125 @@ function WebSidebarFooter() {
     })();
   };
 
+  const openAdminTools = () => {
+    if (role !== 'Admin' || !accessCode) {
+      window.alert('Your admin quick access code is not ready yet. Please try again in a moment.');
+      return;
+    }
+    router.push({
+      pathname: '/(auth)/admin',
+      params: { code: accessCode, returnTo: '/(app)' },
+    } as any);
+  };
+
   return (
     <View style={{ marginTop: 'auto', paddingTop: 24, borderTopWidth: 1, borderTopColor: theme.colors.border }}>
-      <View style={{ paddingVertical: 10, paddingHorizontal: 12 }}>
-        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 10, color: theme.colors.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+      {role === 'Admin' && (
+        <View style={{ marginBottom: 8, marginHorizontal: 12, backgroundColor: theme.colors.accentMuted, borderRadius: theme.radius.sm, paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderColor: theme.colors.accent }}>
+          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.accent, fontWeight: '700' }}>Admin</Text>
+        </View>
+      )}
+      <View style={{ paddingVertical: 4, paddingHorizontal: 12 }}>
+        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 9, color: theme.colors.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
           Your access code
         </Text>
         {accessCode ? (
-          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 18, letterSpacing: 4, color: theme.colors.accent, fontWeight: '600' }}>
-            {accessCode}
-          </Text>
+          <>
+            <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 16, letterSpacing: 4, color: theme.colors.accent, fontWeight: '600' }}>
+              {accessCode}
+            </Text>
+            {role === 'Admin' && (
+              <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 10, color: theme.colors.textMuted, marginTop: 4 }}>
+                This code also lets you manage competitions in Quick access.
+              </Text>
+            )}
+          </>
         ) : (
-          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.textMuted }}>…</Text>
+          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textMuted }}>…</Text>
         )}
       </View>
+      {role === 'Admin' && (
+        <TouchableOpacity
+          onPress={openAdminTools}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingVertical: 8,
+            paddingHorizontal: 12,
+            gap: 8,
+          }}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="construct-outline" size={18} color={theme.colors.accent} />
+          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.accent }}>
+            Admin tools
+          </Text>
+        </TouchableOpacity>
+      )}
       <TouchableOpacity
         onPress={handleSignOut}
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          paddingVertical: 10,
+          paddingVertical: 8,
           paddingHorizontal: 12,
-          gap: 10,
+          gap: 8,
         }}
         activeOpacity={0.7}
       >
-        <Ionicons name="log-out-outline" size={20} color={theme.colors.textSecondary} />
-        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.textSecondary }}>
+        <Ionicons name="log-out-outline" size={18} color={theme.colors.textSecondary} />
+        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary }}>
           Sign out
         </Text>
       </TouchableOpacity>
 
       <View style={{ paddingVertical: 4, paddingHorizontal: 12 }}>
+        {role !== 'Admin' && (
+          <TouchableOpacity
+            onPress={handleRequestAdmin}
+            disabled={adminRequestLoading || adminRequestPending}
+            style={{ paddingVertical: 4 }}
+            activeOpacity={0.7}
+          >
+            {adminRequestLoading ? (
+              <ActivityIndicator size="small" color={theme.colors.accent} />
+            ) : (
+              <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: adminRequestPending ? theme.colors.textMuted : theme.colors.accent }}>
+                {adminRequestPending ? 'Admin request pending' : 'Request admin access'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           onPress={() => setAccountExpanded((e) => !e)}
-          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 }}
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 }}
           activeOpacity={0.7}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Ionicons name="person-outline" size={20} color={theme.colors.textSecondary} />
-            <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.textSecondary }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Ionicons name="person-outline" size={18} color={theme.colors.textSecondary} />
+            <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary }}>
               Account
             </Text>
           </View>
           <Ionicons
             name="chevron-down"
-            size={18}
+            size={16}
             color={theme.colors.textMuted}
             style={{ transform: [{ rotate: accountExpanded ? '0deg' : '-90deg' }] }}
           />
         </TouchableOpacity>
         {accountExpanded && (
-          <View style={{ paddingLeft: 30, paddingBottom: 8 }}>
+          <View style={{ paddingLeft: 28, paddingBottom: 6 }}>
             <TouchableOpacity
               onPress={handleDeleteAccount}
               disabled={deleteAccountLoading}
-              style={{ paddingVertical: 6 }}
+              style={{ paddingVertical: 4 }}
               activeOpacity={0.7}
             >
               {deleteAccountLoading ? (
                 <ActivityIndicator size="small" color={theme.colors.error} />
               ) : (
-                <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.error }}>
+                <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.error }}>
                   Delete account
                 </Text>
               )}
@@ -309,14 +414,14 @@ function WebSidebarFooter() {
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          paddingVertical: 10,
+          paddingVertical: 8,
           paddingHorizontal: 12,
-          gap: 10,
+          gap: 8,
         }}
         activeOpacity={0.7}
       >
-        <Ionicons name="menu" size={20} color={theme.colors.textSecondary} />
-        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.textSecondary }}>
+        <Ionicons name="menu" size={18} color={theme.colors.textSecondary} />
+        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary }}>
           More options
         </Text>
       </TouchableOpacity>
@@ -366,10 +471,10 @@ function MobileWebLayout() {
     headerTitle: {
       flex: 1,
       fontFamily: theme.fontFamily.regular,
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: '600',
       color: isLight ? theme.colors.white : theme.colors.text,
-      marginLeft: 8,
+      marginLeft: 6,
     },
     content: {
       flex: 1,
@@ -378,20 +483,20 @@ function MobileWebLayout() {
     tabBar: {
       flexDirection: 'row',
       backgroundColor: theme.colors.accent,
-      paddingBottom: Math.max(8, insets.bottom),
-      paddingTop: 8,
+      paddingBottom: Math.max(12, insets.bottom) + 28,
+      paddingTop: 10,
       borderTopWidth: 0,
     },
     tabItem: {
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: 8,
+      paddingVertical: 6,
     },
     tabLabel: {
       fontFamily: theme.fontFamily.regular,
-      fontSize: 11,
-      marginTop: 4,
+      fontSize: 10,
+      marginTop: 2,
     },
   });
 
@@ -445,8 +550,8 @@ function WebLayoutContent() {
       flex: 1,
       minWidth: 0,
       minHeight: 0,
-      padding: 24,
-      paddingTop: 24,
+      padding: 20,
+      paddingTop: 20,
     },
     content: {
       flex: 1,
@@ -468,17 +573,27 @@ function WebLayoutContent() {
   );
 }
 
-export default function AppLayoutWeb() {
+function AppLayoutWebContent() {
   const { width } = useWindowDimensions();
+  const { session } = useAuth();
+  const { isLocked } = useAppLock();
   const isNarrow = width < MOBILE_BREAKPOINT;
 
   return (
     <ForceRefreshProvider>
       <SidebarProvider>
         <OnboardingProvider>
-          {isNarrow ? <MobileWebLayout /> : <WebLayoutContent />}
+          {session && isLocked ? <AppUnlockScreen /> : isNarrow ? <MobileWebLayout /> : <WebLayoutContent />}
         </OnboardingProvider>
       </SidebarProvider>
     </ForceRefreshProvider>
+  );
+}
+
+export default function AppLayoutWeb() {
+  return (
+    <AppLockProvider>
+      <AppLayoutWebContent />
+    </AppLockProvider>
   );
 }

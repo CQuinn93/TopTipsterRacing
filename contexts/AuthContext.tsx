@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { cancelAllSelectionReminders } from '@/lib/selectionReminderNotifications';
+import { getOrCreateTabletCode } from '@/lib/tabletCode';
 
 type AuthContextType = {
   session: Session | null;
@@ -52,6 +53,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid) return;
+    // Ensure quick-access code exists as soon as a user has a session.
+    getOrCreateTabletCode(uid).catch(() => {});
+  }, [session?.user?.id]);
 
   const signOut = async () => {
     await cancelAllSelectionReminders();
