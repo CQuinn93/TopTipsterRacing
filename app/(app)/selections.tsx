@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -70,8 +70,9 @@ export default function SelectionsScreen() {
   const [lockingId, setLockingId] = useState<string | null>(null);
   const [pickingDayIndex, setPickingDayIndex] = useState(0);
   const [selectedRaceIndex, setSelectedRaceIndex] = useState(0);
+  const [selectionToast, setSelectionToast] = useState<{ raceId: string; runnerName: string } | null>(null);
   const [userLockedInForPickingDay, setUserLockedInForPickingDay] = useState(false);
-  const [compTab, setCompTab] = useState<'upcoming' | 'live' | 'complete'>('live');
+  const [compTab, setCompTab] = useState<'live' | 'complete'>('live');
   const [compStatusByCompId, setCompStatusByCompId] = useState<Record<string, 'upcoming' | 'live' | 'complete'>>({});
   const cameFromRaceDayRef = useRef(false);
 
@@ -117,7 +118,18 @@ export default function SelectionsScreen() {
       });
       const result = data as { success?: boolean; error?: string } | null;
       if (error || !result?.success) {
-        Alert.alert('Error', result?.error ?? error?.message ?? 'Failed to lock');
+        const reason = result?.error ?? error?.message ?? 'Failed to lock';
+        const friendly =
+          reason === 'deadline_passed'
+            ? 'Selections are locked for this day (less than 1 hour before first race).'
+            : reason === 'selection_not_found'
+              ? 'Please save your selections for this day first, then lock them in.'
+              : reason === 'already_locked'
+                ? 'These selections are already locked in.'
+                : reason === 'race_day_not_found'
+                  ? 'Could not find this race day.'
+                  : reason;
+        Alert.alert('Error', friendly);
         return;
       }
       await refreshMySelections();
@@ -277,6 +289,7 @@ export default function SelectionsScreen() {
 
   const setSelection = (raceId: string, runnerId: string, runnerName: string, oddsDecimal: number) => {
     setSelections((prev) => ({ ...prev, [raceId]: { runnerId, runnerName, oddsDecimal } }));
+    setSelectionToast({ raceId, runnerName });
   };
 
   const saveSelections = async () => {
@@ -552,6 +565,13 @@ export default function SelectionsScreen() {
         compTabTextActive: {
           color: theme.colors.white,
           fontWeight: '600',
+        },
+        makePicksTabHint: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.sm,
+          lineHeight: 15,
         },
         makePicksSection: {
           marginBottom: theme.spacing.lg,
@@ -1098,6 +1118,75 @@ export default function SelectionsScreen() {
           color: theme.colors.black,
           fontWeight: '600',
         },
+        selectionToastOverlay: {
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.35)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: theme.spacing.lg,
+        },
+        selectionToastCard: {
+          width: '100%',
+          maxWidth: 520,
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          padding: theme.spacing.lg,
+        },
+        selectionToastTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          fontWeight: '600',
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.sm,
+        },
+        selectionToastChoice: {
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.sm,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: theme.spacing.xs,
+          marginBottom: theme.spacing.md,
+        },
+        selectionToastChoiceText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          fontWeight: '600',
+          color: theme.colors.white,
+        },
+        selectionToastActions: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          gap: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.xs,
+        },
+        selectionToastActionBtn: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.sm,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          flex: 1,
+          alignItems: 'center',
+        },
+        selectionToastActionPrimary: {
+          backgroundColor: theme.colors.accent,
+          borderColor: theme.colors.accent,
+        },
+        selectionToastActionText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: theme.colors.text,
+        },
+        selectionToastActionTextPrimary: {
+          color: theme.colors.black,
+          fontWeight: '600',
+        },
       }),
     [theme]
   );
@@ -1126,9 +1215,9 @@ export default function SelectionsScreen() {
           {userCompetitions.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyStateTitle}>Join a competition</Text>
-              <Text style={styles.emptyStateText}>Enter an access code from the home screen to join a competition and make your picks.</Text>
-              <TouchableOpacity style={styles.emptyStateButton} onPress={() => router.push('/(auth)/access-code')}>
-                <Text style={styles.emptyStateButtonText}>Enter access code</Text>
+              <Text style={styles.emptyStateText}>Enter an access code on the Competitions screen to join a competition and make your picks.</Text>
+              <TouchableOpacity style={styles.emptyStateButton} onPress={() => router.push('/(app)/competitions?join=1')}>
+                <Text style={styles.emptyStateButtonText}>Join a competition</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -1145,9 +1234,9 @@ export default function SelectionsScreen() {
                     <View style={styles.makePicksSection}>
                       <Text style={styles.makePicksSectionTitle}>Make your picks</Text>
                       <View style={styles.compTabsRow}>
-                        {(['upcoming', 'live', 'complete'] as const).map((tab) => {
+                        {(['live', 'complete'] as const).map((tab) => {
                           const isActive = compTab === tab;
-                          const label = tab === 'upcoming' ? 'Upcoming' : tab === 'live' ? 'Live' : 'Complete';
+                          const label = tab === 'live' ? 'Live' : 'Complete';
                           return (
                             <TouchableOpacity
                               key={tab}
@@ -1160,8 +1249,13 @@ export default function SelectionsScreen() {
                           );
                         })}
                       </View>
+                      <Text style={styles.makePicksTabHint}>
+                        Live: festival days with an open racecard. Complete: finished meetings — view only.
+                      </Text>
                       <View style={styles.lockedNoteBlock}>
-                        <Text style={styles.lockedNoteText}>All selections have been made and are locked in. Good luck!</Text>
+                        <Text style={styles.lockedNoteText}>
+                          No races available for selections right now. Check back soon.
+                        </Text>
                       </View>
                     </View>
                   );
@@ -1170,9 +1264,9 @@ export default function SelectionsScreen() {
                 <View style={styles.makePicksSection}>
                   <Text style={styles.makePicksSectionTitle}>Make your picks</Text>
                   <View style={styles.compTabsRow}>
-                    {(['upcoming', 'live', 'complete'] as const).map((tab) => {
+                    {(['live', 'complete'] as const).map((tab) => {
                       const isActive = compTab === tab;
-                      const label = tab === 'upcoming' ? 'Upcoming' : tab === 'live' ? 'Live' : 'Complete';
+                      const label = tab === 'live' ? 'Live' : 'Complete';
                       return (
                         <TouchableOpacity
                           key={tab}
@@ -1185,6 +1279,9 @@ export default function SelectionsScreen() {
                       );
                     })}
                   </View>
+                  <Text style={styles.makePicksTabHint}>
+                    Live: festival days with an open racecard. Complete: finished meetings — view only.
+                  </Text>
                   <Text style={styles.makePicksSectionSubtitle}>Select a meeting to make or view your selections</Text>
                   <View style={styles.raceCardsList}>
                     {showableRaces.map((item) => {
@@ -1446,26 +1543,27 @@ export default function SelectionsScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <TouchableOpacity style={styles.backToSelectionsButton} onPress={() => router.replace('/(app)/selections')}>
-        <Text style={styles.backToSelectionsButtonText}>← Back to my selections</Text>
-      </TouchableOpacity>
-      <View style={styles.pickingHeaderRow}>
-        <Text style={styles.sectionTitle}>Make your picks</Text>
-        {currentRaces.length > 0 && !selectionsClosed && !userLockedInForPickingDay && (
-          <TouchableOpacity
-            style={[styles.saveButtonInline, saving && styles.buttonDisabled]}
-            onPress={saveSelections}
-            disabled={saving}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color={theme.colors.black} />
-            ) : (
-              <Text style={styles.saveButtonText}>Save selections</Text>
-            )}
-          </TouchableOpacity>
-        )}
-      </View>
+    <>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <TouchableOpacity style={styles.backToSelectionsButton} onPress={() => router.replace('/(app)/selections')}>
+          <Text style={styles.backToSelectionsButtonText}>← Back to my selections</Text>
+        </TouchableOpacity>
+        <View style={styles.pickingHeaderRow}>
+          <Text style={styles.sectionTitle}>Make your picks</Text>
+          {currentRaces.length > 0 && !selectionsClosed && !userLockedInForPickingDay && (
+            <TouchableOpacity
+              style={[styles.saveButtonInline, saving && styles.buttonDisabled]}
+              onPress={saveSelections}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color={theme.colors.black} />
+              ) : (
+                <Text style={styles.saveButtonText}>Save selections</Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
 
       {raceDays.length >= 1 && (
         <View style={styles.pickingDayTabsRow}>
@@ -1499,14 +1597,14 @@ export default function SelectionsScreen() {
         <Text style={styles.muted}>No races loaded for this day. Race data is updated daily.</Text>
       )}
 
-      {currentRaces.length > 0 && (
-        <>
-          <View style={styles.pickingRaceCountRow}>
-            <Text style={styles.pickingRaceCountText}>
-              {currentRaces.filter((r) => selections[r.id]).length} of {currentRaces.length} races picked
-            </Text>
-          </View>
-          <View style={styles.pickingRaceTabsRow}>
+        {currentRaces.length > 0 && (
+          <>
+            <View style={styles.pickingRaceCountRow}>
+              <Text style={styles.pickingRaceCountText}>
+                {currentRaces.filter((r) => selections[r.id]).length} of {currentRaces.length} races picked
+              </Text>
+            </View>
+            <View style={styles.pickingRaceTabsRow}>
             {currentRaces.map((race, idx) => {
               const hasSelection = !!selections[race.id];
               return (
@@ -1525,9 +1623,9 @@ export default function SelectionsScreen() {
                 </TouchableOpacity>
               );
             })}
-          </View>
+            </View>
 
-          {selectedRace && (() => {
+            {selectedRace && (() => {
             const runners = selectedRace.runners ?? [];
             const favRunner = runners.find((r) => r.id === 'FAV');
             const horseRunners = runners.filter((r) => r.id !== 'FAV');
@@ -1571,11 +1669,38 @@ export default function SelectionsScreen() {
                 {horseRunners.map((r) => renderRunnerCard(r))}
               </View>
             );
-          })()}
-        </>
-      )}
+            })()}
+          </>
+        )}
 
-    </ScrollView>
+      </ScrollView>
+      <Modal visible={!!selectionToast} transparent animationType="fade" onRequestClose={() => setSelectionToast(null)}>
+        <Pressable style={styles.selectionToastOverlay} onPress={() => setSelectionToast(null)}>
+          <Pressable style={styles.selectionToastCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.selectionToastTitle}>Your selection</Text>
+            <View style={styles.selectionToastChoice}>
+              <Text style={styles.selectionToastChoiceText}>✓</Text>
+              <Text style={styles.selectionToastChoiceText}>{selectionToast?.runnerName}</Text>
+            </View>
+            <View style={styles.selectionToastActions}>
+              <TouchableOpacity style={styles.selectionToastActionBtn} onPress={() => setSelectionToast(null)}>
+                <Text style={styles.selectionToastActionText}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.selectionToastActionBtn, styles.selectionToastActionPrimary]}
+                onPress={() => {
+                  if (selectedRaceIndex < currentRaces.length - 1) {
+                    setSelectedRaceIndex((prev) => prev + 1);
+                  }
+                  setSelectionToast(null);
+                }}
+              >
+                <Text style={[styles.selectionToastActionText, styles.selectionToastActionTextPrimary]}>Next race</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
   );
 }
-

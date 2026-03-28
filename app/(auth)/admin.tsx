@@ -17,9 +17,10 @@ import {
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
-import { theme } from '@/constants/theme';
+import type { Theme } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 
 const IRISH_COURSES = [
@@ -39,6 +40,21 @@ const ENGLAND_COURSES = [
 ].sort((a, b) => a.localeCompare(b));
 
 const COURSES = [...IRISH_COURSES, ...ENGLAND_COURSES];
+
+/** RN Web's `Alert.alert` often does not show; use `window.alert` so admin actions give visible feedback. */
+function adminAlert(title: string, message?: string) {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined') {
+      window.alert(message != null && message !== '' ? `${title}\n\n${message}` : title);
+    }
+    return;
+  }
+  if (message != null && message !== '') {
+    Alert.alert(title, message);
+  } else {
+    Alert.alert(title);
+  }
+}
 
 type CourseRegionFilter = 'all' | 'ireland' | 'england';
 
@@ -129,10 +145,22 @@ type AdminAccessRequest = {
   created_at: string;
 };
 
-type TabId = 'requests' | 'admins' | 'create' | 'selections';
+type AdminCompetitionListRow = {
+  id: string;
+  name: string;
+  access_code: string | null;
+  festival_start_date: string;
+  festival_end_date: string;
+  created_by_user_id: string | null;
+  creator_username: string | null;
+  display_status: 'upcoming' | 'live' | 'complete';
+};
+
+type TabId = 'requests' | 'admins' | 'create' | 'competitionList' | 'selections';
 
 export default function AdminScreen() {
   const activeTheme = useTheme();
+  const styles = useMemo(() => createAdminStyles(activeTheme), [activeTheme]);
   const params = useLocalSearchParams<{ code?: string; returnTo?: string }>();
   const adminCode = String(params.code ?? '').trim();
   const returnToRaw = String(params.returnTo ?? '').trim();
@@ -164,6 +192,13 @@ export default function AdminScreen() {
   const [datePickerTempDate, setDatePickerTempDate] = useState(new Date());
   const [newAccessCode, setNewAccessCode] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
+  const [adminCompetitionsList, setAdminCompetitionsList] = useState<AdminCompetitionListRow[]>([]);
+  const [compListFilter, setCompListFilter] = useState<'live' | 'upcoming' | 'complete'>('live');
+
+  const adminCompetitionsFiltered = useMemo(
+    () => adminCompetitionsList.filter((c) => c.display_status === compListFilter),
+    [adminCompetitionsList, compListFilter]
+  );
 
   const load = async () => {
     if (!adminCode) {
@@ -173,20 +208,29 @@ export default function AdminScreen() {
     }
     setRefreshing(true);
     try {
-      const [pendingRes, adminReqRes, compsRes] = await Promise.all([
+      const [pendingRes, adminReqRes, adminListRes] = await Promise.all([
         supabase.rpc('admin_list_pending', { p_code: adminCode }),
         supabase.rpc('admin_list_access_requests', { p_code: adminCode }),
-        supabase.from('competitions').select('id, name').order('name'),
+        supabase.rpc('admin_list_competitions', { p_code: adminCode }),
       ]);
       if (pendingRes.error) throw pendingRes.error;
       if (adminReqRes.error) throw adminReqRes.error;
-      if (compsRes.error) throw compsRes.error;
       setList((pendingRes.data as PendingRequest[]) ?? []);
       setAdminRequests((adminReqRes.data as AdminAccessRequest[]) ?? []);
-      setCompetitions((compsRes.data as Competition[]) ?? []);
+      if (adminListRes.error) {
+        const { data: compsFallback } = await supabase.from('competitions').select('id, name').order('name');
+        setAdminCompetitionsList([]);
+        setCompetitions((compsFallback as Competition[]) ?? []);
+      } else {
+        const rawList = adminListRes.data as unknown;
+        const fullList: AdminCompetitionListRow[] = Array.isArray(rawList) ? (rawList as AdminCompetitionListRow[]) : [];
+        setAdminCompetitionsList(fullList);
+        setCompetitions(fullList.map((c) => ({ id: c.id, name: c.name })));
+      }
     } catch {
       setList([]);
       setAdminRequests([]);
+      setAdminCompetitionsList([]);
       setCompetitions([]);
     } finally {
       setRefreshing(false);
@@ -275,12 +319,12 @@ export default function AdminScreen() {
       if (error) throw error;
       const result = data as { success?: boolean; error?: string };
       if (!result?.success) {
-        Alert.alert('Error', result?.error ?? 'Could not approve');
+        adminAlert('Error', result?.error ?? 'Could not approve');
         return;
       }
       setList((prev) => prev.filter((r) => r.id !== id));
     } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not approve');
+      adminAlert('Error', e instanceof Error ? e.message : 'Could not approve');
     } finally {
       setActingId(null);
     }
@@ -296,12 +340,12 @@ export default function AdminScreen() {
       if (error) throw error;
       const result = data as { success?: boolean; error?: string };
       if (!result?.success) {
-        Alert.alert('Error', result?.error ?? 'Could not approve admin request');
+        adminAlert('Error', result?.error ?? 'Could not approve admin request');
         return;
       }
       setAdminRequests((prev) => prev.filter((r) => r.id !== id));
     } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not approve admin request');
+      adminAlert('Error', e instanceof Error ? e.message : 'Could not approve admin request');
     } finally {
       setActingId(null);
     }
@@ -319,7 +363,7 @@ export default function AdminScreen() {
       if (!result?.success) return;
       setList((prev) => prev.filter((r) => r.id !== id));
     } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not reject');
+      adminAlert('Error', e instanceof Error ? e.message : 'Could not reject');
     } finally {
       setActingId(null);
     }
@@ -337,7 +381,7 @@ export default function AdminScreen() {
       if (!result?.success) return;
       setAdminRequests((prev) => prev.filter((r) => r.id !== id));
     } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not reject admin request');
+      adminAlert('Error', e instanceof Error ? e.message : 'Could not reject admin request');
     } finally {
       setActingId(null);
     }
@@ -346,27 +390,27 @@ export default function AdminScreen() {
   const handleCreateCompetition = async () => {
     const name = newName.trim();
     if (!name) {
-      Alert.alert('Error', 'Please enter a competition name.');
+      adminAlert('Error', 'Please enter a competition name.');
       return;
     }
     const start = newStartDate.trim() || null;
     const end = newEndDate.trim() || null;
     if (!start || !end) {
-      Alert.alert('Error', 'Please enter festival start and end dates (YYYY-MM-DD).');
+      adminAlert('Error', 'Please enter festival start and end dates (YYYY-MM-DD).');
       return;
     }
     const minStart = getMinStartDateStr();
     if (start < minStart) {
-      Alert.alert('Error', `Start date must be ${minStart} or later. Race data is pulled the day before; competitions for tomorrow can only be created before 8pm UK.`);
+      adminAlert('Error', `Start date must be ${minStart} or later. Race data is pulled the day before; competitions for tomorrow can only be created before 8pm UK.`);
       return;
     }
     if (isCreationAfterCutoffForTomorrow(start, end)) {
-      Alert.alert('Error', 'Competitions for the following day can only be created before 8pm UK. Please set the start date to the day after tomorrow or try again tomorrow before 8pm UK.');
+      adminAlert('Error', 'Competitions for the following day can only be created before 8pm UK. Please set the start date to the day after tomorrow or try again tomorrow before 8pm UK.');
       return;
     }
     const course = newCourse.trim();
     if (!course) {
-      Alert.alert('Error', 'Please select a course.');
+      adminAlert('Error', 'Please select a course.');
       return;
     }
     const code = newAccessCode.trim().toUpperCase().slice(0, 6) || null;
@@ -385,10 +429,10 @@ export default function AdminScreen() {
       if (error) throw error;
       const result = data as { success?: boolean; error?: string };
       if (!result?.success) {
-        Alert.alert('Error', result?.error ?? 'Could not create competition');
+        adminAlert('Error', result?.error ?? 'Could not create competition');
         return;
       }
-      Alert.alert('Created', 'Competition created.');
+      adminAlert('Created', 'Competition created.');
       setNewName('');
       setNewStartDate('');
       setNewEndDate('');
@@ -396,7 +440,7 @@ export default function AdminScreen() {
       setNewAccessCode('');
       load();
     } catch (e: unknown) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not create');
+      adminAlert('Error', e instanceof Error ? e.message : 'Could not create');
     } finally {
       setCreateLoading(false);
     }
@@ -420,49 +464,67 @@ export default function AdminScreen() {
         </View>
       ) : (
       <>
-      <View style={styles.header}>
-        <Text style={styles.title}>Admin</Text>
-        <Text style={styles.adminSubTitle}>Manage join requests, admin access, competitions, and edits.</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.replace(returnTo as any)}>
-          <Text style={styles.backButtonText}>Exit admin</Text>
-        </TouchableOpacity>
+      <View style={styles.adminChrome}>
+        <View style={styles.adminChromeTop}>
+          <View style={styles.adminBadge}>
+            <Ionicons name="shield-checkmark" size={14} color={activeTheme.colors.barAccent} />
+            <Text style={styles.adminBadgeText}>Admin console</Text>
+          </View>
+          <TouchableOpacity style={styles.exitPill} onPress={() => router.replace(returnTo as any)} activeOpacity={0.8}>
+            <Ionicons name="log-out-outline" size={16} color={activeTheme.colors.textSecondary} />
+            <Text style={styles.exitPillText}>Exit</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.title}>Operations</Text>
+        <Text style={styles.adminSubTitle}>
+          Join requests, admin access, competition list (codes & creators), new competitions, and selection edits.
+        </Text>
       </View>
 
-      <View style={styles.tabRow}>
-        <TouchableOpacity
-          style={[styles.tab, tab === 'requests' && styles.tabActive]}
-          onPress={() => setTab('requests')}
-        >
-          <Text style={[styles.tabText, tab === 'requests' && styles.tabTextActive]}>Join requests</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, tab === 'admins' && styles.tabActive]}
-          onPress={() => setTab('admins')}
-        >
-          <Text style={[styles.tabText, tab === 'admins' && styles.tabTextActive]}>Admin access</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, tab === 'create' && styles.tabActive]}
-          onPress={() => setTab('create')}
-        >
-          <Text style={[styles.tabText, tab === 'create' && styles.tabTextActive]}>New competition</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, tab === 'selections' && styles.tabActive]}
-          onPress={() => setTab('selections')}
-        >
-          <Text style={[styles.tabText, tab === 'selections' && styles.tabTextActive]}>Edit selections</Text>
-        </TouchableOpacity>
-      </View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tabScroll}
+        contentContainerStyle={styles.tabScrollContent}
+      >
+        {(
+          [
+            { id: 'requests' as const, label: 'Join requests', icon: 'people-outline' as const },
+            { id: 'admins' as const, label: 'Admin access', icon: 'key-outline' as const },
+            { id: 'create' as const, label: 'New competition', icon: 'add-circle-outline' as const },
+            { id: 'competitionList' as const, label: 'Competitions', icon: 'trophy-outline' as const },
+            { id: 'selections' as const, label: 'Edit selections', icon: 'create-outline' as const },
+          ] as const
+        ).map((item) => {
+          const active = tab === item.id;
+          return (
+            <TouchableOpacity
+              key={item.id}
+              style={[styles.tabPill, active && styles.tabPillActive]}
+              onPress={() => setTab(item.id)}
+              activeOpacity={0.85}
+            >
+              <Ionicons
+                name={item.icon}
+                size={16}
+                color={active ? activeTheme.colors.white : activeTheme.colors.textSecondary}
+              />
+              <Text style={[styles.tabPillText, active && styles.tabPillTextActive]} numberOfLines={1}>
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
 
-      {loading && tab === 'requests' ? (
-        <ActivityIndicator size="large" color={theme.colors.accent} style={styles.loader} />
+      {loading ? (
+        <ActivityIndicator size="large" color={activeTheme.colors.accent} style={styles.loader} />
       ) : tab === 'requests' ? (
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={theme.colors.accent} />
+            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={activeTheme.colors.accent} />
           }
         >
           <Text style={styles.pullToRefreshHint}>Pull down to refresh</Text>
@@ -471,6 +533,7 @@ export default function AdminScreen() {
           ) : (
             requestsByCompetition.map(([compName, requests]) => (
               <View key={compName} style={styles.section}>
+                <Text style={styles.sectionLabel}>Competition</Text>
                 <Text style={styles.sectionTitle}>{compName}</Text>
                 {requests.map((r) => (
                   <View key={r.id} style={styles.card}>
@@ -483,7 +546,7 @@ export default function AdminScreen() {
                         disabled={actingId !== null}
                       >
                         {actingId === r.id ? (
-                          <ActivityIndicator size="small" color={theme.colors.black} />
+                          <ActivityIndicator size="small" color={activeTheme.colors.black} />
                         ) : (
                           <Text style={styles.approveBtnText}>Approve</Text>
                         )}
@@ -507,7 +570,7 @@ export default function AdminScreen() {
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={theme.colors.accent} />
+            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={activeTheme.colors.accent} />
           }
         >
           <Text style={styles.pullToRefreshHint}>Pull down to refresh</Text>
@@ -525,7 +588,7 @@ export default function AdminScreen() {
                     disabled={actingId !== null}
                   >
                     {actingId === r.id ? (
-                      <ActivityIndicator size="small" color={theme.colors.black} />
+                      <ActivityIndicator size="small" color={activeTheme.colors.black} />
                     ) : (
                       <Text style={styles.approveBtnText}>Grant admin</Text>
                     )}
@@ -544,11 +607,14 @@ export default function AdminScreen() {
         </ScrollView>
       ) : tab === 'create' ? (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.formContent}>
+          <View style={styles.formPanel}>
+            <Text style={styles.formPanelTitle}>Create competition</Text>
+            <Text style={styles.formPanelHint}>Festival dates and course; optional 6-character access code.</Text>
           <Text style={styles.formLabel}>Competition name</Text>
           <TextInput
             style={styles.input}
             placeholder="e.g. Pat Nutter 2027"
-            placeholderTextColor={theme.colors.textMuted}
+            placeholderTextColor={activeTheme.colors.textMuted}
             value={newName}
             onChangeText={setNewName}
             editable={!createLoading}
@@ -562,11 +628,11 @@ export default function AdminScreen() {
               onChange={(e) => setNewStartDate(e.target.value)}
               disabled={createLoading}
               style={{
-                fontFamily: theme.fontFamily.input,
+                fontFamily: activeTheme.fontFamily.input,
                 fontSize: 16,
-                color: theme.colors.text,
-                backgroundColor: theme.colors.surface,
-                border: `1px solid ${theme.colors.border}`,
+                color: activeTheme.colors.text,
+                backgroundColor: activeTheme.colors.surface,
+                border: `1px solid ${activeTheme.colors.border}`,
                 borderRadius: 8,
                 padding: 12,
                 width: '100%',
@@ -584,7 +650,7 @@ export default function AdminScreen() {
               }}
               disabled={createLoading}
             >
-              <Text style={[styles.coursePickerTriggerText, !newStartDate && { color: theme.colors.textMuted }]}>
+              <Text style={[styles.coursePickerTriggerText, !newStartDate && { color: activeTheme.colors.textMuted }]}>
                 {newStartDate || 'Select start date'}
               </Text>
               <Text style={styles.coursePickerChevron}>📅</Text>
@@ -599,11 +665,11 @@ export default function AdminScreen() {
               onChange={(e) => setNewEndDate(e.target.value)}
               disabled={createLoading}
               style={{
-                fontFamily: theme.fontFamily.input,
+                fontFamily: activeTheme.fontFamily.input,
                 fontSize: 16,
-                color: theme.colors.text,
-                backgroundColor: theme.colors.surface,
-                border: `1px solid ${theme.colors.border}`,
+                color: activeTheme.colors.text,
+                backgroundColor: activeTheme.colors.surface,
+                border: `1px solid ${activeTheme.colors.border}`,
                 borderRadius: 8,
                 padding: 12,
                 width: '100%',
@@ -622,7 +688,7 @@ export default function AdminScreen() {
               }}
               disabled={createLoading}
             >
-              <Text style={[styles.coursePickerTriggerText, !newEndDate && { color: theme.colors.textMuted }]}>
+              <Text style={[styles.coursePickerTriggerText, !newEndDate && { color: activeTheme.colors.textMuted }]}>
                 {newEndDate || 'Select end date'}
               </Text>
               <Text style={styles.coursePickerChevron}>📅</Text>
@@ -666,7 +732,7 @@ export default function AdminScreen() {
             onPress={() => !createLoading && setCoursePickerOpen(true)}
             disabled={createLoading}
           >
-            <Text style={[styles.coursePickerTriggerText, !newCourse && { color: theme.colors.textMuted }]}>
+            <Text style={[styles.coursePickerTriggerText, !newCourse && { color: activeTheme.colors.textMuted }]}>
               {newCourse || 'Select course'}
             </Text>
             <Text style={styles.coursePickerChevron}>▼</Text>
@@ -688,7 +754,7 @@ export default function AdminScreen() {
                 <TextInput
                   style={styles.courseSearchInput}
                   placeholder="Search courses..."
-                  placeholderTextColor={theme.colors.textMuted}
+                  placeholderTextColor={activeTheme.colors.textMuted}
                   value={courseSearchQuery}
                   onChangeText={setCourseSearchQuery}
                   autoCapitalize="none"
@@ -739,7 +805,7 @@ export default function AdminScreen() {
           <TextInput
             style={styles.input}
             placeholder="e.g. PN2027"
-            placeholderTextColor={theme.colors.textMuted}
+            placeholderTextColor={activeTheme.colors.textMuted}
             value={newAccessCode}
             onChangeText={setNewAccessCode}
             maxLength={6}
@@ -752,11 +818,91 @@ export default function AdminScreen() {
             disabled={createLoading}
           >
             {createLoading ? (
-              <ActivityIndicator color={theme.colors.black} />
+              <ActivityIndicator color={activeTheme.colors.black} />
             ) : (
               <Text style={styles.createButtonText}>Create competition</Text>
             )}
           </TouchableOpacity>
+          </View>
+        </ScrollView>
+      ) : tab === 'competitionList' ? (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={activeTheme.colors.accent} />
+          }
+        >
+          <Text style={styles.pullToRefreshHint}>Pull down to refresh</Text>
+          <View style={styles.catalogIntro}>
+            <Text style={styles.catalogIntroTitle}>Competitions & join codes</Text>
+            <Text style={styles.catalogIntroHint}>
+              Competitions you created appear here. Older rows without a creator are shown to every admin. Use the join code (access code) for entrants.
+            </Text>
+          </View>
+          <View style={styles.compTabsRow}>
+            {(['complete', 'live', 'upcoming'] as const).map((filterKey) => {
+              const isActive = compListFilter === filterKey;
+              const label = filterKey === 'complete' ? 'Complete' : filterKey === 'live' ? 'Live' : 'Upcoming';
+              return (
+                <TouchableOpacity
+                  key={filterKey}
+                  style={[styles.compTab, isActive && styles.compTabActive]}
+                  onPress={() => setCompListFilter(filterKey)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.compTabText, isActive && styles.compTabTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {adminCompetitionsFiltered.length === 0 ? (
+            <Text style={styles.empty}>No competitions in this category.</Text>
+          ) : (
+            adminCompetitionsFiltered.map((c) => (
+              <View key={c.id} style={styles.catalogCard}>
+                <View style={styles.catalogCardTop}>
+                  <Text style={styles.catalogName} numberOfLines={2}>
+                    {c.name}
+                  </Text>
+                  <View
+                    style={[
+                      styles.statusPill,
+                      c.display_status === 'live' && styles.statusPillLive,
+                      c.display_status === 'upcoming' && styles.statusPillUpcoming,
+                      c.display_status === 'complete' && styles.statusPillComplete,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.statusPillText,
+                        c.display_status === 'live' && { color: activeTheme.colors.accent },
+                        c.display_status === 'upcoming' && { color: activeTheme.colors.barAccent },
+                        c.display_status === 'complete' && { color: activeTheme.colors.textMuted },
+                      ]}
+                    >
+                      {c.display_status === 'live' ? 'Live' : c.display_status === 'upcoming' ? 'Upcoming' : 'Complete'}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.catalogMeta}>
+                  {new Date(c.festival_start_date).toLocaleDateString()} –{' '}
+                  {new Date(c.festival_end_date).toLocaleDateString()}
+                </Text>
+                <View style={styles.catalogFieldRow}>
+                  <Text style={styles.catalogFieldLabel}>Join code</Text>
+                  <Text style={styles.catalogCode}>{c.access_code ?? '—'}</Text>
+                </View>
+                <View style={styles.catalogFieldRow}>
+                  <Text style={styles.catalogFieldLabel}>Created by</Text>
+                  <Text style={styles.catalogCreator}>
+                    {c.creator_username ??
+                      (c.created_by_user_id ? `${c.created_by_user_id.slice(0, 8)}…` : '— (legacy)')}
+                  </Text>
+                </View>
+              </View>
+            ))
+          )}
         </ScrollView>
       ) : (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
@@ -847,71 +993,301 @@ export default function AdminScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
-  header: { padding: theme.spacing.lg, borderBottomWidth: 1, borderBottomColor: theme.colors.border },
+function createAdminStyles(t: Theme) {
+  return StyleSheet.create({
+  container: { flex: 1, backgroundColor: t.colors.background },
+  adminChrome: {
+    paddingHorizontal: t.spacing.lg,
+    paddingTop: t.spacing.md,
+    paddingBottom: t.spacing.lg,
+    backgroundColor: t.colors.surfaceElevated,
+    borderBottomWidth: 1,
+    borderBottomColor: t.colors.border,
+  },
+  adminChromeTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: t.spacing.md,
+  },
+  adminBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.spacing.xs,
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: t.spacing.sm,
+    borderRadius: t.radius.sm,
+    backgroundColor: t.colors.surface,
+    borderWidth: 1,
+    borderColor: t.colors.barAccent,
+  },
+  adminBadgeText: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+    color: t.colors.barAccent,
+    textTransform: 'uppercase',
+  },
+  exitPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.spacing.xs,
+    paddingVertical: t.spacing.sm,
+    paddingHorizontal: t.spacing.md,
+    borderRadius: t.radius.full,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.background,
+  },
+  exitPillText: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 14,
+    fontWeight: '600',
+    color: t.colors.textSecondary,
+  },
   title: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 24,
-    color: theme.colors.text,
-    marginBottom: theme.spacing.xs,
+    fontFamily: t.fontFamily.regular,
+    fontSize: 22,
+    fontWeight: '700',
+    color: t.colors.text,
+    marginBottom: t.spacing.xs,
+    letterSpacing: -0.3,
   },
   adminSubTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 12,
-    color: theme.colors.textMuted,
-    marginBottom: theme.spacing.sm,
+    fontFamily: t.fontFamily.regular,
+    fontSize: 13,
+    color: t.colors.textMuted,
+    lineHeight: 19,
   },
   backButton: {
     alignSelf: 'flex-start',
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
+    paddingVertical: t.spacing.sm,
+    paddingHorizontal: t.spacing.md,
   },
   backButtonText: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 14,
-    color: theme.colors.accent,
+    color: t.colors.accent,
     textDecorationLine: 'underline',
   },
-  tabRow: {
-    flexDirection: 'row',
+  tabScroll: {
+    flexGrow: 0,
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-    paddingHorizontal: theme.spacing.sm,
+    borderBottomColor: t.colors.border,
+    backgroundColor: t.colors.surface,
+    maxHeight: 56,
   },
-  tab: {
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.sm,
-    marginRight: theme.spacing.sm,
+  tabScrollContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: t.spacing.md,
+    paddingVertical: t.spacing.sm,
+    gap: t.spacing.sm,
   },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: theme.colors.accent },
-  tabText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.textSecondary,
+  tabPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: t.spacing.md,
+    borderRadius: t.radius.full,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.background,
   },
-  tabTextActive: { color: theme.colors.accent },
-  loader: { marginTop: theme.spacing.xl },
+  tabPillActive: {
+    backgroundColor: t.colors.barAccent,
+    borderColor: t.colors.barAccent,
+  },
+  tabPillText: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 13,
+    fontWeight: '600',
+    color: t.colors.textSecondary,
+    maxWidth: 140,
+  },
+  tabPillTextActive: {
+    color: t.colors.white,
+  },
+  loader: { marginTop: t.spacing.xl },
   scroll: { flex: 1 },
-  scrollContent: { padding: theme.spacing.lg, paddingBottom: theme.spacing.xxl },
-  formContent: { padding: theme.spacing.lg, paddingBottom: theme.spacing.xxl },
+  scrollContent: { padding: t.spacing.lg, paddingBottom: t.spacing.xxl },
+  formContent: { padding: t.spacing.lg, paddingBottom: t.spacing.xxl },
+  formPanel: {
+    backgroundColor: t.colors.surfaceElevated,
+    borderRadius: t.radius.lg,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    padding: t.spacing.lg,
+    marginBottom: t.spacing.md,
+  },
+  formPanelTitle: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 17,
+    fontWeight: '700',
+    color: t.colors.text,
+    marginBottom: t.spacing.xs,
+  },
+  formPanelHint: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 12,
+    color: t.colors.textMuted,
+    marginBottom: t.spacing.md,
+    lineHeight: 17,
+  },
+  catalogIntro: {
+    marginBottom: t.spacing.lg,
+    padding: t.spacing.md,
+    backgroundColor: t.colors.surfaceElevated,
+    borderRadius: t.radius.md,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    borderLeftWidth: 3,
+    borderLeftColor: t.colors.barAccent,
+  },
+  catalogIntroTitle: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 16,
+    fontWeight: '700',
+    color: t.colors.text,
+    marginBottom: t.spacing.xs,
+  },
+  catalogIntroHint: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 12,
+    color: t.colors.textMuted,
+    lineHeight: 17,
+  },
+  compTabsRow: {
+    flexDirection: 'row',
+    width: '100%',
+    marginBottom: t.spacing.md,
+    gap: t.spacing.xs,
+  },
+  compTab: {
+    flex: 1,
+    paddingVertical: t.spacing.sm,
+    paddingHorizontal: t.spacing.xs,
+    borderRadius: t.radius.sm,
+    backgroundColor: t.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  compTabActive: {
+    backgroundColor: t.colors.accent,
+  },
+  compTabText: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 13,
+    color: t.colors.textSecondary,
+  },
+  compTabTextActive: {
+    color: t.colors.white,
+    fontWeight: '600',
+  },
+  catalogCard: {
+    backgroundColor: t.colors.surface,
+    borderRadius: t.radius.md,
+    padding: t.spacing.md,
+    marginBottom: t.spacing.md,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    borderLeftWidth: 3,
+    borderLeftColor: t.colors.barAccent,
+  },
+  catalogCardTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: t.spacing.sm,
+    marginBottom: t.spacing.xs,
+  },
+  catalogName: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 16,
+    fontWeight: '600',
+    color: t.colors.text,
+    flex: 1,
+  },
+  catalogMeta: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 12,
+    color: t.colors.textMuted,
+    marginBottom: t.spacing.sm,
+  },
+  catalogFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: t.spacing.md,
+    paddingVertical: t.spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: t.colors.border,
+  },
+  catalogFieldLabel: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 12,
+    fontWeight: '600',
+    color: t.colors.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  catalogCode: {
+    fontFamily: t.fontFamily.input,
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 2,
+    color: t.colors.accent,
+  },
+  catalogCreator: {
+    fontFamily: t.fontFamily.input,
+    fontSize: 13,
+    color: t.colors.text,
+    flex: 1,
+    textAlign: 'right',
+  },
+  statusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: t.radius.full,
+    borderWidth: 1,
+  },
+  statusPillText: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  statusPillLive: {
+    backgroundColor: t.colors.accentMuted,
+    borderColor: t.colors.accent,
+  },
+  statusPillUpcoming: {
+    backgroundColor: t.colors.surface,
+    borderColor: t.colors.barAccent,
+  },
+  statusPillComplete: {
+    backgroundColor: t.colors.surface,
+    borderColor: t.colors.border,
+  },
   formLabel: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 14,
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.xs,
-    marginTop: theme.spacing.md,
+    color: t.colors.textSecondary,
+    marginBottom: t.spacing.xs,
+    marginTop: t.spacing.md,
   },
   input: {
-    fontFamily: theme.fontFamily.input,
+    fontFamily: t.fontFamily.input,
     fontSize: 16,
-    color: theme.colors.text,
-    backgroundColor: theme.colors.surface,
+    color: t.colors.text,
+    backgroundColor: t.colors.surface,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
+    borderColor: t.colors.border,
+    borderRadius: t.radius.md,
+    paddingHorizontal: t.spacing.md,
+    paddingVertical: t.spacing.sm,
   },
   coursePickerTrigger: {
     flexDirection: 'row',
@@ -919,277 +1295,294 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   coursePickerTriggerText: {
-    fontFamily: theme.fontFamily.input,
+    fontFamily: t.fontFamily.input,
     fontSize: 16,
-    color: theme.colors.text,
+    color: t.colors.text,
   },
   coursePickerChevron: {
     fontSize: 12,
-    color: theme.colors.textMuted,
+    color: t.colors.textMuted,
   },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
-    padding: theme.spacing.lg,
+    padding: t.spacing.lg,
   },
   modalContent: {
-    backgroundColor: theme.colors.background,
-    borderRadius: theme.radius.md,
+    backgroundColor: t.colors.background,
+    borderRadius: t.radius.md,
     maxHeight: '70%',
   },
   datePickerModalContent: {
-    backgroundColor: theme.colors.background,
-    borderRadius: theme.radius.md,
-    marginHorizontal: theme.spacing.lg,
+    backgroundColor: t.colors.background,
+    borderRadius: t.radius.md,
+    marginHorizontal: t.spacing.lg,
   },
   datePickerActions: { flexDirection: 'row' },
   pullToRefreshHint: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 12,
-    color: theme.colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
-    marginBottom: theme.spacing.sm,
+    marginBottom: t.spacing.sm,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: theme.spacing.md,
+    padding: t.spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
+    borderBottomColor: t.colors.border,
   },
   modalTitle: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 18,
-    color: theme.colors.text,
+    color: t.colors.text,
   },
   modalClose: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 16,
-    color: theme.colors.accent,
+    color: t.colors.barAccent,
     fontWeight: '600',
   },
   courseSearchInput: {
-    fontFamily: theme.fontFamily.input,
+    fontFamily: t.fontFamily.input,
     fontSize: 16,
-    color: theme.colors.text,
-    backgroundColor: theme.colors.surface,
+    color: t.colors.text,
+    backgroundColor: t.colors.surface,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    marginHorizontal: theme.spacing.md,
-    marginBottom: theme.spacing.sm,
+    borderColor: t.colors.border,
+    borderRadius: t.radius.md,
+    paddingHorizontal: t.spacing.md,
+    paddingVertical: t.spacing.sm,
+    marginHorizontal: t.spacing.md,
+    marginBottom: t.spacing.sm,
   },
   courseFilterRow: {
     flexDirection: 'row',
-    gap: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
-    marginBottom: theme.spacing.sm,
+    gap: t.spacing.sm,
+    paddingHorizontal: t.spacing.md,
+    marginBottom: t.spacing.sm,
   },
   courseFilterChip: {
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.xs,
-    borderRadius: theme.radius.full,
-    backgroundColor: theme.colors.surface,
+    paddingHorizontal: t.spacing.md,
+    paddingVertical: t.spacing.xs,
+    borderRadius: t.radius.full,
+    backgroundColor: t.colors.surface,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: t.colors.border,
   },
-  courseFilterChipActive: { backgroundColor: theme.colors.accentMuted, borderColor: theme.colors.accent },
-  courseFilterChipText: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textSecondary },
-  courseFilterChipTextActive: { color: theme.colors.accent, fontWeight: '600' },
+  courseFilterChipActive: { backgroundColor: t.colors.accentMuted, borderColor: t.colors.accent },
+  courseFilterChipText: { fontFamily: t.fontFamily.regular, fontSize: 14, color: t.colors.textSecondary },
+  courseFilterChipTextActive: { color: t.colors.accent, fontWeight: '600' },
   courseList: { maxHeight: 400 },
   courseListEmpty: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 14,
-    color: theme.colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
-    padding: theme.spacing.lg,
+    padding: t.spacing.lg,
   },
   courseItem: {
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.md,
+    paddingVertical: t.spacing.sm,
+    paddingHorizontal: t.spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.border,
+    borderBottomColor: t.colors.border,
   },
-  courseItemActive: { backgroundColor: theme.colors.accentMuted },
+  courseItemActive: { backgroundColor: t.colors.accentMuted },
   courseItemText: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 16,
-    color: theme.colors.text,
+    color: t.colors.text,
   },
-  courseItemTextActive: { color: theme.colors.accent, fontWeight: '600' },
+  courseItemTextActive: { color: t.colors.accent, fontWeight: '600' },
   createButton: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.md,
-    paddingVertical: theme.spacing.md,
+    backgroundColor: t.colors.accent,
+    borderRadius: t.radius.md,
+    paddingVertical: t.spacing.md,
     alignItems: 'center',
-    marginTop: theme.spacing.xl,
+    marginTop: t.spacing.xl,
   },
   createButtonText: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 16,
-    color: theme.colors.black,
+    color: t.colors.black,
     fontWeight: '600',
   },
   empty: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 14,
-    color: theme.colors.textMuted,
+    color: t.colors.textMuted,
     textAlign: 'center',
-    marginTop: theme.spacing.xl,
+    marginTop: t.spacing.xl,
   },
-  section: { marginBottom: theme.spacing.xl },
+  section: { marginBottom: t.spacing.xl },
+  sectionLabel: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    color: t.colors.textMuted,
+    marginBottom: t.spacing.xs,
+  },
   sectionTitle: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 18,
-    color: theme.colors.accent,
-    marginBottom: theme.spacing.sm,
+    fontFamily: t.fontFamily.regular,
+    fontSize: 17,
+    fontWeight: '600',
+    color: t.colors.text,
+    marginBottom: t.spacing.md,
   },
   card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.md,
-    marginBottom: theme.spacing.md,
+    backgroundColor: t.colors.surface,
+    borderRadius: t.radius.md,
+    padding: t.spacing.md,
+    marginBottom: t.spacing.md,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: t.colors.border,
+    borderLeftWidth: 3,
+    borderLeftColor: t.colors.barAccent,
   },
   cardName: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 16,
-    color: theme.colors.text,
+    color: t.colors.text,
   },
   cardDate: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 12,
-    color: theme.colors.textMuted,
-    marginTop: theme.spacing.xs,
+    color: t.colors.textMuted,
+    marginTop: t.spacing.xs,
   },
   editHint: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 12,
-    color: theme.colors.accent,
-    marginTop: theme.spacing.xs,
+    color: t.colors.accent,
+    marginTop: t.spacing.xs,
   },
-  actions: { flexDirection: 'row', gap: theme.spacing.sm, marginTop: theme.spacing.sm },
+  actions: { flexDirection: 'row', gap: t.spacing.sm, marginTop: t.spacing.sm },
   approveBtn: {
     flex: 1,
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.sm,
-    paddingVertical: theme.spacing.sm,
+    backgroundColor: t.colors.accent,
+    borderRadius: t.radius.sm,
+    paddingVertical: t.spacing.sm,
     alignItems: 'center',
   },
   approveBtnText: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 14,
-    color: theme.colors.black,
+    color: t.colors.black,
     fontWeight: '600',
   },
   rejectBtn: {
     flex: 1,
-    backgroundColor: theme.colors.surface,
+    backgroundColor: t.colors.surface,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.sm,
-    paddingVertical: theme.spacing.sm,
+    borderColor: t.colors.border,
+    borderRadius: t.radius.sm,
+    paddingVertical: t.spacing.sm,
     alignItems: 'center',
   },
   rejectBtnText: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 14,
-    color: theme.colors.text,
+    color: t.colors.text,
   },
   buttonDisabled: { opacity: 0.7 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: theme.spacing.md, gap: theme.spacing.sm },
-  chipRowScroll: { flexDirection: 'row', marginBottom: theme.spacing.md, gap: theme.spacing.sm },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: t.spacing.md, gap: t.spacing.sm },
+  chipRowScroll: { flexDirection: 'row', marginBottom: t.spacing.md, gap: t.spacing.sm },
   chip: {
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
-    borderRadius: theme.radius.full,
-    backgroundColor: theme.colors.surface,
+    paddingHorizontal: t.spacing.md,
+    paddingVertical: t.spacing.sm,
+    borderRadius: t.radius.full,
+    backgroundColor: t.colors.surface,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: t.colors.border,
   },
-  chipActive: { backgroundColor: theme.colors.accentMuted, borderColor: theme.colors.accent },
-  chipText: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textSecondary },
-  chipTextActive: { color: theme.colors.accent },
+  chipActive: { backgroundColor: t.colors.accentMuted, borderColor: t.colors.accent },
+  chipText: { fontFamily: t.fontFamily.regular, fontSize: 14, color: t.colors.textSecondary },
+  chipTextActive: { color: t.colors.accent },
   editSelectionsIntro: {
-    marginBottom: theme.spacing.xl,
-    paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.md,
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
+    marginBottom: t.spacing.xl,
+    paddingVertical: t.spacing.md,
+    paddingHorizontal: t.spacing.md,
+    backgroundColor: t.colors.surfaceElevated,
+    borderRadius: t.radius.md,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: t.colors.border,
+    borderLeftWidth: 3,
+    borderLeftColor: t.colors.barAccent,
   },
   editSelectionsTitle: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 16,
-    color: theme.colors.text,
+    color: t.colors.text,
     fontWeight: '600',
-    marginBottom: theme.spacing.xs,
+    marginBottom: t.spacing.xs,
   },
   editSelectionsHint: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 13,
-    color: theme.colors.textSecondary,
+    color: t.colors.textSecondary,
     lineHeight: 20,
   },
   stepLabel: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 14,
-    color: theme.colors.textSecondary,
+    color: t.colors.textSecondary,
     fontWeight: '600',
-    marginBottom: theme.spacing.sm,
-    marginTop: theme.spacing.md,
+    marginBottom: t.spacing.sm,
+    marginTop: t.spacing.md,
   },
   emptyCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.lg,
-    marginBottom: theme.spacing.md,
+    backgroundColor: t.colors.surface,
+    borderRadius: t.radius.md,
+    padding: t.spacing.lg,
+    marginBottom: t.spacing.md,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: t.colors.border,
   },
   emptyTitle: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 15,
-    color: theme.colors.text,
+    color: t.colors.text,
     fontWeight: '600',
-    marginBottom: theme.spacing.xs,
+    marginBottom: t.spacing.xs,
   },
   emptyDetail: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 13,
-    color: theme.colors.textMuted,
+    color: t.colors.textMuted,
     lineHeight: 19,
   },
   selectionCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.md,
-    marginBottom: theme.spacing.sm,
+    backgroundColor: t.colors.surface,
+    borderRadius: t.radius.md,
+    padding: t.spacing.md,
+    marginBottom: t.spacing.sm,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: t.colors.border,
+    borderLeftWidth: 3,
+    borderLeftColor: t.colors.accent,
   },
   selectionCardName: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 16,
-    color: theme.colors.text,
+    color: t.colors.text,
     fontWeight: '600',
   },
   selectionCardMeta: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 13,
-    color: theme.colors.textMuted,
-    marginTop: theme.spacing.xs,
+    color: t.colors.textMuted,
+    marginTop: t.spacing.xs,
   },
   selectionCardEdit: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 13,
-    color: theme.colors.accent,
-    marginTop: theme.spacing.xs,
+    color: t.colors.accent,
+    marginTop: t.spacing.xs,
   },
-});
+  });
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
-import { theme } from '@/constants/theme';
+import type { Theme } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
 import { displayHorseName } from '@/lib/displayHorseName';
 import type { Race } from '@/types/races';
@@ -26,6 +27,7 @@ type RaceDayRow = {
 
 export default function AdminEditSelectionScreen() {
   const activeTheme = useTheme();
+  const styles = useMemo(() => createAdminEditStyles(activeTheme), [activeTheme]);
   const params = useLocalSearchParams<{ selectionId: string; competitionId: string; raceDate: string; code?: string }>();
   const selectionId = params.selectionId as string;
   const competitionId = params.competitionId as string;
@@ -100,8 +102,8 @@ export default function AdminEditSelectionScreen() {
 
   if (loading || !raceDay) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color={theme.colors.accent} />
+      <View style={[styles.centered, { backgroundColor: activeTheme.colors.background }]}>
+        <ActivityIndicator size="large" color={activeTheme.colors.barAccent} />
       </View>
     );
   }
@@ -110,10 +112,15 @@ export default function AdminEditSelectionScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: activeTheme.colors.background }]} edges={['top']}>
-      <View style={[styles.header, { borderBottomColor: activeTheme.colors.border }]}>
+      <View style={[styles.header, { borderBottomColor: activeTheme.colors.border, backgroundColor: activeTheme.colors.surfaceElevated }]}>
+        <View style={styles.adminBadge}>
+          <Ionicons name="create-outline" size={14} color={activeTheme.colors.barAccent} />
+          <Text style={styles.adminBadgeText}>Admin</Text>
+        </View>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Text style={[styles.backText, { color: activeTheme.colors.accent }]}>← Back</Text>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton} hitSlop={8}>
+            <Ionicons name="chevron-back" size={22} color={activeTheme.colors.barAccent} />
+            <Text style={[styles.backText, { color: activeTheme.colors.barAccent }]}>Back</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.saveButtonTop, saving && styles.buttonDisabled]}
@@ -121,9 +128,12 @@ export default function AdminEditSelectionScreen() {
             disabled={saving}
           >
             {saving ? (
-              <ActivityIndicator size="small" color={theme.colors.black} />
+              <ActivityIndicator size="small" color={activeTheme.colors.black} />
             ) : (
-              <Text style={styles.saveButtonText}>Save</Text>
+              <>
+                <Ionicons name="checkmark-circle-outline" size={18} color={activeTheme.colors.black} />
+                <Text style={styles.saveButtonText}>Save</Text>
+              </>
             )}
           </TouchableOpacity>
         </View>
@@ -161,83 +171,113 @@ export default function AdminEditSelectionScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background },
-  header: { padding: theme.spacing.lg, borderBottomWidth: 1, borderBottomColor: theme.colors.border },
+function createAdminEditStyles(t: Theme) {
+  return StyleSheet.create({
+  container: { flex: 1, backgroundColor: t.colors.background },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header: { padding: t.spacing.lg, paddingTop: t.spacing.md, borderBottomWidth: 1 },
+  adminBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.spacing.xs,
+    alignSelf: 'flex-start',
+    marginBottom: t.spacing.sm,
+    paddingVertical: 5,
+    paddingHorizontal: t.spacing.sm,
+    borderRadius: t.radius.sm,
+    borderWidth: 1,
+    borderColor: t.colors.barAccent,
+    backgroundColor: t.colors.surface,
+  },
+  adminBadgeText: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    color: t.colors.barAccent,
+    textTransform: 'uppercase',
+  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: theme.spacing.sm,
+    marginBottom: t.spacing.md,
   },
-  backButton: { paddingVertical: theme.spacing.xs, paddingRight: theme.spacing.md },
+  backButton: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: t.spacing.xs, paddingRight: t.spacing.md },
   backText: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 14,
-    color: theme.colors.accent,
+    fontFamily: t.fontFamily.regular,
+    fontSize: 16,
+    fontWeight: '600',
   },
   saveButtonTop: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.md,
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.spacing.xs,
+    backgroundColor: t.colors.accent,
+    borderRadius: t.radius.full,
+    paddingVertical: t.spacing.sm,
+    paddingHorizontal: t.spacing.lg,
   },
   title: {
-    fontFamily: theme.fontFamily.regular,
-    fontSize: 20,
-    color: theme.colors.text,
+    fontFamily: t.fontFamily.regular,
+    fontSize: 22,
+    fontWeight: '700',
+    color: t.colors.text,
+    letterSpacing: -0.2,
   },
   subtitle: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 14,
-    color: theme.colors.textMuted,
-    marginTop: theme.spacing.xs,
+    color: t.colors.textMuted,
+    marginTop: t.spacing.xs,
   },
   adminHint: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 12,
-    color: theme.colors.textMuted,
-    marginTop: theme.spacing.sm,
+    color: t.colors.textMuted,
+    marginTop: t.spacing.sm,
   },
   scroll: { flex: 1 },
-  content: { padding: theme.spacing.lg, paddingBottom: theme.spacing.xxl },
+  content: { padding: t.spacing.lg, paddingBottom: t.spacing.xxl },
   raceCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.spacing.md,
-    marginBottom: theme.spacing.md,
+    backgroundColor: t.colors.surface,
+    borderRadius: t.radius.md,
+    padding: t.spacing.md,
+    marginBottom: t.spacing.md,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: t.colors.border,
+    borderLeftWidth: 3,
+    borderLeftColor: t.colors.barAccent,
   },
-  raceName: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.text, fontWeight: '600' },
+  raceName: { fontFamily: t.fontFamily.regular, fontSize: 16, color: t.colors.text, fontWeight: '600' },
   raceTime: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 12,
-    color: theme.colors.textMuted,
-    marginBottom: theme.spacing.sm,
+    color: t.colors.textMuted,
+    marginBottom: t.spacing.sm,
   },
   runnerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.sm,
-    borderRadius: theme.radius.sm,
+    paddingVertical: t.spacing.sm,
+    paddingHorizontal: t.spacing.sm,
+    borderRadius: t.radius.sm,
     marginTop: 2,
   },
   runnerRowSelected: {
-    backgroundColor: theme.colors.accentMuted,
+    backgroundColor: t.colors.accentMuted,
     borderWidth: 1,
-    borderColor: theme.colors.accent,
+    borderColor: t.colors.accent,
   },
-  runnerName: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.text },
-  runnerOdds: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.accent },
+  runnerName: { fontFamily: t.fontFamily.regular, fontSize: 14, color: t.colors.text },
+  runnerOdds: { fontFamily: t.fontFamily.regular, fontSize: 14, color: t.colors.accent },
   buttonDisabled: { opacity: 0.7 },
   saveButtonText: {
-    fontFamily: theme.fontFamily.regular,
+    fontFamily: t.fontFamily.regular,
     fontSize: 16,
-    color: theme.colors.black,
+    color: t.colors.black,
     fontWeight: '600',
   },
-});
+  });
+}

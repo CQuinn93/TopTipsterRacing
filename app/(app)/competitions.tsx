@@ -1,6 +1,17 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Alert } from 'react-native';
-import { router } from 'expo-router';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  RefreshControl,
+  Alert,
+  TextInput,
+  ActivityIndicator,
+} from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -8,6 +19,7 @@ import { lightTheme } from '@/constants/theme';
 import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
 import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
 import { getCompetitionDisplayStatus } from '@/lib/appUtils';
+import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
 
 type UserCompetition = {
   competition_id: string;
@@ -29,12 +41,40 @@ type PendingCompetition = {
 export default function MyCompetitionsScreen() {
   const theme = useTheme();
   const { userId } = useAuth();
+  const params = useLocalSearchParams<{ join?: string }>();
   const [list, setList] = useState<UserCompetition[]>([]);
   const [pendingList, setPendingList] = useState<PendingCompetition[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [newlyApprovedNames, setNewlyApprovedNames] = useState<string[]>([]);
   const [compFilter, setCompFilter] = useState<'live' | 'upcoming' | 'complete'>('live');
   const pendingListRef = useRef<PendingCompetition[]>([]);
+
+  const [joinExpanded, setJoinExpanded] = useState(() => params.join === '1' || params.join === 'true');
+  const [joinCode, setJoinCode] = useState('');
+  const [joinDisplayName, setJoinDisplayName] = useState('');
+  const [joinProfileUsername, setJoinProfileUsername] = useState<string | null>(null);
+  const [joinLoading, setJoinLoading] = useState(false);
+
+  const displayNameToUse = joinProfileUsername?.length ? joinProfileUsername : joinDisplayName.trim();
+
+  useEffect(() => {
+    if (!userId) return;
+    supabase
+      .from('profiles')
+      .select('username')
+      .eq('id', userId)
+      .maybeSingle()
+      .then(({ data }) => {
+        setJoinProfileUsername(data?.username ?? null);
+        if (data?.username) setJoinDisplayName(data.username);
+      });
+  }, [userId]);
+
+  useEffect(() => {
+    if (params.join === '1' || params.join === 'true') {
+      setJoinExpanded(true);
+    }
+  }, [params.join]);
 
   const listFiltered = useMemo(
     () => list.filter((c) => c.status.toLowerCase() === compFilter),
@@ -172,6 +212,42 @@ export default function MyCompetitionsScreen() {
     ]);
   }, [newlyApprovedNames, userId]);
 
+  const handleJoinSubmit = async () => {
+    if (!userId) {
+      Alert.alert('Error', 'You must be signed in.');
+      return;
+    }
+    setJoinLoading(true);
+    try {
+      const outcome = await joinCompetitionWithAccessCode({
+        userId,
+        code: joinCode,
+        displayNameToUse,
+      });
+      if (outcome.kind === 'error') {
+        Alert.alert('Error', outcome.message);
+        return;
+      }
+      if (outcome.kind === 'invalid_code') {
+        Alert.alert('Invalid code', 'This access code is not recognised.');
+        return;
+      }
+      if (outcome.kind === 'already_in') {
+        Alert.alert('Already in', `You're already in "${outcome.competitionName}".`);
+        await load();
+        return;
+      }
+      Alert.alert(
+        'Request sent',
+        `Your request to join "${outcome.competitionName}" has been sent. An admin will approve you soon.`
+      );
+      setJoinCode('');
+      await load();
+    } finally {
+      setJoinLoading(false);
+    }
+  };
+
   const styles = useMemo(() => {
     const isLight = theme.colors.background === lightTheme.colors.background;
     const cardBorder = isLight ? theme.colors.white : theme.colors.border;
@@ -191,17 +267,69 @@ export default function MyCompetitionsScreen() {
         color: theme.colors.textSecondary,
         marginBottom: theme.spacing.sm,
       },
-      primaryButton: {
+      joinSection: {
+        backgroundColor: theme.colors.surface,
+        borderRadius: theme.radius.md,
+        borderWidth: cardBorderWidth,
+        borderColor: cardBorder,
+        marginBottom: theme.spacing.lg,
+        overflow: 'hidden',
+      },
+      joinHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: theme.spacing.md,
+        paddingHorizontal: theme.spacing.lg,
+      },
+      joinHeaderText: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 16,
+        fontWeight: '600',
+        color: theme.colors.text,
+        flex: 1,
+      },
+      joinPanel: {
+        paddingHorizontal: theme.spacing.lg,
+        paddingBottom: theme.spacing.md,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: theme.colors.border,
+      },
+      joinHint: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 12,
+        color: theme.colors.textMuted,
+        marginBottom: theme.spacing.sm,
+      },
+      joinInput: {
+        fontFamily: theme.fontFamily.input,
+        fontSize: 16,
+        color: theme.colors.text,
+        backgroundColor: theme.colors.background,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        borderRadius: theme.radius.sm,
+        paddingHorizontal: theme.spacing.md,
+        paddingVertical: theme.spacing.sm,
+        marginBottom: theme.spacing.sm,
+      },
+      joinDisplayLabel: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 13,
+        color: theme.colors.textSecondary,
+        marginBottom: theme.spacing.sm,
+      },
+      joinButton: {
         backgroundColor: theme.colors.accent,
         borderRadius: theme.radius.sm,
         paddingVertical: theme.spacing.md,
-        paddingHorizontal: theme.spacing.lg,
         alignItems: 'center',
-        marginBottom: theme.spacing.lg,
+        marginTop: theme.spacing.xs,
       },
-      primaryButtonText: {
+      joinButtonDisabled: { opacity: 0.7 },
+      joinButtonText: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 14,
+        fontSize: 15,
         color: theme.colors.background === '#fafafa' ? theme.colors.black : theme.colors.white,
         fontWeight: '600',
       },
@@ -298,9 +426,61 @@ export default function MyCompetitionsScreen() {
       <Text style={styles.title}>My Competitions</Text>
       <Text style={styles.subtitle}>Tap a competition to view the leaderboard.</Text>
 
-      <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/(auth)/access-code')}>
-        <Text style={styles.primaryButtonText}>Enter another competition (access code)</Text>
-      </TouchableOpacity>
+      <View style={styles.joinSection}>
+        <TouchableOpacity
+          style={styles.joinHeader}
+          onPress={() => setJoinExpanded((e) => !e)}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: joinExpanded }}
+        >
+          <Text style={styles.joinHeaderText}>Join a competition</Text>
+          <Ionicons
+            name={joinExpanded ? 'chevron-up' : 'chevron-down'}
+            size={22}
+            color={theme.colors.textSecondary}
+          />
+        </TouchableOpacity>
+        {joinExpanded && (
+          <View style={styles.joinPanel}>
+            <Text style={styles.joinHint}>Enter the access code you were given. An admin may need to approve your request.</Text>
+            <TextInput
+              style={styles.joinInput}
+              placeholder="Access code"
+              placeholderTextColor={theme.colors.textMuted}
+              value={joinCode}
+              onChangeText={setJoinCode}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              editable={!joinLoading}
+            />
+            {joinProfileUsername ? (
+              <Text style={styles.joinDisplayLabel}>{"You'll appear on the leaderboard as: "}{joinProfileUsername}</Text>
+            ) : (
+              <TextInput
+                style={styles.joinInput}
+                placeholder="Display name (for leaderboard)"
+                placeholderTextColor={theme.colors.textMuted}
+                value={joinDisplayName}
+                onChangeText={setJoinDisplayName}
+                editable={!joinLoading}
+              />
+            )}
+            <TouchableOpacity
+              style={[styles.joinButton, joinLoading && styles.joinButtonDisabled]}
+              onPress={handleJoinSubmit}
+              disabled={joinLoading}
+              activeOpacity={0.85}
+            >
+              {joinLoading ? (
+                <ActivityIndicator color={theme.colors.black} />
+              ) : (
+                <Text style={styles.joinButtonText}>Submit request</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
 
       {pendingList.length > 0 && (
         <>
@@ -342,7 +522,9 @@ export default function MyCompetitionsScreen() {
       )}
 
       {list.length === 0 && pendingList.length === 0 ? (
-        <Text style={styles.emptyMessage}>You're not part of any competitions yet. Press the button below to enter one.</Text>
+        <Text style={styles.emptyMessage}>
+          {"You're not part of any competitions yet. Open \"Join a competition\" above and enter your access code."}
+        </Text>
       ) : list.length === 0 ? null : (
         listFiltered.map((c) => (
             <TouchableOpacity

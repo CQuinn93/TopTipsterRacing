@@ -22,7 +22,6 @@ function MenuHeaderButton() {
 
 import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
 import { SidebarProvider } from '@/contexts/SidebarContext';
-import { OnboardingProvider } from '@/contexts/OnboardingContext';
 import { AppLockProvider, useAppLock } from '@/contexts/AppLockContext';
 
 function AppTabs() {
@@ -111,6 +110,13 @@ function AppTabs() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="tutorial-sandbox"
+        options={{
+          title: 'Tutorial',
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }
@@ -122,16 +128,14 @@ function AppLayoutContent() {
   return (
     <ForceRefreshProvider>
       <SidebarProvider>
-        <OnboardingProvider>
-          {session && isLocked ? (
-            <AppUnlockScreen />
-          ) : (
-            <>
-              <AppTabs />
-              <AppSidebar />
-            </>
-          )}
-        </OnboardingProvider>
+        {session && isLocked ? (
+          <AppUnlockScreen />
+        ) : (
+          <>
+            <AppTabs />
+            <AppSidebar />
+          </>
+        )}
       </SidebarProvider>
     </ForceRefreshProvider>
   );

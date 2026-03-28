@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -12,11 +12,10 @@ import {
   Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as ExpoLinking from 'expo-linking';
 
 export default function LoginScreen() {
   const theme = useTheme();
@@ -27,6 +26,7 @@ export default function LoginScreen() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   const styles = useMemo(
     () =>
@@ -62,6 +62,7 @@ export default function LoginScreen() {
         },
         input: {
           fontFamily: theme.fontFamily.input,
+          /* ≥16px avoids iOS Safari auto-zoom on focus; web also enforced in global.css */
           fontSize: 16,
           color: theme.colors.text,
           backgroundColor: theme.colors.surface,
@@ -71,6 +72,23 @@ export default function LoginScreen() {
           paddingHorizontal: theme.spacing.md,
           paddingVertical: theme.spacing.md,
           marginBottom: theme.spacing.md,
+        },
+        passwordField: {
+          position: 'relative' as const,
+          marginBottom: theme.spacing.md,
+        },
+        passwordInput: {
+          marginBottom: 0,
+          paddingRight: 48,
+        },
+        passwordToggle: {
+          position: 'absolute' as const,
+          right: 4,
+          top: 0,
+          bottom: 0,
+          width: 44,
+          justifyContent: 'center',
+          alignItems: 'center',
         },
         button: {
           backgroundColor: theme.colors.accent,
@@ -164,6 +182,40 @@ export default function LoginScreen() {
     [theme, insets.bottom]
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+      const id = requestAnimationFrame(() => {
+        window.scrollTo(0, 0);
+      });
+      return () => cancelAnimationFrame(id);
+    }, [])
+  );
+
+  const WEB_VIEWPORT =
+    'width=device-width, initial-scale=1, minimum-scale=1, shrink-to-fit=no, viewport-fit=cover';
+
+  /** On refresh / direct load, re-apply viewport + scroll top so mobile browsers don’t stay at a stale zoom. */
+  useLayoutEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined' || typeof window === 'undefined') return;
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (meta) {
+      meta.setAttribute('content', WEB_VIEWPORT);
+    }
+    window.scrollTo(0, 0);
+  }, []);
+
+  const resetWebZoomChrome = () => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const el = document.activeElement;
+    if (el && 'blur' in el && typeof (el as HTMLElement).blur === 'function') {
+      (el as HTMLElement).blur();
+    }
+    if (typeof window !== 'undefined') {
+      window.scrollTo(0, 0);
+    }
+  };
+
   const handleAuth = async () => {
     if (!email.trim() || !password) {
       Alert.alert('Error', 'Please enter email and password.');
@@ -209,6 +261,7 @@ export default function LoginScreen() {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         if (error) throw error;
+        resetWebZoomChrome();
         router.replace('/(app)');
       }
     } catch (e: unknown) {
@@ -228,34 +281,11 @@ export default function LoginScreen() {
   };
 
   const handleForgotPassword = async () => {
-    if (!email.trim()) {
-      showMessage('Email required', 'Enter your email address first, then tap forgot password.');
-      return;
-    }
-
-    setResetLoading(true);
-    try {
-      const webBase = (process.env.EXPO_PUBLIC_WEB_BASE_URL ?? '').trim();
-      const webResetUrl = webBase
-        ? `https://www.toptipster.ie${webBase === '/' ? '' : webBase}/reset-password`
-        : 'https://www.toptipster.ie/reset-password';
-      const nativeResetUrl = ExpoLinking.createURL('/reset-password');
-      const redirectTo = Platform.OS === 'web' ? webResetUrl : nativeResetUrl;
-
-      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo,
-      });
-      if (error) throw error;
-      showMessage(
-        'Reset link sent',
-        'If this email exists, we have sent a password reset link. Please check your inbox and spam folder.'
-      );
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Could not send password reset email.';
-      showMessage('Error', message);
-    } finally {
-      setResetLoading(false);
-    }
+    const trimmedEmail = email.trim();
+    router.push({
+      pathname: '/(auth)/forgot-password',
+      params: trimmedEmail ? { email: trimmedEmail } : undefined,
+    });
   };
 
   return (
@@ -278,15 +308,34 @@ export default function LoginScreen() {
             keyboardType="email-address"
             editable={!loading}
           />
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor={theme.colors.textMuted}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            editable={!loading}
-          />
+          <View style={styles.passwordField}>
+            <TextInput
+              style={[styles.input, styles.passwordInput]}
+              placeholder="Password"
+              placeholderTextColor={theme.colors.textMuted}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!passwordVisible}
+              editable={!loading}
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="password"
+              autoComplete="password"
+            />
+            <TouchableOpacity
+              style={styles.passwordToggle}
+              onPress={() => setPasswordVisible((v) => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={passwordVisible ? 'Hide password' : 'Show password'}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons
+                name={passwordVisible ? 'eye-off-outline' : 'eye-outline'}
+                size={22}
+                color={theme.colors.textMuted}
+              />
+            </TouchableOpacity>
+          </View>
 
           {isSignUp && (
             <TextInput

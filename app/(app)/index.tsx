@@ -24,13 +24,12 @@ import { useForceRefresh } from '@/contexts/ForceRefreshContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import type { ParticipationRow } from '@/lib/availableRacesCache';
 import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
-import { isSelectionClosed, getCompetitionDisplayStatus } from '@/lib/appUtils';
+import { getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { decimalToFractional } from '@/lib/oddsFormat';
 import { requestPermissionsAndSetup, scheduleSelectionReminders } from '@/lib/selectionReminderNotifications';
 import { getNotificationCompetitionIds } from '@/lib/notificationCompetitionPrefs';
 import { HomeLeaderboardPanel } from '@/components/HomeLeaderboardPanel';
 import { HomeSelectionsAndResults } from '@/components/HomeSelectionsAndResults';
-
 export default function HomeScreen() {
   const theme = useTheme();
   const { openSidebar } = useSidebar();
@@ -222,30 +221,8 @@ export default function HomeScreen() {
     return () => clearTimeout(t);
   }, [effectiveCompId, compListFiltered.length, windowWidth]);
 
-  // Next race: show chronologically next race day (from DB) – open or closed. Data is from Supabase, cached in AsyncStorage.
-  const nextRaceOff = (() => {
-    if (availableRaces.length === 0) return null;
-    const sorted = [...availableRaces].sort((a, b) => new Date(a.firstRaceUtc).getTime() - new Date(b.firstRaceUtc).getTime());
-    const now = Date.now();
-    const RACE_FINISHED_BUFFER_MS = 20 * 60 * 1000; // 20 min after first race we treat as "races finished"
-    const next = sorted.find((d) => new Date(d.firstRaceUtc).getTime() > now) ?? sorted[sorted.length - 1];
-    const dateStr = new Date(next.raceDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-    const timeStr = new Date(next.firstRaceUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-    const closed = isSelectionClosed(next.firstRaceUtc);
-    const raceTimePassed = new Date(next.firstRaceUtc).getTime() + RACE_FINISHED_BUFFER_MS < now;
-    return {
-      label: 'Next race off',
-      course: next.course,
-      dateStr,
-      timeStr,
-      raceName: next.firstRaceName ?? 'Race',
-      runnerCount: next.firstRaceRunnerCount ?? 0,
-      isClosed: closed,
-      raceTimePassed,
-    };
-  })();
-
   const isWeb = Platform.OS === 'web';
+
   const styles = useMemo(
     () => {
       const isLight = String(theme.colors.background) === String(lightTheme.colors.background);
@@ -320,17 +297,17 @@ export default function HomeScreen() {
           color: theme.colors.black,
           fontWeight: '600',
         },
-        nextRaceCard: {
+        heroCard: {
           backgroundColor: theme.colors.surface,
           borderRadius: isWeb ? 16 : theme.radius.lg,
           padding: isWeb ? 24 : theme.spacing.md,
-          marginBottom: theme.spacing.md,
+          marginBottom: theme.spacing.lg,
           borderWidth: 2,
           borderColor: theme.colors.accent,
           overflow: 'hidden',
           ...webCard,
         },
-        nextRaceCardTitle: {
+        heroEyebrow: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 10,
           color: theme.colors.textMuted,
@@ -338,109 +315,77 @@ export default function HomeScreen() {
           textTransform: 'uppercase',
           letterSpacing: 0.8,
         },
-        nextRaceCardTouchable: {},
-        nextRaceCardContentRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-        },
-        nextRaceCardContent: {
-          flex: 1,
-          minWidth: 0,
-        },
-        nextRaceCardArrow: {
-          marginLeft: theme.spacing.sm,
-        },
-        nextRaceCardHeaderRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.spacing.sm,
-          marginBottom: 2,
-        },
-        nextRaceCardRaceName: {
-          flex: 1,
+        heroTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 15,
+          fontSize: 20,
           fontWeight: '700',
           color: theme.colors.text,
-        },
-        nextRaceCardClosedBadge: {
-          backgroundColor: theme.colors.textMuted + '20',
-          paddingHorizontal: theme.spacing.sm,
-          paddingVertical: 2,
-          borderRadius: theme.radius.sm,
-        },
-        nextRaceCardClosedBadgeText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
-          color: theme.colors.textMuted,
-        },
-        nextRaceCardCourse: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
-          color: theme.colors.textSecondary,
-          marginBottom: theme.spacing.xs,
-        },
-        nextRaceCardRow: {
-          flexDirection: 'row',
-          gap: theme.spacing.md,
           marginBottom: theme.spacing.sm,
         },
-        nextRaceCardMeta: {
+        heroBody: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.textSecondary,
+          lineHeight: 21,
+          marginBottom: theme.spacing.md,
+        },
+        heroCta: {
           flexDirection: 'row',
           alignItems: 'center',
-          gap: 6,
+          justifyContent: 'center',
+          gap: theme.spacing.sm,
+          alignSelf: 'stretch',
+          paddingVertical: theme.spacing.md,
+          paddingHorizontal: theme.spacing.lg,
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.md,
         },
-        nextRaceCardTime: {
+        heroCtaText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
-          color: theme.colors.text,
+          fontSize: 15,
+          fontWeight: '600',
+          color: theme.colors.black,
         },
-        nextRaceCardRunners: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
-          color: theme.colors.text,
+        homePrimaryRow: {
+          flexDirection: 'row',
+          gap: theme.spacing.sm,
+          marginBottom: theme.spacing.lg,
         },
-        nextRaceCardBtn: {
+        homePrimaryBtn: {
+          flex: 1,
           flexDirection: 'row',
           alignItems: 'center',
-          justifyContent: 'flex-end',
-          paddingVertical: theme.spacing.sm,
-          paddingHorizontal: theme.spacing.md,
+          justifyContent: 'center',
+          gap: 8,
+          paddingVertical: theme.spacing.md,
+          paddingHorizontal: theme.spacing.sm,
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.md,
         },
-        nextRaceCardBtnText: {
+        homePrimaryBtnSecondary: {
+          flex: 1,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          paddingVertical: theme.spacing.md,
+          paddingHorizontal: theme.spacing.sm,
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        homePrimaryBtnText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          fontWeight: '600',
+          color: theme.colors.black,
+        },
+        homePrimaryBtnTextSecondary: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 13,
           fontWeight: '600',
           color: theme.colors.accent,
-        },
-        nextRaceCardBtnCompact: {
-          paddingVertical: theme.spacing.sm,
-          paddingHorizontal: theme.spacing.md,
-          backgroundColor: theme.colors.accent,
-        },
-        nextRaceCardBtnTextWhite: {
-          color: theme.colors.white,
-        },
-        nextRaceCardMuted: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
-          color: theme.colors.textMuted,
-          fontStyle: 'italic',
-        },
-        lockedNoteText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          color: theme.colors.text,
-          textAlign: 'center',
-        },
-        nextRaceCardEmptyMessage: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 15,
-          color: theme.colors.textSecondary,
-          marginBottom: theme.spacing.md,
-        },
-        nextRaceCardBtnFull: {
-          alignSelf: 'stretch',
         },
         competitionsCard: {
           backgroundColor: theme.colors.surface,
@@ -581,6 +526,13 @@ export default function HomeScreen() {
         compTabTextActive: {
           color: theme.colors.white,
           fontWeight: '600',
+        },
+        homeCompHint: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          marginBottom: theme.spacing.sm,
+          lineHeight: 15,
         },
         compScroll: { marginHorizontal: -theme.spacing.md, marginBottom: theme.spacing.sm },
         compScrollInCard: { marginHorizontal: 0, marginBottom: theme.spacing.sm },
@@ -811,81 +763,44 @@ export default function HomeScreen() {
         </View>
 
         {!hasJoinedAny && (
-          <View style={styles.nextRaceCard}>
-            <Text style={styles.nextRaceCardTitle}>Next race</Text>
-            <Text style={styles.nextRaceCardEmptyMessage}>
-              You have no upcoming competitions or races. Join one now.
+          <View style={styles.heroCard}>
+            <Text style={styles.heroEyebrow}>Get started</Text>
+            <Text style={styles.heroTitle}>Join a competition</Text>
+            <Text style={styles.heroBody}>
+              Enter an access code to join a private league, then make your daily picks and climb the leaderboard.
             </Text>
             <TouchableOpacity
-              style={[styles.nextRaceCardBtn, styles.nextRaceCardBtnFull]}
-              onPress={() => router.push('/(auth)/access-code')}
-              activeOpacity={0.8}
+              style={styles.heroCta}
+              onPress={() => router.push('/(app)/competitions?join=1')}
+              activeOpacity={0.85}
             >
-              <Text style={styles.nextRaceCardBtnText}>Enter competition (access code)</Text>
-              <Ionicons name="arrow-forward" size={14} color="#000000" />
+              <Text style={styles.heroCtaText}>Enter competition</Text>
+              <Ionicons name="arrow-forward" size={18} color={theme.colors.black} />
             </TouchableOpacity>
           </View>
         )}
 
         {hasJoinedAny && (
           <>
-            {/* Next race card – own card, above competitions */}
-            <View style={styles.nextRaceCard}>
-              {nextRaceOff && !nextRaceOff.raceTimePassed ? (
-                nextRaceOff.isClosed ? (
-                  <>
-                    <Text style={styles.nextRaceCardTitle}>Next race</Text>
-                    <Text style={styles.lockedNoteText}>All selections have been made and are locked in. Good luck!</Text>
-                  </>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.nextRaceCardTouchable}
-                    onPress={() => router.push('/(app)/selections')}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.nextRaceCardTitle}>Next race</Text>
-                    <View style={styles.nextRaceCardContentRow}>
-                      <View style={styles.nextRaceCardContent}>
-                        <View style={styles.nextRaceCardHeaderRow}>
-                          <Text style={styles.nextRaceCardRaceName} numberOfLines={1}>{nextRaceOff.raceName}</Text>
-                        </View>
-                        <Text style={styles.nextRaceCardCourse}>{nextRaceOff.course} · {nextRaceOff.dateStr}</Text>
-                        <View style={styles.nextRaceCardRow}>
-                          <View style={styles.nextRaceCardMeta}>
-                            <Ionicons name="time-outline" size={14} color={theme.colors.textMuted} />
-                            <Text style={styles.nextRaceCardTime}>{nextRaceOff.timeStr}</Text>
-                          </View>
-                          {nextRaceOff.runnerCount > 0 && (
-                            <View style={styles.nextRaceCardMeta}>
-                              <Ionicons name="people-outline" size={14} color={theme.colors.textMuted} />
-                              <Text style={styles.nextRaceCardRunners}>{nextRaceOff.runnerCount} runners</Text>
-                            </View>
-                          )}
-                        </View>
-                      </View>
-                      <Ionicons name="chevron-forward" size={20} color={theme.colors.accent} style={styles.nextRaceCardArrow} />
-                    </View>
-                  </TouchableOpacity>
-                )
-              ) : (
-                <>
-                  <Text style={styles.nextRaceCardTitle}>Next race</Text>
-                  <Text style={styles.nextRaceCardEmptyMessage}>
-                    All of today's races have finished. Don't forget to check the leaderboard to see how you got on.
-                  </Text>
-                  <TouchableOpacity
-                    style={[styles.nextRaceCardBtn, styles.nextRaceCardBtnCompact]}
-                    onPress={() => router.push('/(app)/competitions')}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.nextRaceCardBtnTextWhite}>My Competitions</Text>
-                    <Ionicons name="arrow-forward" size={14} color="#ffffff" />
-                  </TouchableOpacity>
-                </>
-              )}
+            <View style={styles.homePrimaryRow}>
+              <TouchableOpacity
+                style={styles.homePrimaryBtn}
+                onPress={() => router.push('/(app)/selections')}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="list-outline" size={20} color={theme.colors.black} />
+                <Text style={styles.homePrimaryBtnText}>My selections</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.homePrimaryBtnSecondary}
+                onPress={() => router.push('/(app)/competitions')}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="trophy-outline" size={20} color={theme.colors.accent} />
+                <Text style={styles.homePrimaryBtnTextSecondary}>Competitions</Text>
+              </TouchableOpacity>
             </View>
 
-            {/* Your competitions – title and tabs */}
             <Text style={[styles.sectionTitle, styles.sectionTitleFirst]}>Your competitions</Text>
             <View style={styles.compTabsRow}>
               {(['upcoming', 'live', 'complete'] as const).map((tab) => {
@@ -903,6 +818,9 @@ export default function HomeScreen() {
                 );
               })}
             </View>
+            <Text style={styles.homeCompHint}>
+              Browse by festival phase. Make picks in My selections when racecards are published.
+            </Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}

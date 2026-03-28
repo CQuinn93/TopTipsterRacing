@@ -1,7 +1,6 @@
 /**
  * Fetch races for the user's competitions, grouped by meeting (course), for the Results section.
- * Includes ALL races from linked race days – when the user has no selection (e.g. locked/FAV backfill
- * not yet run), we show "FAV" and "Awaiting results". Each race is a template: race name, time,
+ * Includes ALL races from linked race days. Each race is a template: race name, time,
  * user's selection, places 1–4, full result, and placed positions.
  */
 import type { Race, RaceResult } from '@/types/races';
@@ -117,7 +116,7 @@ export async function fetchResultsTemplateForUser(
       const course = d.course ?? 'Meeting';
 
       for (const race of races) {
-        const userSelection = userSelections[race.id] ?? 'FAV';
+        const userSelection = userSelections[race.id] ?? '';
 
         const { place1, place2, place3, place4 } = getPlaceNames(race);
         const results = race.results ?? {};

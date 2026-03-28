@@ -12,6 +12,7 @@ import { router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
 
 export default function AccessCodeScreen() {
   const theme = useTheme();
@@ -32,72 +33,35 @@ export default function AccessCodeScreen() {
   const displayNameToUse = profileUsername?.length ? profileUsername : displayName.trim();
 
   const handleSubmit = async () => {
-    const trimmed = code.trim().toUpperCase();
-    if (!trimmed) {
-      Alert.alert('Error', 'Please enter the access code.');
-      return;
-    }
-    if (!displayNameToUse) {
-      Alert.alert('Error', 'Please enter your display name for the leaderboard.');
-      return;
-    }
     if (!userId) {
       Alert.alert('Error', 'You must be signed in.');
       return;
     }
     setLoading(true);
     try {
-      const { data: comp, error: compError } = await supabase
-        .from('competitions')
-        .select('id, name')
-        .eq('access_code', trimmed)
-        .maybeSingle();
-
-      if (compError) throw compError;
-      if (!comp) {
+      const outcome = await joinCompetitionWithAccessCode({
+        userId,
+        code: code,
+        displayNameToUse,
+      });
+      if (outcome.kind === 'error') {
+        Alert.alert('Error', outcome.message);
+        return;
+      }
+      if (outcome.kind === 'invalid_code') {
         Alert.alert('Invalid code', 'This access code is not recognised.');
-        setLoading(false);
         return;
       }
-
-      const { data: existing } = await supabase
-        .from('competition_participants')
-        .select('id')
-        .eq('competition_id', comp.id)
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (existing) {
-        Alert.alert('Already in', `You're already in "${comp.name}".`);
+      if (outcome.kind === 'already_in') {
+        Alert.alert('Already in', `You're already in "${outcome.competitionName}".`);
         router.replace('/(app)');
-        setLoading(false);
         return;
       }
-
-      const { error: requestError } = await supabase
-        .from('competition_join_requests')
-        .upsert(
-          {
-            competition_id: comp.id,
-            user_id: userId,
-            display_name: displayNameToUse,
-            status: 'pending',
-          },
-          { onConflict: 'competition_id,user_id' }
-        );
-
-      if (requestError) throw requestError;
-
-      Alert.alert('Request sent', `Your request to join "${comp.name}" has been sent. An admin will approve you soon.`);
+      Alert.alert(
+        'Request sent',
+        `Your request to join "${outcome.competitionName}" has been sent. An admin will approve you soon.`
+      );
       router.replace('/(app)');
-    } catch (e: unknown) {
-      let msg = 'Failed to join competition';
-      if (e && typeof e === 'object' && 'message' in e && typeof (e as { message: unknown }).message === 'string') {
-        msg = (e as { message: string }).message;
-      }
-      if (e && typeof e === 'object' && 'details' in e && typeof (e as { details: unknown }).details === 'string') {
-        msg = `${msg} (${(e as { details: string }).details})`;
-      }
-      Alert.alert('Error', msg);
     } finally {
       setLoading(false);
     }

@@ -16,9 +16,34 @@ body {
   font-size: 14px;
 }
 
+/*
+ * iOS Safari zooms the viewport when a focused input has effective font-size under 16px.
+ * RN Web inputs can inherit 14px from body; force ≥16px on form fields (mobile / narrow).
+ */
+@media (max-width: 768px) {
+  input[type='text'],
+  input[type='email'],
+  input[type='password'],
+  input[type='search'],
+  input[type='tel'],
+  input[type='url'],
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
 /* Web: smooth scrolling and selection */
 html {
   scroll-behavior: smooth;
+  /* Stop iOS Safari from inflating text (can look like a zoomed layout) */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Avoid horizontal overflow that makes mobile browsers pan/zoom the page */
+#root {
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 /* Web: improve touch targets and hover feedback */

@@ -10,13 +10,13 @@ import {
   Alert,
   ActivityIndicator,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSidebar } from '@/contexts/SidebarContext';
-import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { getOrCreateTabletCode } from '@/lib/tabletCode';
 import { clearTabletCodeCache } from '@/lib/tabletCode';
@@ -41,9 +41,9 @@ export function AppSidebar() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { open, closeSidebar } = useSidebar();
-  const { startGuidedTour } = useOnboarding();
   const { session, signOut } = useAuth();
   const userId = session?.user?.id ?? null;
+  const [howItWorksExpanded, setHowItWorksExpanded] = useState(false);
   const [accountExpanded, setAccountExpanded] = useState(false);
   const [accessCode, setAccessCode] = useState<string | null>(null);
   const [role, setRole] = useState<'User' | 'Admin'>('User');
@@ -95,6 +95,13 @@ export function AppSidebar() {
   };
 
   const handleSignOut = () => {
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Are you sure you want to sign out?')) {
+        closeSidebar();
+        void doSignOut(signOut, userId, router);
+      }
+      return;
+    }
     closeSidebar();
     Alert.alert('Sign out', 'Are you sure?', [
       { text: 'Cancel', style: 'cancel' },
@@ -266,14 +273,30 @@ export function AppSidebar() {
           </View>
           <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.buttons} showsVerticalScrollIndicator={false}>
             <TouchableOpacity
-              style={styles.menuButton}
-              onPress={showTour}
+              style={[styles.menuButton, styles.accountFolderHeader]}
+              onPress={() => setHowItWorksExpanded((e) => !e)}
               activeOpacity={0.7}
             >
               <Ionicons name="help-circle-outline" size={22} color={theme.colors.accent} />
               <Text style={styles.menuButtonText}>How it works</Text>
-              <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+              <Ionicons
+                name="chevron-down"
+                size={20}
+                color={theme.colors.textMuted}
+                style={{ transform: [{ rotate: howItWorksExpanded ? '0deg' : '-90deg' }] }}
+              />
             </TouchableOpacity>
+            {howItWorksExpanded && (
+              <View style={styles.accountFolderContent}>
+                <TouchableOpacity
+                  style={styles.accountFolderItem}
+                  onPress={() => goTo('/(app)/rules')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.menuButtonText}>FAQs</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             <TouchableOpacity
               style={styles.menuButton}
               onPress={() => goTo('/(app)/rules')}

@@ -17,6 +17,7 @@ import { lightTheme } from '@/constants/theme';
 import { displayHorseName } from '@/lib/displayHorseName';
 import { decimalToFractional } from '@/lib/oddsFormat';
 import { POSITION_POINTS } from '@/lib/appUtils';
+import { isSelectionClosed } from '@/lib/appUtils';
 import { getLatestResultsForUser } from '@/lib/latestResultsCache';
 import type { MeetingResults, RaceResultTemplate } from '@/lib/resultsTemplateForUser';
 import { useRealtimeRaces } from '@/lib/useRealtimeRaces';
@@ -401,14 +402,34 @@ export default function ResultsScreen() {
         color: theme.colors.textMuted,
         textAlign: 'center',
       },
-      yourSelection: {
+      yourSelectionSection: {
+        marginTop: theme.spacing.sm,
+        marginBottom: theme.spacing.md,
+      },
+      yourSelectionLabel: {
         fontFamily: theme.fontFamily.regular,
         fontSize: 12,
         color: theme.colors.textMuted,
-        marginTop: theme.spacing.sm,
-        paddingTop: theme.spacing.xs,
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: theme.colors.border,
+        marginBottom: theme.spacing.xs,
+      },
+      yourSelectionCard: {
+        backgroundColor: theme.colors.accent,
+        borderRadius: theme.radius.sm,
+        paddingVertical: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.md,
+      },
+      yourSelectionCardText: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 13,
+        color: theme.colors.white,
+        fontWeight: '600',
+        textAlign: 'center',
+      },
+      resultSectionLabel: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 12,
+        color: theme.colors.textMuted,
+        marginBottom: theme.spacing.xs,
       },
     });
   }, [theme]);
@@ -499,6 +520,15 @@ export default function ResultsScreen() {
                 {selectedRace && (() => {
                   const fullResult = selectedRace.fullResult ?? [];
                   const awaiting = fullResult.length === 0;
+                  const userSelectionName = (selectedRace.userSelection ?? '').trim();
+                  const isFavPlaceholder = userSelectionName.toUpperCase() === 'FAV';
+                  const hasUserSelection = userSelectionName.length > 0 && !isFavPlaceholder;
+                  const isOpenForSelection = !isSelectionClosed(selectedRace.raceTimeUtc);
+                  const yourSelectionText = hasUserSelection
+                    ? displayHorseName(userSelectionName)
+                    : isOpenForSelection
+                      ? 'Awaiting selection'
+                      : (isFavPlaceholder ? 'FAV' : 'No selection made');
                   return (
                     <View style={styles.resultCard}>
                       <Text style={styles.resultCardRaceName}>{selectedRace.raceName}</Text>
@@ -508,6 +538,13 @@ export default function ResultsScreen() {
                           minute: '2-digit',
                         })}
                       </Text>
+                      <View style={styles.yourSelectionSection}>
+                        <Text style={styles.yourSelectionLabel}>Your selection</Text>
+                        <View style={styles.yourSelectionCard}>
+                          <Text style={styles.yourSelectionCardText}>{yourSelectionText}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.resultSectionLabel}>Result</Text>
                       {awaiting ? (
                         <View style={styles.awaitingRow}>
                           <Text style={styles.awaitingText}>Awaiting results</Text>
@@ -575,9 +612,6 @@ export default function ResultsScreen() {
                           })}
                         </View>
                       )}
-                      <Text style={styles.yourSelection}>
-                        Your selection: {displayHorseName(selectedRace.userSelection)}
-                      </Text>
                     </View>
                   );
                 })()}
@@ -595,4 +629,3 @@ export default function ResultsScreen() {
     </ScrollView>
   );
 }
-

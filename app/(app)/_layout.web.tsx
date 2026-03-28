@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions, type ViewStyle, type DimensionValue } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions, Platform, type ViewStyle, type DimensionValue } from 'react-native';
 import { useState, useEffect } from 'react';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,7 +9,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { AppLockProvider, useAppLock } from '@/contexts/AppLockContext';
 import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
 import { SidebarProvider, useSidebar } from '@/contexts/SidebarContext';
-import { OnboardingProvider } from '@/contexts/OnboardingContext';
 import { AppSidebar } from '@/components/AppSidebar';
 import { AppUnlockScreen } from '@/components/AppUnlockScreen';
 import { clearTabletCodeCache, getOrCreateTabletCode } from '@/lib/tabletCode';
@@ -73,7 +72,7 @@ function WebSidebar() {
     },
     logo: {
       fontFamily: theme.fontFamily.regular,
-      fontSize: 14,
+      fontSize: 13,
       fontWeight: '700',
       color: theme.colors.text,
       marginBottom: 4,
@@ -113,7 +112,7 @@ function WebSidebar() {
     },
     navItemText: {
       fontFamily: theme.fontFamily.regular,
-      fontSize: 12,
+      fontSize: 11,
       color: theme.colors.text,
     },
     navItemTextActive: {
@@ -144,7 +143,7 @@ function WebSidebar() {
               onPress={() => router.push(item.href as any)}
               activeOpacity={0.7}
             >
-              <Ionicons name={item.icon} size={20} color={active ? theme.colors.accent : theme.colors.textSecondary} />
+              <Ionicons name={item.icon} size={18} color={active ? theme.colors.accent : theme.colors.textSecondary} />
               <Text style={[styles.navItemText, active && styles.navItemTextActive]}>{item.label}</Text>
             </TouchableOpacity>
           );
@@ -161,7 +160,7 @@ function WebSidebar() {
               onPress={() => router.push(item.href as any)}
               activeOpacity={0.7}
             >
-              <Ionicons name={item.icon} size={20} color={active ? theme.colors.accent : theme.colors.textSecondary} />
+              <Ionicons name={item.icon} size={18} color={active ? theme.colors.accent : theme.colors.textSecondary} />
               <Text style={[styles.navItemText, active && styles.navItemTextActive]}>{item.label}</Text>
             </TouchableOpacity>
           );
@@ -297,7 +296,7 @@ function WebSidebarFooter() {
     <View style={{ marginTop: 'auto', paddingTop: 24, borderTopWidth: 1, borderTopColor: theme.colors.border }}>
       {role === 'Admin' && (
         <View style={{ marginBottom: 8, marginHorizontal: 12, backgroundColor: theme.colors.accentMuted, borderRadius: theme.radius.sm, paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderColor: theme.colors.accent }}>
-          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.accent, fontWeight: '700' }}>Admin</Text>
+          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.accent, fontWeight: '700' }}>Admin</Text>
         </View>
       )}
       <View style={{ paddingVertical: 4, paddingHorizontal: 12 }}>
@@ -306,7 +305,7 @@ function WebSidebarFooter() {
         </Text>
         {accessCode ? (
           <>
-            <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 16, letterSpacing: 4, color: theme.colors.accent, fontWeight: '600' }}>
+            <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 14, letterSpacing: 3.5, color: theme.colors.accent, fontWeight: '600' }}>
               {accessCode}
             </Text>
             {role === 'Admin' && (
@@ -331,8 +330,8 @@ function WebSidebarFooter() {
           }}
           activeOpacity={0.7}
         >
-          <Ionicons name="construct-outline" size={18} color={theme.colors.accent} />
-          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.accent }}>
+          <Ionicons name="construct-outline" size={17} color={theme.colors.accent} />
+          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.accent }}>
             Admin tools
           </Text>
         </TouchableOpacity>
@@ -348,8 +347,8 @@ function WebSidebarFooter() {
         }}
         activeOpacity={0.7}
       >
-        <Ionicons name="log-out-outline" size={18} color={theme.colors.textSecondary} />
-        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary }}>
+        <Ionicons name="log-out-outline" size={17} color={theme.colors.textSecondary} />
+        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textSecondary }}>
           Sign out
         </Text>
       </TouchableOpacity>
@@ -365,7 +364,7 @@ function WebSidebarFooter() {
             {adminRequestLoading ? (
               <ActivityIndicator size="small" color={theme.colors.accent} />
             ) : (
-              <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: adminRequestPending ? theme.colors.textMuted : theme.colors.accent }}>
+              <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: adminRequestPending ? theme.colors.textMuted : theme.colors.accent }}>
                 {adminRequestPending ? 'Admin request pending' : 'Request admin access'}
               </Text>
             )}
@@ -377,8 +376,8 @@ function WebSidebarFooter() {
           activeOpacity={0.7}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Ionicons name="person-outline" size={18} color={theme.colors.textSecondary} />
-            <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary }}>
+            <Ionicons name="person-outline" size={17} color={theme.colors.textSecondary} />
+            <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textSecondary }}>
               Account
             </Text>
           </View>
@@ -400,7 +399,7 @@ function WebSidebarFooter() {
               {deleteAccountLoading ? (
                 <ActivityIndicator size="small" color={theme.colors.error} />
               ) : (
-                <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.error }}>
+                <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.error }}>
                   Delete account
                 </Text>
               )}
@@ -420,8 +419,8 @@ function WebSidebarFooter() {
         }}
         activeOpacity={0.7}
       >
-        <Ionicons name="menu" size={18} color={theme.colors.textSecondary} />
-        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary }}>
+        <Ionicons name="menu" size={17} color={theme.colors.textSecondary} />
+        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textSecondary }}>
           More options
         </Text>
       </TouchableOpacity>
@@ -452,15 +451,27 @@ function MobileWebLayout() {
     return currentSegment === target || (target === 'index' && (currentSegment === 'index' || currentSegment === '(app)'));
   };
 
+  const webMobileShell: ViewStyle | undefined =
+    Platform.OS === 'web'
+      ? {
+          width: '100%',
+          height: '100vh' as DimensionValue,
+          maxHeight: '100vh' as DimensionValue,
+          overflow: 'hidden',
+        }
+      : undefined;
+
   const styles = StyleSheet.create({
+    /** Narrow native: min height; narrow web: combined with webMobileShell for viewport-locked shell. */
     wrapper: {
       flex: 1,
-      minHeight: '100vh' as DimensionValue,
       backgroundColor: theme.colors.background,
+      ...(Platform.OS !== 'web' ? { minHeight: '100vh' as DimensionValue } : {}),
     },
     header: {
       flexDirection: 'row',
       alignItems: 'center',
+      flexShrink: 0,
       paddingHorizontal: 12,
       paddingVertical: 12,
       paddingTop: Math.max(12, insets.top),
@@ -471,21 +482,30 @@ function MobileWebLayout() {
     headerTitle: {
       flex: 1,
       fontFamily: theme.fontFamily.regular,
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: '600',
       color: isLight ? theme.colors.white : theme.colors.text,
       marginLeft: 6,
     },
+    /** Main scroll area; bottom inset so content clears iOS home / browser overlays. */
     content: {
       flex: 1,
       minHeight: 0,
+      overflow: 'hidden',
+      paddingBottom: Math.max(12, insets.bottom),
     },
+    /**
+     * Primary nav sits under the header on narrow web only — avoids the bar sitting
+     * under the mobile browser URL/chrome at the bottom of the viewport.
+     */
     tabBar: {
       flexDirection: 'row',
+      flexShrink: 0,
       backgroundColor: theme.colors.accent,
-      paddingBottom: Math.max(12, insets.bottom) + 28,
-      paddingTop: 10,
-      borderTopWidth: 0,
+      paddingVertical: 8,
+      paddingHorizontal: 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: 'rgba(0, 0, 0, 0.12)',
     },
     tabItem: {
       flex: 1,
@@ -495,21 +515,18 @@ function MobileWebLayout() {
     },
     tabLabel: {
       fontFamily: theme.fontFamily.regular,
-      fontSize: 10,
+      fontSize: 9,
       marginTop: 2,
     },
   });
 
   return (
-    <View style={styles.wrapper}>
+    <View style={[styles.wrapper, webMobileShell]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={openSidebar} hitSlop={12} style={{ padding: 4 }}>
-          <Ionicons name="menu" size={24} color={isLight ? theme.colors.white : theme.colors.text} />
+          <Ionicons name="menu" size={22} color={isLight ? theme.colors.white : theme.colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{headerTitle}</Text>
-      </View>
-      <View style={styles.content}>
-        <Slot />
       </View>
       <View style={styles.tabBar}>
         {NAV_ITEMS.map((item) => {
@@ -522,13 +539,16 @@ function MobileWebLayout() {
               onPress={() => router.push(item.href as any)}
               activeOpacity={0.7}
             >
-              <Ionicons name={item.icon} size={24} color={color} />
+              <Ionicons name={item.icon} size={22} color={color} />
               <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
                 {item.label}
               </Text>
             </TouchableOpacity>
           );
         })}
+      </View>
+      <View style={styles.content}>
+        <Slot />
       </View>
       <AppSidebar />
     </View>
@@ -582,9 +602,7 @@ function AppLayoutWebContent() {
   return (
     <ForceRefreshProvider>
       <SidebarProvider>
-        <OnboardingProvider>
-          {session && isLocked ? <AppUnlockScreen /> : isNarrow ? <MobileWebLayout /> : <WebLayoutContent />}
-        </OnboardingProvider>
+        {session && isLocked ? <AppUnlockScreen /> : isNarrow ? <MobileWebLayout /> : <WebLayoutContent />}
       </SidebarProvider>
     </ForceRefreshProvider>
   );
