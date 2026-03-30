@@ -10,6 +10,8 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
+  Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -37,9 +39,12 @@ function getPointsForRunner(
 export function HomeSelectionsAndResults({ competitionId }: { competitionId: string }) {
   const theme = useTheme();
   const { userId } = useAuth();
+  const { width } = useWindowDimensions();
+  const isNarrowWeb = Platform.OS === 'web' && width < 768;
   const [raceDays, setRaceDays] = useState<RaceDayRow[]>([]);
   const [meetingResults, setMeetingResults] = useState<MeetingResults[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedRaceKey, setSelectedRaceKey] = useState<string | null>(null);
   const [expandedRunnerKey, setExpandedRunnerKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectionsByDate, setSelectionsByDate] = useState<Record<string, Record<string, string>>>({});
@@ -105,6 +110,19 @@ export function HomeSelectionsAndResults({ competitionId }: { competitionId: str
     return out;
   }, [meetingResults, selectedDate]);
 
+  useEffect(() => {
+    if (racesForSelectedDate.length === 0) {
+      setSelectedRaceKey(null);
+      return;
+    }
+    const firstKey = `${racesForSelectedDate[0]?.race.raceId}-${racesForSelectedDate[0]?.race.raceTimeUtc}`;
+    setSelectedRaceKey((prev) => {
+      if (!prev) return firstKey;
+      const exists = racesForSelectedDate.some(({ race }) => `${race.raceId}-${race.raceTimeUtc}` === prev);
+      return exists ? prev : firstKey;
+    });
+  }, [racesForSelectedDate]);
+
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -116,7 +134,7 @@ export function HomeSelectionsAndResults({ competitionId }: { competitionId: str
         },
         dayTabsRow: {
           flexDirection: 'row',
-          flexWrap: 'wrap',
+          flexWrap: isNarrowWeb ? 'nowrap' : 'wrap',
           gap: 8,
           marginBottom: 16,
         },
@@ -136,6 +154,35 @@ export function HomeSelectionsAndResults({ competitionId }: { competitionId: str
         dayTabTextActive: {
           color: theme.colors.accent,
           fontWeight: '600',
+        },
+        raceTabsScroll: {
+          marginBottom: 12,
+        },
+        raceTabsRow: {
+          flexDirection: 'row',
+          gap: 8,
+          paddingRight: 8,
+        },
+        raceTab: {
+          paddingVertical: 7,
+          paddingHorizontal: 10,
+          borderRadius: 8,
+          backgroundColor: theme.colors.surface,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        raceTabActive: {
+          backgroundColor: theme.colors.accentMuted,
+          borderColor: theme.colors.accent,
+        },
+        raceTabText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.text,
+          fontWeight: '600',
+        },
+        raceTabTextActive: {
+          color: theme.colors.accent,
         },
         twoColRow: {
           flexDirection: 'row',
@@ -209,6 +256,23 @@ export function HomeSelectionsAndResults({ competitionId }: { competitionId: str
         rightCol: {
           flex: 1,
           minWidth: 0,
+        },
+        combinedCard: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: 12,
+          padding: isNarrowWeb ? 12 : 16,
+          marginBottom: 12,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        combinedSectionTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          fontWeight: '700',
+          color: theme.colors.textMuted,
+          marginBottom: 6,
+          textTransform: 'uppercase',
+          letterSpacing: 0.5,
         },
         rightTitle: {
           fontFamily: theme.fontFamily.regular,
@@ -301,7 +365,7 @@ export function HomeSelectionsAndResults({ competitionId }: { competitionId: str
         awaitingText: { fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.textMuted, textAlign: 'center' },
         emptyText: { fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.textMuted },
       }),
-    [theme]
+    [theme, isNarrowWeb]
   );
 
   if (loading) {
@@ -322,7 +386,7 @@ export function HomeSelectionsAndResults({ competitionId }: { competitionId: str
 
   return (
     <View style={styles.section}>
-      <View style={styles.dayTabsRow}>
+      <ScrollView horizontal={isNarrowWeb} showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dayTabsRow}>
         {raceDays.map((d) => {
           const isSelected = selectedDate === d.race_date;
           const pickCount = Object.keys(selectionsByDate[d.race_date] ?? {}).length;
@@ -343,9 +407,125 @@ export function HomeSelectionsAndResults({ competitionId }: { competitionId: str
             </TouchableOpacity>
           );
         })}
-      </View>
+      </ScrollView>
 
-      <View style={styles.twoColRow}>
+      {isNarrowWeb && (
+        <>
+          {racesForSelectedDate.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.raceTabsScroll} contentContainerStyle={styles.raceTabsRow}>
+              {racesForSelectedDate.map(({ race }) => {
+                const raceKey = `${race.raceId}-${race.raceTimeUtc}`;
+                const active = raceKey === selectedRaceKey;
+                return (
+                  <TouchableOpacity
+                    key={`race-tab-${raceKey}`}
+                    style={[styles.raceTab, active && styles.raceTabActive]}
+                    onPress={() => {
+                      setSelectedRaceKey(raceKey);
+                      setExpandedRunnerKey(null);
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.raceTabText, active && styles.raceTabTextActive]}>
+                      {new Date(race.raceTimeUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          ) : null}
+
+          {racesForSelectedDate.length === 0 ? (
+            <Text style={styles.emptyText}>No races on this day yet.</Text>
+          ) : (
+            (() => {
+              const selectedRace = racesForSelectedDate.find(({ race }) => `${race.raceId}-${race.raceTimeUtc}` === selectedRaceKey) ?? racesForSelectedDate[0];
+              const { course, race } = selectedRace;
+              const fullResult = race.fullResult ?? [];
+              const awaiting = fullResult.length === 0;
+              return (
+                <View style={styles.combinedCard}>
+                  <Text style={styles.resultCardRaceName}>{race.raceName}</Text>
+                  <Text style={styles.resultCardTime}>
+                    {course} · {new Date(race.raceTimeUtc).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+
+                  <Text style={styles.combinedSectionTitle}>Your selection</Text>
+                  <Text style={[styles.selectionCardPick, { marginBottom: 12 }]}>
+                    {displayHorseName(race.userSelection)}
+                  </Text>
+
+                  <Text style={styles.combinedSectionTitle}>Results</Text>
+                  {awaiting ? (
+                    <View style={styles.awaitingRow}>
+                      <Text style={styles.awaitingText}>Awaiting results</Text>
+                    </View>
+                  ) : (
+                    <View>
+                      {fullResult.map((r: ResultRow, idx: number) => {
+                        const runnerKey = `${race.raceId}-${idx}`;
+                        const isExpanded = expandedRunnerKey === runnerKey;
+                        const points = getPointsForRunner(r, race.placedPositions ?? []);
+                        return (
+                          <TouchableOpacity
+                            key={`${r.label}-${r.name}-${idx}`}
+                            style={[styles.runnerCard, r.earnedPoints && styles.runnerCardEarned]}
+                            onPress={() =>
+                              setExpandedRunnerKey((prev) => (prev === runnerKey ? null : runnerKey))
+                            }
+                            activeOpacity={0.8}
+                          >
+                            <View style={styles.runnerCardRow}>
+                              <View style={styles.runnerCardPosition}>
+                                <Text style={[styles.runnerCardPositionBadge, r.position === 1 && styles.runnerCardPositionWon]}>
+                                  {r.label}
+                                </Text>
+                              </View>
+                              <View style={styles.runnerCardCenter}>
+                                <Text style={styles.runnerCardName} numberOfLines={1}>
+                                  {displayHorseName(r.name)}
+                                </Text>
+                              </View>
+                              <Text style={styles.runnerCardTotalPts}>
+                                {(r.pos_points ?? points) + (r.sp_points ?? 0)} pts
+                              </Text>
+                              <Text style={styles.runnerCardChevron}>{isExpanded ? '▲' : '▼'}</Text>
+                            </View>
+                            {isExpanded && (
+                              <View style={styles.runnerCardPointsBlock}>
+                                <View style={styles.runnerCardThreeBoxRow}>
+                                  <View style={styles.runnerCardPointsBox}>
+                                    <Text style={styles.runnerCardPointsLabel}>Pos points</Text>
+                                    <Text style={styles.runnerCardPointsValue}>
+                                      {r.pos_points != null ? r.pos_points : points}
+                                    </Text>
+                                  </View>
+                                  <View style={styles.runnerCardPointsBox}>
+                                    <Text style={styles.runnerCardPointsLabel}>SP</Text>
+                                    <Text style={styles.runnerCardPointsValue}>{decimalToFractional(r.sp)}</Text>
+                                  </View>
+                                  <View style={styles.runnerCardPointsBox}>
+                                    <Text style={styles.runnerCardPointsLabel}>Bonus points</Text>
+                                    <Text style={styles.runnerCardPointsValue}>
+                                      {r.sp_points != null ? r.sp_points : 0}
+                                    </Text>
+                                  </View>
+                                </View>
+                              </View>
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  )}
+                </View>
+              );
+            })()
+          )}
+        </>
+      )}
+
+      {!isNarrowWeb && <View style={styles.twoColRow}>
         <View style={styles.leftCol}>
           <Text style={styles.leftTitle}>Your selections</Text>
           <ScrollView style={{ maxHeight: 480 }} showsVerticalScrollIndicator={true}>
@@ -452,7 +632,7 @@ export function HomeSelectionsAndResults({ competitionId }: { competitionId: str
           )}
         </ScrollView>
         </View>
-      </View>
+      </View>}
     </View>
   );
 }

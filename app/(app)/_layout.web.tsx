@@ -391,6 +391,15 @@ function WebSidebarFooter() {
         {accountExpanded && (
           <View style={{ paddingLeft: 28, paddingBottom: 6 }}>
             <TouchableOpacity
+              onPress={() => router.push('/(app)/change-password')}
+              style={{ paddingVertical: 4 }}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.accent }}>
+                Change password
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               onPress={handleDeleteAccount}
               disabled={deleteAccountLoading}
               style={{ paddingVertical: 4 }}

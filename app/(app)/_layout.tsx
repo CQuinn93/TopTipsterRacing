@@ -104,6 +104,13 @@ function AppTabs() {
         }}
       />
       <Tabs.Screen
+        name="change-password"
+        options={{
+          title: 'Change password',
+          href: null,
+        }}
+      />
+      <Tabs.Screen
         name="reminders"
         options={{
           title: 'Reminders',

@@ -7,9 +7,9 @@ import {
   ScrollView,
   ActivityIndicator,
   useWindowDimensions,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
   Platform,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { router } from 'expo-router';
@@ -46,8 +46,8 @@ export default function HomeScreen() {
   const [compDaysByCompId, setCompDaysByCompId] = useState<Record<string, number>>({});
   const [compDateRangeByCompId, setCompDateRangeByCompId] = useState<Record<string, { start: string; end: string }>>({});
   const [compTab, setCompTab] = useState<'upcoming' | 'live' | 'complete'>('live');
+  const [compDropdownOpen, setCompDropdownOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
-  const compScrollRef = useRef<ScrollView>(null);
   const { width: windowWidth } = useWindowDimensions();
   const isNarrowWeb = Platform.OS === 'web' && windowWidth < 768;
 
@@ -192,12 +192,6 @@ export default function HomeScreen() {
 
   const currentSummary = summaryByComp && effectiveCompId ? summaryByComp.byComp[effectiveCompId] : null;
 
-  const scrollToCompIndex = useCallback((index: number) => {
-    if (compScrollRef.current && index >= 0) {
-      compScrollRef.current.scrollTo({ x: index * windowWidth, animated: true });
-    }
-  }, [windowWidth]);
-
   const compListFilteredIds = compListFiltered.map((c) => c.id).join(',');
   useEffect(() => {
     if (compListFiltered.length === 0) {
@@ -209,18 +203,6 @@ export default function HomeScreen() {
     }
   }, [compTab, compListFilteredIds]);
 
-  useEffect(() => {
-    if (compListFiltered.length === 0) return;
-    const index = compListFiltered.findIndex((c) => c.id === effectiveCompId);
-    if (index <= 0) return;
-    const t = setTimeout(() => {
-      if (compScrollRef.current) {
-        compScrollRef.current.scrollTo({ x: index * windowWidth, animated: false });
-      }
-    }, 100);
-    return () => clearTimeout(t);
-  }, [effectiveCompId, compListFiltered.length, windowWidth]);
-
   const isWeb = Platform.OS === 'web';
 
   const styles = useMemo(
@@ -229,17 +211,18 @@ export default function HomeScreen() {
       const cardBorder = isLight ? theme.colors.white : theme.colors.border;
       const cardBorderWidth = isLight ? 2 : 1;
       const webCard = isWeb ? { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 } : {};
+      const compact = isNarrowWeb;
       return StyleSheet.create({
         wrapper: { flex: 1, backgroundColor: theme.colors.background, ...(isWeb && { paddingHorizontal: 0 }) },
         container: { flex: 1 },
         content: { padding: theme.spacing.md, ...(isWeb && { padding: 24, paddingBottom: 48 }) },
         sectionTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 15,
+          fontSize: compact ? 13 : 15,
           fontWeight: '700',
           color: theme.colors.text,
           marginTop: theme.spacing.lg,
-          marginBottom: theme.spacing.sm,
+          marginBottom: compact ? theme.spacing.xs : theme.spacing.sm,
         },
         sectionTitleFirst: {
           marginTop: 0,
@@ -261,7 +244,7 @@ export default function HomeScreen() {
         },
         headerWelcome: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: compact ? 10 : 12,
           color: theme.colors.textMuted,
           marginBottom: 4,
           textTransform: 'uppercase',
@@ -269,7 +252,7 @@ export default function HomeScreen() {
         },
         headerHello: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 22,
+          fontSize: compact ? 18 : 22,
           fontWeight: '700',
           color: theme.colors.text,
         },
@@ -357,7 +340,7 @@ export default function HomeScreen() {
           alignItems: 'center',
           justifyContent: 'center',
           gap: 8,
-          paddingVertical: theme.spacing.md,
+          paddingVertical: compact ? theme.spacing.sm : theme.spacing.md,
           paddingHorizontal: theme.spacing.sm,
           backgroundColor: theme.colors.accent,
           borderRadius: theme.radius.md,
@@ -368,7 +351,7 @@ export default function HomeScreen() {
           alignItems: 'center',
           justifyContent: 'center',
           gap: 8,
-          paddingVertical: theme.spacing.md,
+          paddingVertical: compact ? theme.spacing.sm : theme.spacing.md,
           paddingHorizontal: theme.spacing.sm,
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.md,
@@ -377,22 +360,22 @@ export default function HomeScreen() {
         },
         homePrimaryBtnText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: compact ? 11 : 13,
           fontWeight: '600',
           color: theme.colors.black,
         },
         homePrimaryBtnTextSecondary: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: compact ? 11 : 13,
           fontWeight: '600',
           color: theme.colors.accent,
         },
         competitionsCard: {
           backgroundColor: theme.colors.surface,
           borderRadius: isWeb ? 14 : theme.radius.lg,
-          padding: isWeb ? 20 : theme.spacing.sm,
+          padding: compact ? theme.spacing.sm : (isWeb ? 20 : theme.spacing.sm),
           marginBottom: theme.spacing.sm,
-          marginTop: theme.spacing.xs,
+          marginTop: compact ? 0 : theme.spacing.xs,
           borderWidth: cardBorderWidth,
           borderColor: cardBorder,
           overflow: 'hidden',
@@ -474,31 +457,26 @@ export default function HomeScreen() {
         compStatusPillTextComplete: { color: theme.colors.error },
         statsTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: compact ? 11 : 12,
           fontWeight: '600',
           color: theme.colors.textMuted,
-          marginTop: theme.spacing.sm,
+          marginTop: compact ? 2 : theme.spacing.sm,
           marginBottom: theme.spacing.sm,
           textTransform: 'uppercase',
           letterSpacing: 0.5,
         },
         compSection: { marginBottom: theme.spacing.md },
-        compSlide: {
-          paddingHorizontal: theme.spacing.md,
-          paddingBottom: theme.spacing.sm,
-        },
         compMeetingNameAbove: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
+          fontSize: compact ? 13 : 16,
           fontWeight: '700',
           color: theme.colors.text,
-          marginBottom: 2,
+          marginBottom: compact ? 2 : 4,
         },
         compMetaAbove: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: compact ? 11 : 12,
           color: theme.colors.textMuted,
-          marginBottom: theme.spacing.sm,
         },
         compTabsRow: {
           flexDirection: 'row',
@@ -508,7 +486,7 @@ export default function HomeScreen() {
         },
         compTab: {
           flex: 1,
-          paddingVertical: theme.spacing.sm,
+          paddingVertical: compact ? theme.spacing.xs : theme.spacing.sm,
           paddingHorizontal: theme.spacing.sm,
           borderRadius: theme.radius.sm,
           backgroundColor: theme.colors.surface,
@@ -520,7 +498,7 @@ export default function HomeScreen() {
         },
         compTabText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: compact ? 11 : 13,
           color: theme.colors.textSecondary,
         },
         compTabTextActive: {
@@ -529,49 +507,71 @@ export default function HomeScreen() {
         },
         homeCompHint: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
+          fontSize: compact ? 10 : 11,
           color: theme.colors.textMuted,
-          marginBottom: theme.spacing.sm,
-          lineHeight: 15,
-        },
-        compScroll: { marginHorizontal: -theme.spacing.md, marginBottom: theme.spacing.sm },
-        compScrollInCard: { marginHorizontal: 0, marginBottom: theme.spacing.sm },
-        compScrollContent: {
-          paddingHorizontal: theme.spacing.md,
-          gap: theme.spacing.md,
-          paddingBottom: theme.spacing.sm,
-          flexDirection: 'row',
-          alignItems: 'flex-start',
-        },
-        compCircle: {
-          alignItems: 'center',
-          width: 72,
-        },
-        compCircleSelected: {},
-        compCircleInner: {
-          width: 56,
-          height: 56,
-          borderRadius: 28,
-          backgroundColor: theme.colors.surface,
-          borderWidth: 2,
-          borderColor: cardBorder,
-          alignItems: 'center',
-          justifyContent: 'center',
           marginBottom: theme.spacing.xs,
+          lineHeight: compact ? 14 : 15,
         },
-        compCircleInnerSelected: {
-          borderColor: theme.colors.accent,
-          backgroundColor: theme.colors.surfaceElevated,
+        compDropdownTrigger: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          paddingVertical: compact ? theme.spacing.sm : theme.spacing.md,
+          paddingHorizontal: theme.spacing.md,
+          borderWidth: cardBorderWidth,
+          borderColor: cardBorder,
+          marginBottom: theme.spacing.sm,
+          gap: theme.spacing.sm,
+          ...webCard,
         },
-        compCircleLabel: {
+        compDropdownTextBlock: {
+          flex: 1,
+          minWidth: 0,
+        },
+        compDropdownChevron: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
-          color: theme.colors.textSecondary,
-          textAlign: 'center',
+          fontSize: compact ? 11 : 12,
+          color: theme.colors.textMuted,
+          paddingLeft: theme.spacing.xs,
         },
-        compCircleLabelSelected: {
-          color: theme.colors.text,
+        dropdownOverlay: {
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: theme.spacing.lg,
+        },
+        dropdownContent: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          padding: theme.spacing.sm,
+          width: '100%',
+          maxWidth: 360,
+          maxHeight: 400,
+        },
+        dropdownOption: {
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          borderRadius: theme.radius.sm,
+        },
+        dropdownOptionActive: {
+          backgroundColor: theme.colors.accentMuted,
+        },
+        dropdownOptionText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: compact ? 13 : 15,
           fontWeight: '600',
+          color: theme.colors.text,
+        },
+        dropdownOptionTextActive: {
+          color: theme.colors.accent,
+        },
+        dropdownOptionMeta: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: compact ? 11 : 12,
+          color: theme.colors.textMuted,
+          marginTop: 4,
         },
         statusCard: {
           backgroundColor: theme.colors.surface,
@@ -628,21 +628,21 @@ export default function HomeScreen() {
         statCard: {
           backgroundColor: theme.colors.accentMuted ?? 'rgba(21, 128, 61, 0.15)',
           borderRadius: theme.radius.md,
-          padding: theme.spacing.sm,
+          padding: compact ? theme.spacing.xs : theme.spacing.sm,
           borderWidth: 1,
           borderColor: theme.colors.accentDim ?? theme.colors.accent,
           alignItems: 'center',
         },
         statCardLabel: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
+          fontSize: compact ? 10 : 11,
           color: theme.colors.textSecondary,
           marginTop: 4,
           textAlign: 'center',
         },
         statCardValue: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 20,
+          fontSize: compact ? 16 : 20,
           fontWeight: '700',
           color: theme.colors.accent,
         },
@@ -661,7 +661,7 @@ export default function HomeScreen() {
           alignItems: 'center',
           justifyContent: 'center',
           gap: theme.spacing.xs,
-          paddingVertical: theme.spacing.sm,
+          paddingVertical: compact ? theme.spacing.xs : theme.spacing.sm,
           paddingHorizontal: theme.spacing.md,
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.md,
@@ -670,13 +670,13 @@ export default function HomeScreen() {
         },
         quickLinkBtnText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: compact ? 11 : 13,
           fontWeight: '600',
           color: theme.colors.accent,
         },
         muted: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: compact ? 11 : 13,
           color: theme.colors.textMuted,
         },
         cardRow: {
@@ -739,7 +739,7 @@ export default function HomeScreen() {
         },
       });
     },
-    [theme, isWeb]
+    [theme, isWeb, isNarrowWeb]
   );
 
   const mainContent = (
@@ -821,49 +821,28 @@ export default function HomeScreen() {
             <Text style={styles.homeCompHint}>
               Browse by festival phase. Make picks in My selections when racecards are published.
             </Text>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.compScrollContent}
-              style={styles.compScroll}
-            >
-              {compListFiltered.map((c) => {
-                const isSelected = effectiveCompId === c.id;
-                return (
-                  <TouchableOpacity
-                    key={c.id}
-                    style={[styles.compCircle, isSelected && styles.compCircleSelected]}
-                    onPress={() => {
-                      const index = compListFiltered.findIndex((x) => x.id === c.id);
-                      setSelectedCompId(c.id);
-                      scrollToCompIndex(index);
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <View style={[styles.compCircleInner, isSelected && styles.compCircleInnerSelected]}>
-                      <Ionicons
-                        name="medal-outline"
-                        size={22}
-                        color={isSelected ? theme.colors.accent : theme.colors.textSecondary}
-                      />
-                    </View>
-                    <Text style={[styles.compCircleLabel, isSelected && styles.compCircleLabelSelected]} numberOfLines={1}>
-                      {c.name}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
 
-            {/* Your stats: on web with leaderboard, single card that fits; otherwise horizontal scroll */}
-            {compListFiltered.length > 0 && (() => {
+            {compListFiltered.length === 0 ? (
+              <Text style={[styles.muted, { marginBottom: theme.spacing.md }]}>No competitions in this category.</Text>
+            ) : null}
+
+            {compListFiltered.length > 0 && effectiveCompId ? (() => {
+              const selectedRow = compListFiltered.find((x) => x.id === effectiveCompId) ?? compListFiltered[0];
+              const summarySel = summaryByComp?.byComp[effectiveCompId];
+              const displayName = summarySel?.name ?? selectedRow.name;
+              const multi = compListFiltered.length > 1;
+              const metaLine = (compId: string) => {
+                const days = compDaysByCompId[compId] ?? 1;
+                const range = compDateRangeByCompId[compId];
+                return `${days} day event${range ? ` · ${range.start} – ${range.end}` : ''}`;
+              };
               const StatBox = ({ label, value }: { label: string; value: React.ReactNode }) => (
                 <View style={[styles.statCard, styles.statCardHalf]}>
                   <Text style={styles.statCardValue}>{value}</Text>
                   <Text style={styles.statCardLabel}>{label}</Text>
                 </View>
               );
-              const renderStatsCard = (c: { id: string; name: string }) => {
+              const renderStatsBody = (c: { id: string; name: string }) => {
                 const summary = summaryByComp?.byComp[c.id];
                 const isComplete = compStatusByCompId[c.id] === 'complete';
                 const position = compPositionByCompId[c.id] ?? null;
@@ -872,70 +851,81 @@ export default function HomeScreen() {
                   ? (position != null ? `${position}${position === 1 ? 'st' : position === 2 ? 'nd' : position === 3 ? 'rd' : 'th'}` : '—')
                   : (summary?.dailyPoints ?? 0);
                 return (
-                  <>
-                    <Text style={styles.compMeetingNameAbove} numberOfLines={1}>
-                      {summary?.name ?? c.name}
-                    </Text>
-                    <Text style={styles.compMetaAbove}>
-                      {compDaysByCompId[c.id] ?? 1} day event
-                      {compDateRangeByCompId[c.id]
-                        ? ` · ${compDateRangeByCompId[c.id].start} – ${compDateRangeByCompId[c.id].end}`
-                        : ''}
-                    </Text>
-                    <View style={styles.competitionsCard}>
-                      <Text style={styles.statsTitle}>Your stats</Text>
-                      <View style={styles.statsGrid}>
-                        <View style={styles.statsRow}>
-                          <StatBox label="Points" value={summary?.totalPoints ?? 0} />
-                          <StatBox label={secondLabel} value={typeof secondValue === 'number' ? secondValue : secondValue} />
-                        </View>
-                        <View style={styles.statsRow}>
-                          <StatBox
-                            label="Top pick"
-                            value={summary?.highestSpWin != null ? decimalToFractional(summary.highestSpWin) : '—'}
-                          />
-                          <StatBox label="Participants" value={participantCountByCompId[c.id] ?? 0} />
-                        </View>
+                  <View style={styles.competitionsCard}>
+                    <Text style={styles.statsTitle}>Your stats</Text>
+                    <View style={styles.statsGrid}>
+                      <View style={styles.statsRow}>
+                        <StatBox label="Points" value={summary?.totalPoints ?? 0} />
+                        <StatBox label={secondLabel} value={typeof secondValue === 'number' ? secondValue : secondValue} />
+                      </View>
+                      <View style={styles.statsRow}>
+                        <StatBox
+                          label="Top pick"
+                          value={summary?.highestSpWin != null ? decimalToFractional(summary.highestSpWin) : '—'}
+                        />
+                        <StatBox label="Participants" value={participantCountByCompId[c.id] ?? 0} />
                       </View>
                     </View>
-                  </>
-                );
-              };
-
-              if (isWeb && hasJoinedAny && effectiveCompId) {
-                const c = compListFiltered.find((x) => x.id === effectiveCompId) ?? compListFiltered[0];
-                if (!c) return null;
-                return (
-                  <View key={c.id} style={[styles.compSlide, { width: '100%' }]}>
-                    {renderStatsCard(c)}
                   </View>
                 );
-              }
-
+              };
               return (
-                <ScrollView
-                  ref={compScrollRef}
-                  horizontal
-                  pagingEnabled
-                  showsHorizontalScrollIndicator={false}
-                  onMomentumScrollEnd={(e: NativeSyntheticEvent<NativeScrollEvent>) => {
-                    const x = e.nativeEvent.contentOffset.x;
-                    const slideWidth = windowWidth;
-                    const index = Math.round(x / slideWidth);
-                    const comp = compListFiltered[index];
-                    if (comp) setSelectedCompId(comp.id);
-                  }}
-                  contentContainerStyle={{ flexDirection: 'row' }}
-                  style={{ marginHorizontal: -theme.spacing.md, marginBottom: theme.spacing.sm }}
-                >
-                  {compListFiltered.map((c) => (
-                    <View key={c.id} style={[styles.compSlide, { width: windowWidth }]}>
-                      {renderStatsCard(c)}
+                <View>
+                  <TouchableOpacity
+                    style={styles.compDropdownTrigger}
+                    onPress={() => multi && setCompDropdownOpen(true)}
+                    activeOpacity={multi ? 0.75 : 1}
+                    disabled={!multi}
+                  >
+                    <View style={styles.compDropdownTextBlock}>
+                      <Text style={styles.compMeetingNameAbove} numberOfLines={2}>
+                        {displayName}
+                      </Text>
+                      <Text style={styles.compMetaAbove}>{metaLine(effectiveCompId)}</Text>
                     </View>
-                  ))}
-                </ScrollView>
+                    {multi ? <Text style={styles.compDropdownChevron}>▼</Text> : null}
+                  </TouchableOpacity>
+
+                  {multi ? (
+                    <Modal
+                      visible={compDropdownOpen}
+                      transparent
+                      animationType="fade"
+                      onRequestClose={() => setCompDropdownOpen(false)}
+                    >
+                      <Pressable style={styles.dropdownOverlay} onPress={() => setCompDropdownOpen(false)}>
+                        <Pressable style={styles.dropdownContent} onPress={(e) => e.stopPropagation()}>
+                          {compListFiltered.map((opt) => {
+                            const s = summaryByComp?.byComp[opt.id];
+                            const label = s?.name ?? opt.name;
+                            return (
+                              <TouchableOpacity
+                                key={opt.id}
+                                style={[styles.dropdownOption, opt.id === effectiveCompId && styles.dropdownOptionActive]}
+                                onPress={() => {
+                                  setSelectedCompId(opt.id);
+                                  setCompDropdownOpen(false);
+                                }}
+                              >
+                                <Text
+                                  style={[styles.dropdownOptionText, opt.id === effectiveCompId && styles.dropdownOptionTextActive]}
+                                  numberOfLines={2}
+                                >
+                                  {label}
+                                </Text>
+                                <Text style={styles.dropdownOptionMeta}>{metaLine(opt.id)}</Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </Pressable>
+                      </Pressable>
+                    </Modal>
+                  ) : null}
+
+                  {renderStatsBody(selectedRow)}
+                </View>
               );
-            })()}
+            })() : null}
 
             {/* Quick links: hidden on web (leaderboard is in sidebar; selections+results below) */}
             {(!isWeb || isNarrowWeb) && (

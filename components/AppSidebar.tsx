@@ -351,6 +351,13 @@ export function AppSidebar() {
             </TouchableOpacity>
             {accountExpanded && (
               <View style={styles.accountFolderContent}>
+                <TouchableOpacity
+                  style={styles.accountFolderItem}
+                  onPress={() => goTo('/(app)/change-password')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.menuButtonText}>Change password</Text>
+                </TouchableOpacity>
                 {role !== 'Admin' && (
                   <TouchableOpacity
                     style={styles.accountFolderItem}
