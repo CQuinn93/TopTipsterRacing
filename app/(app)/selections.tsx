@@ -29,6 +29,7 @@ import type { Race } from '@/types/races';
 import { formatDayDate, isSelectionClosed, isCompletedMoreThanOneDay, formatTimeUntilDeadline, getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { getAvailableRacesForUser } from '@/lib/availableRacesCache';
 import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
+import { useNarrowWebCompact, cfs } from '@/lib/narrowWebTypography';
 
 type RaceDay = {
   id: string;
@@ -41,6 +42,7 @@ const SELECTIONS_VISIT_REFRESH_COOLDOWN_MS = 30 * 1000;
 
 export default function SelectionsScreen() {
   const theme = useTheme();
+  const compact = useNarrowWebCompact();
   const { userId } = useAuth();
   const router = useRouter();
   const params = useLocalSearchParams<{ competitionId?: string; raceDate?: string }>();
@@ -447,9 +449,18 @@ export default function SelectionsScreen() {
     () =>
       StyleSheet.create({
         container: { flex: 1, backgroundColor: theme.colors.background },
-        content: { padding: theme.spacing.lg, paddingBottom: theme.spacing.xxl },
-        centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background, padding: theme.spacing.lg },
-        text: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.textSecondary, textAlign: 'center' },
+        content: {
+          padding: compact ? theme.spacing.md : theme.spacing.lg,
+          paddingBottom: theme.spacing.xxl,
+        },
+        centered: {
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          backgroundColor: theme.colors.background,
+          padding: compact ? theme.spacing.md : theme.spacing.lg,
+        },
+        text: { fontFamily: theme.fontFamily.regular, fontSize: cfs(16, compact), color: theme.colors.textSecondary, textAlign: 'center' },
         linkButton: {
           marginTop: theme.spacing.xl,
           paddingVertical: theme.spacing.sm,
@@ -457,13 +468,13 @@ export default function SelectionsScreen() {
         },
         linkButtonText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
+          fontSize: cfs(14, compact),
           color: theme.colors.accent,
           textDecorationLine: 'underline',
         },
         sectionTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 18,
+          fontSize: cfs(18, compact),
           color: theme.colors.textSecondary,
         },
         pickingHeaderRow: {
@@ -479,7 +490,7 @@ export default function SelectionsScreen() {
         },
         backToSelectionsButtonText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 15,
+          fontSize: cfs(15, compact),
           color: theme.colors.accent,
           fontWeight: '500',
         },
@@ -499,14 +510,14 @@ export default function SelectionsScreen() {
         },
         emptyStateTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 17,
+          fontSize: cfs(17, compact),
           fontWeight: '600',
           color: theme.colors.text,
           marginBottom: theme.spacing.sm,
         },
         emptyStateText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
+          fontSize: cfs(14, compact),
           color: theme.colors.textMuted,
           textAlign: 'center',
           marginBottom: theme.spacing.md,
@@ -519,7 +530,7 @@ export default function SelectionsScreen() {
         },
         emptyStateButtonText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
+          fontSize: cfs(14, compact),
           color: theme.colors.black,
           fontWeight: '600',
         },
@@ -535,7 +546,7 @@ export default function SelectionsScreen() {
         },
         lockedNoteText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
+          fontSize: cfs(16, compact),
           color: theme.colors.text,
           textAlign: 'center',
         },
@@ -547,7 +558,7 @@ export default function SelectionsScreen() {
         },
         compTab: {
           flex: 1,
-          paddingVertical: theme.spacing.sm,
+          paddingVertical: compact ? theme.spacing.xs : theme.spacing.sm,
           paddingHorizontal: theme.spacing.sm,
           borderRadius: theme.radius.sm,
           backgroundColor: theme.colors.surface,
@@ -559,7 +570,7 @@ export default function SelectionsScreen() {
         },
         compTabText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: cfs(13, compact),
           color: theme.colors.textSecondary,
         },
         compTabTextActive: {
@@ -568,24 +579,24 @@ export default function SelectionsScreen() {
         },
         makePicksTabHint: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
+          fontSize: cfs(11, compact),
           color: theme.colors.textMuted,
           marginBottom: theme.spacing.sm,
-          lineHeight: 15,
+          lineHeight: compact ? 14 : 15,
         },
         makePicksSection: {
           marginBottom: theme.spacing.lg,
         },
         makePicksSectionTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
+          fontSize: cfs(14, compact),
           fontWeight: '600',
           color: theme.colors.text,
           marginBottom: 4,
         },
         makePicksSectionSubtitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           color: theme.colors.textMuted,
           marginBottom: theme.spacing.sm,
         },
@@ -616,25 +627,25 @@ export default function SelectionsScreen() {
         raceCardRight: { alignItems: 'flex-end', marginLeft: theme.spacing.sm },
         raceCardTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 15,
+          fontSize: cfs(15, compact),
           fontWeight: '600',
           color: theme.colors.text,
         },
         raceCardMeta: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
+          fontSize: cfs(11, compact),
           color: theme.colors.textMuted,
           marginTop: 2,
         },
         raceCardStatus: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
+          fontSize: cfs(11, compact),
           color: theme.colors.accent,
           marginTop: 2,
         },
         raceCardStatusClosed: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
+          fontSize: cfs(11, compact),
           color: '#b91c1c',
           marginTop: 2,
           fontStyle: 'italic',
@@ -642,12 +653,12 @@ export default function SelectionsScreen() {
         timeBlock: { alignItems: 'flex-end' },
         timeLabel: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 10,
+          fontSize: cfs(10, compact),
           color: theme.colors.textMuted,
         },
         timeValue: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           fontWeight: '600',
           color: theme.colors.accent,
           marginTop: 2,
@@ -661,7 +672,7 @@ export default function SelectionsScreen() {
         lockInBtnDisabled: { opacity: 0.7 },
         lockInBtnText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           color: theme.colors.black,
           fontWeight: '600',
         },
@@ -675,7 +686,7 @@ export default function SelectionsScreen() {
           justifyContent: 'space-between',
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.sm,
-          paddingVertical: theme.spacing.md,
+          paddingVertical: compact ? theme.spacing.sm : theme.spacing.md,
           paddingHorizontal: theme.spacing.lg,
           borderWidth: 1,
           borderColor: theme.colors.border,
@@ -683,12 +694,12 @@ export default function SelectionsScreen() {
         },
         courseDropdownText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
+          fontSize: cfs(14, compact),
           color: theme.colors.text,
         },
         courseDropdownChevron: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           color: theme.colors.textMuted,
         },
         dropdownOverlay: {
@@ -716,7 +727,7 @@ export default function SelectionsScreen() {
         },
         dropdownOptionText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 15,
+          fontSize: cfs(15, compact),
           color: theme.colors.text,
         },
         dropdownOptionTextActive: {
@@ -741,7 +752,7 @@ export default function SelectionsScreen() {
         },
         dayTabText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: cfs(13, compact),
           color: theme.colors.textMuted,
         },
         dayTabTextActive: {
@@ -753,7 +764,7 @@ export default function SelectionsScreen() {
         },
         meetingSectionTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           color: theme.colors.textMuted,
           marginBottom: theme.spacing.sm,
         },
@@ -777,7 +788,7 @@ export default function SelectionsScreen() {
         },
         drawerChevron: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 10,
+          fontSize: cfs(10, compact),
           color: theme.colors.textMuted,
           marginLeft: theme.spacing.xs,
         },
@@ -797,7 +808,7 @@ export default function SelectionsScreen() {
         },
         mySelectionCardTime: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
+          fontSize: cfs(11, compact),
           color: theme.colors.textMuted,
           width: 36,
         },
@@ -807,19 +818,19 @@ export default function SelectionsScreen() {
         },
         mySelectionCardPick: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: cfs(13, compact),
           fontWeight: '600',
           color: theme.colors.text,
         },
         mySelectionCardJockey: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
+          fontSize: cfs(11, compact),
           color: theme.colors.textMuted,
           marginTop: 2,
         },
         mySelectionCardPending: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
+          fontSize: cfs(11, compact),
           color: theme.colors.textMuted,
         },
         wplBadge: {
@@ -830,7 +841,7 @@ export default function SelectionsScreen() {
         wplWon: { backgroundColor: 'rgba(34, 197, 94, 0.2)' },
         wplPlace: { backgroundColor: 'rgba(234, 179, 8, 0.2)' },
         wplLost: { backgroundColor: 'rgba(239, 68, 68, 0.15)' },
-        wplBadgeText: { fontFamily: theme.fontFamily.regular, fontSize: 11 },
+        wplBadgeText: { fontFamily: theme.fontFamily.regular, fontSize: cfs(11, compact) },
         wplWonText: { color: '#166534', fontWeight: '600' },
         wplPlaceText: { color: '#a16207' },
         wplLostText: { color: '#991b1b' },
@@ -852,20 +863,20 @@ export default function SelectionsScreen() {
         },
         modalTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
+          fontSize: cfs(16, compact),
           fontWeight: '600',
           color: theme.colors.text,
           marginBottom: theme.spacing.xs,
         },
         modalSubtitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           color: theme.colors.textMuted,
           marginBottom: theme.spacing.md,
         },
         modalSectionLabel: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           color: theme.colors.textMuted,
           marginBottom: theme.spacing.sm,
         },
@@ -893,11 +904,11 @@ export default function SelectionsScreen() {
           justifyContent: 'space-between',
           minWidth: 0,
         },
-        othersCardName: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.text },
+        othersCardName: { fontFamily: theme.fontFamily.regular, fontSize: cfs(12, compact), color: theme.colors.text },
         othersCardNameBold: { fontWeight: '600' },
         othersCardPick: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           color: theme.colors.textSecondary,
           marginLeft: theme.spacing.sm,
           flex: 1,
@@ -919,7 +930,7 @@ export default function SelectionsScreen() {
         },
         othersDrawerLabel: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           color: theme.colors.textMuted,
           marginBottom: theme.spacing.xs,
         },
@@ -928,7 +939,7 @@ export default function SelectionsScreen() {
           paddingVertical: theme.spacing.sm,
           alignItems: 'center',
         },
-        modalCloseText: { fontFamily: theme.fontFamily.regular, fontSize: 16, color: theme.colors.accent },
+        modalCloseText: { fontFamily: theme.fontFamily.regular, fontSize: cfs(16, compact), color: theme.colors.accent },
         pickingDayTabsRow: {
           flexDirection: 'row',
           width: '100%',
@@ -947,7 +958,7 @@ export default function SelectionsScreen() {
         },
         pickingDayTabText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: cfs(13, compact),
           color: theme.colors.textMuted,
         },
         pickingDayTabTextActive: {
@@ -959,7 +970,7 @@ export default function SelectionsScreen() {
         },
         pickingRaceCountText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: cfs(13, compact),
           color: theme.colors.textMuted,
         },
         pickingRaceTabsRow: {
@@ -983,7 +994,7 @@ export default function SelectionsScreen() {
         },
         pickingRaceTabText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: cfs(13, compact),
           color: theme.colors.textMuted,
         },
         pickingRaceTabTextActive: {
@@ -996,7 +1007,7 @@ export default function SelectionsScreen() {
         pickingRunnerList: { gap: theme.spacing.xs, marginBottom: theme.spacing.lg },
         pickingSelectFavLabel: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           color: theme.colors.textMuted,
           marginBottom: theme.spacing.xs,
         },
@@ -1008,7 +1019,7 @@ export default function SelectionsScreen() {
         },
         pickingOrSelectLabel: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           color: theme.colors.textMuted,
           marginBottom: theme.spacing.xs,
         },
@@ -1046,7 +1057,7 @@ export default function SelectionsScreen() {
         pickingRunnerCenter: { flex: 1, minWidth: 0 },
         pickingRunnerName: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: cfs(13, compact),
           fontWeight: '600',
           color: theme.colors.text,
         },
@@ -1055,7 +1066,7 @@ export default function SelectionsScreen() {
         },
         pickingRunnerJockey: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
+          fontSize: cfs(11, compact),
           color: theme.colors.textMuted,
           marginTop: 2,
         },
@@ -1076,7 +1087,7 @@ export default function SelectionsScreen() {
         },
         pickingRunnerNumberText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           fontWeight: '600',
           color: theme.colors.text,
         },
@@ -1085,7 +1096,7 @@ export default function SelectionsScreen() {
         },
         pickingRunnerCheck: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
+          fontSize: cfs(14, compact),
           fontWeight: '700',
           color: theme.colors.accent,
         },
@@ -1094,7 +1105,7 @@ export default function SelectionsScreen() {
         },
         pickingRunnerSelect: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: cfs(12, compact),
           color: theme.colors.textMuted,
         },
         closedBanner: {
@@ -1107,14 +1118,14 @@ export default function SelectionsScreen() {
         },
         closedBannerText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: cfs(13, compact),
           color: '#b91c1c',
         },
-        muted: { fontFamily: theme.fontFamily.regular, fontSize: 14, color: theme.colors.textMuted, marginBottom: theme.spacing.lg },
+        muted: { fontFamily: theme.fontFamily.regular, fontSize: cfs(14, compact), color: theme.colors.textMuted, marginBottom: theme.spacing.lg },
         buttonDisabled: { opacity: 0.7 },
         saveButtonText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
+          fontSize: cfs(16, compact),
           color: theme.colors.black,
           fontWeight: '600',
         },
@@ -1136,7 +1147,7 @@ export default function SelectionsScreen() {
         },
         selectionToastTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
+          fontSize: cfs(16, compact),
           fontWeight: '600',
           color: theme.colors.textMuted,
           marginBottom: theme.spacing.sm,
@@ -1154,7 +1165,7 @@ export default function SelectionsScreen() {
         },
         selectionToastChoiceText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
+          fontSize: cfs(14, compact),
           fontWeight: '600',
           color: theme.colors.white,
         },
@@ -1180,7 +1191,7 @@ export default function SelectionsScreen() {
         },
         selectionToastActionText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
+          fontSize: cfs(13, compact),
           color: theme.colors.text,
         },
         selectionToastActionTextPrimary: {
@@ -1188,7 +1199,7 @@ export default function SelectionsScreen() {
           fontWeight: '600',
         },
       }),
-    [theme]
+    [theme, compact]
   );
 
   if (!competitionId) {

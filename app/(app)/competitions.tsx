@@ -20,6 +20,7 @@ import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
 import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
 import { getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
+import { useNarrowWebCompact, cfs } from '@/lib/narrowWebTypography';
 
 type UserCompetition = {
   competition_id: string;
@@ -40,6 +41,7 @@ type PendingCompetition = {
 
 export default function MyCompetitionsScreen() {
   const theme = useTheme();
+  const compact = useNarrowWebCompact();
   const { userId } = useAuth();
   const params = useLocalSearchParams<{ join?: string }>();
   const [list, setList] = useState<UserCompetition[]>([]);
@@ -254,16 +256,19 @@ export default function MyCompetitionsScreen() {
     const cardBorderWidth = isLight ? 2 : 1;
     return StyleSheet.create({
       container: { flex: 1, backgroundColor: theme.colors.background },
-      content: { padding: theme.spacing.md, paddingBottom: theme.spacing.xxl },
+      content: {
+        padding: compact ? theme.spacing.sm : theme.spacing.md,
+        paddingBottom: theme.spacing.xxl,
+      },
       title: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 20,
+        fontSize: cfs(20, compact),
         color: theme.colors.text,
         marginBottom: theme.spacing.xs,
       },
       subtitle: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: cfs(13, compact),
         color: theme.colors.textSecondary,
         marginBottom: theme.spacing.sm,
       },
@@ -279,12 +284,12 @@ export default function MyCompetitionsScreen() {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingVertical: theme.spacing.md,
+        paddingVertical: compact ? theme.spacing.sm : theme.spacing.md,
         paddingHorizontal: theme.spacing.lg,
       },
       joinHeaderText: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 16,
+        fontSize: cfs(16, compact),
         fontWeight: '600',
         color: theme.colors.text,
         flex: 1,
@@ -297,13 +302,13 @@ export default function MyCompetitionsScreen() {
       },
       joinHint: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 12,
+        fontSize: cfs(12, compact),
         color: theme.colors.textMuted,
         marginBottom: theme.spacing.sm,
       },
       joinInput: {
         fontFamily: theme.fontFamily.input,
-        fontSize: 16,
+        fontSize: cfs(16, compact),
         color: theme.colors.text,
         backgroundColor: theme.colors.background,
         borderWidth: 1,
@@ -315,7 +320,7 @@ export default function MyCompetitionsScreen() {
       },
       joinDisplayLabel: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: cfs(13, compact),
         color: theme.colors.textSecondary,
         marginBottom: theme.spacing.sm,
       },
@@ -329,20 +334,20 @@ export default function MyCompetitionsScreen() {
       joinButtonDisabled: { opacity: 0.7 },
       joinButtonText: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 15,
+        fontSize: cfs(15, compact),
         color: theme.colors.background === '#fafafa' ? theme.colors.black : theme.colors.white,
         fontWeight: '600',
       },
       sectionTitle: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 15,
+        fontSize: cfs(15, compact),
         color: theme.colors.accent,
         marginTop: theme.spacing.md,
         marginBottom: theme.spacing.xs,
       },
       sectionSubtitle: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 11,
+        fontSize: cfs(11, compact),
         color: theme.colors.textMuted,
         marginBottom: theme.spacing.xs,
       },
@@ -351,14 +356,14 @@ export default function MyCompetitionsScreen() {
       },
       pendingBadge: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 12,
+        fontSize: cfs(12, compact),
         color: theme.colors.textMuted,
         marginTop: theme.spacing.xs,
         fontStyle: 'italic',
       },
       emptyMessage: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: cfs(13, compact),
         color: theme.colors.textMuted,
         textAlign: 'center',
         marginTop: theme.spacing.sm,
@@ -374,16 +379,16 @@ export default function MyCompetitionsScreen() {
       },
       cardTitle: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 16,
+        fontSize: cfs(16, compact),
         color: theme.colors.text,
       },
-      cardMeta: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textMuted, marginTop: theme.spacing.xs },
+      cardMeta: { fontFamily: theme.fontFamily.regular, fontSize: cfs(12, compact), color: theme.colors.textMuted, marginTop: theme.spacing.xs },
       cardFooter: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm, marginTop: theme.spacing.sm, flexWrap: 'wrap' },
-      cardStatus: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.accent },
-      cardPosition: { fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textSecondary },
+      cardStatus: { fontFamily: theme.fontFamily.regular, fontSize: cfs(12, compact), color: theme.colors.accent },
+      cardPosition: { fontFamily: theme.fontFamily.regular, fontSize: cfs(12, compact), color: theme.colors.textSecondary },
       tapHint: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 12,
+        fontSize: cfs(12, compact),
         color: theme.colors.textMuted,
         marginTop: theme.spacing.sm,
       },
@@ -395,7 +400,7 @@ export default function MyCompetitionsScreen() {
       },
       compTab: {
         flex: 1,
-        paddingVertical: theme.spacing.sm,
+        paddingVertical: compact ? theme.spacing.xs : theme.spacing.sm,
         paddingHorizontal: theme.spacing.sm,
         borderRadius: theme.radius.sm,
         backgroundColor: theme.colors.surface,
@@ -407,7 +412,7 @@ export default function MyCompetitionsScreen() {
       },
       compTabText: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: cfs(13, compact),
         color: theme.colors.textSecondary,
       },
       compTabTextActive: {
@@ -415,7 +420,7 @@ export default function MyCompetitionsScreen() {
         fontWeight: '600',
       },
     });
-  }, [theme]);
+  }, [theme, compact]);
 
   return (
     <ScrollView

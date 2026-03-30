@@ -21,6 +21,7 @@ import { isSelectionClosed } from '@/lib/appUtils';
 import { getLatestResultsForUser } from '@/lib/latestResultsCache';
 import type { MeetingResults, RaceResultTemplate } from '@/lib/resultsTemplateForUser';
 import { useRealtimeRaces } from '@/lib/useRealtimeRaces';
+import { useNarrowWebCompact, cfs } from '@/lib/narrowWebTypography';
 
 const RESULTS_COMP_IDS_TTL_MS = 60 * 1000; // 1 min – avoid refetching competition_participants on every load
 const RESULTS_VISIT_REFRESH_COOLDOWN_MS = 30 * 1000; // avoid repeat refreshes on rapid revisits
@@ -28,6 +29,7 @@ let resultsCompIdsCache: { userId: string; compIds: string[]; fetchedAt: number 
 
 export default function ResultsScreen() {
   const theme = useTheme();
+  const compact = useNarrowWebCompact();
   const { userId } = useAuth();
   const [compIds, setCompIds] = useState<string[]>([]);
   const [meetingResults, setMeetingResults] = useState<MeetingResults[]>([]);
@@ -180,24 +182,27 @@ export default function ResultsScreen() {
     const cardBorderWidth = isLight ? 2 : 1;
     return StyleSheet.create({
       container: { flex: 1, backgroundColor: theme.colors.background },
-      content: { padding: theme.spacing.md, paddingBottom: theme.spacing.xxl },
+      content: {
+        padding: compact ? theme.spacing.sm : theme.spacing.md,
+        paddingBottom: theme.spacing.xxl,
+      },
       centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background },
       title: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 20,
+        fontSize: cfs(20, compact),
         fontWeight: '600',
         color: theme.colors.text,
         marginBottom: theme.spacing.xs,
       },
       subtitle: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: cfs(13, compact),
         color: theme.colors.textMuted,
         marginBottom: theme.spacing.md,
       },
       muted: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 14,
+        fontSize: cfs(14, compact),
         color: theme.colors.textMuted,
       },
       groupSection: {
@@ -205,7 +210,7 @@ export default function ResultsScreen() {
       },
       groupHeader: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 15,
+        fontSize: cfs(15, compact),
         fontWeight: '600',
         color: theme.colors.accent,
         marginBottom: theme.spacing.xs,
@@ -218,7 +223,7 @@ export default function ResultsScreen() {
       },
       dateFilterLabel: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: cfs(13, compact),
         color: theme.colors.textMuted,
         marginRight: theme.spacing.xs,
       },
@@ -230,8 +235,8 @@ export default function ResultsScreen() {
         paddingVertical: theme.spacing.xs,
       },
       datePill: {
-        paddingVertical: theme.spacing.sm,
-        paddingHorizontal: theme.spacing.md,
+        paddingVertical: compact ? theme.spacing.xs : theme.spacing.sm,
+        paddingHorizontal: compact ? theme.spacing.sm : theme.spacing.md,
         borderRadius: theme.radius.lg,
         backgroundColor: theme.colors.surface,
         borderWidth: 1,
@@ -243,7 +248,7 @@ export default function ResultsScreen() {
       },
       datePillText: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 14,
+        fontSize: cfs(14, compact),
         color: theme.colors.text,
       },
       datePillTextSelected: {
@@ -258,8 +263,8 @@ export default function ResultsScreen() {
         gap: theme.spacing.sm,
       },
       raceTab: {
-        paddingVertical: theme.spacing.sm,
-        paddingHorizontal: theme.spacing.md,
+        paddingVertical: compact ? theme.spacing.xs : theme.spacing.sm,
+        paddingHorizontal: compact ? theme.spacing.sm : theme.spacing.md,
         borderRadius: theme.radius.lg,
         borderWidth: 2,
         borderColor: theme.colors.border,
@@ -271,7 +276,7 @@ export default function ResultsScreen() {
       },
       raceTabText: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 15,
+        fontSize: cfs(15, compact),
         color: theme.colors.text,
       },
       raceTabTextActive: {
@@ -291,14 +296,14 @@ export default function ResultsScreen() {
       },
       resultCardRaceName: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 16,
+        fontSize: cfs(16, compact),
         color: theme.colors.text,
         fontWeight: '600',
         marginBottom: theme.spacing.xs,
       },
       resultCardTime: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 12,
+        fontSize: cfs(12, compact),
         color: theme.colors.textMuted,
         marginBottom: theme.spacing.sm,
       },
@@ -321,7 +326,7 @@ export default function ResultsScreen() {
       },
       runnerCardChevron: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 10,
+        fontSize: cfs(10, compact),
         color: theme.colors.textMuted,
         marginLeft: theme.spacing.xs,
       },
@@ -348,12 +353,12 @@ export default function ResultsScreen() {
       },
       runnerCardPointsLabel: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 12,
+        fontSize: cfs(12, compact),
         color: theme.colors.textMuted,
       },
       runnerCardPointsValue: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: cfs(13, compact),
         fontWeight: '600',
         color: theme.colors.accent,
       },
@@ -369,7 +374,7 @@ export default function ResultsScreen() {
       },
       runnerCardPositionBadge: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 12,
+        fontSize: cfs(12, compact),
         fontWeight: '700',
         color: theme.colors.textSecondary,
       },
@@ -377,13 +382,13 @@ export default function ResultsScreen() {
       runnerCardCenter: { flex: 1, minWidth: 0, marginLeft: theme.spacing.xs },
       runnerCardName: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 14,
+        fontSize: cfs(14, compact),
         color: theme.colors.text,
         fontWeight: '500',
       },
       runnerCardTotalPts: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: cfs(13, compact),
         fontWeight: '600',
         color: theme.colors.accent,
         marginLeft: theme.spacing.xs,
@@ -398,7 +403,7 @@ export default function ResultsScreen() {
       },
       awaitingText: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: cfs(13, compact),
         color: theme.colors.textMuted,
         textAlign: 'center',
       },
@@ -408,7 +413,7 @@ export default function ResultsScreen() {
       },
       yourSelectionLabel: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 12,
+        fontSize: cfs(12, compact),
         color: theme.colors.textMuted,
         marginBottom: theme.spacing.xs,
       },
@@ -420,19 +425,19 @@ export default function ResultsScreen() {
       },
       yourSelectionCardText: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 13,
+        fontSize: cfs(13, compact),
         color: theme.colors.white,
         fontWeight: '600',
         textAlign: 'center',
       },
       resultSectionLabel: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 12,
+        fontSize: cfs(12, compact),
         color: theme.colors.textMuted,
         marginBottom: theme.spacing.xs,
       },
     });
-  }, [theme]);
+  }, [theme, compact]);
 
   if (loading && meetingResults.length === 0) {
     return (
