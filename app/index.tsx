@@ -33,5 +33,5 @@ export default function Index() {
     return <Redirect href="/(auth)/login" />;
   }
 
-  return <Redirect href="/(app)" />;
+  return <Redirect href="/competition-hub" />;
 }

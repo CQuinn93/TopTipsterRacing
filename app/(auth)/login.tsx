@@ -262,7 +262,7 @@ export default function LoginScreen() {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         if (error) throw error;
         resetWebZoomChrome();
-        router.replace('/(app)');
+        router.replace('/competition-hub');
       }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Something went wrong';

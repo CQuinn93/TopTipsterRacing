@@ -124,6 +124,13 @@ function AppTabs() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="world-cup"
+        options={{
+          title: 'World Cup',
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

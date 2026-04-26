@@ -324,6 +324,15 @@ export function AppSidebar() {
               <Text style={styles.menuButtonText}>Reminders</Text>
               <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
             </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuButton}
+              onPress={() => goTo('/competition-hub')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="swap-horizontal-outline" size={22} color={theme.colors.accent} />
+              <Text style={styles.menuButtonText}>Switch competition</Text>
+              <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+            </TouchableOpacity>
             {role === 'Admin' && (
               <TouchableOpacity
                 style={styles.menuButton}
