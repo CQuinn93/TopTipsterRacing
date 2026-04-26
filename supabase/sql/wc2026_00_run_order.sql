@@ -1,0 +1,27 @@
+-- World Cup 2026 SQL run order (shared Top Tipster database)
+-- Run these files in order in Supabase SQL editor.
+
+-- 1) Core schema + RLS
+--    wc2026_schema_core.sql
+--
+-- 2) Compatibility objects required by legacy WC scripts
+--    wc2026_01_legacy_compat.sql
+--
+-- 3) Seed lookup data (stages, groups, venues, teams)
+--    wc2026_02_seed_data.sql
+--
+-- 4) Assign teams into groups (needed before generated group fixtures)
+--    wc2026_03_group_assignments.sql
+--
+-- 5) Generate all group-stage fixtures (72)
+--    wc2026_04_all_group_stage_matches.sql
+--
+-- 6) Optional prediction migration helper (safe to run)
+--    wc2026_05_add_match_number_to_predictions.sql
+--
+-- 7) Optional diagnostics if something looks off
+--    wc2026_06_diagnose_missing_matches.sql
+
+-- Notes:
+-- - These scripts target wc2026 schema tables.
+-- - Existing Racing tables in public schema are not touched.

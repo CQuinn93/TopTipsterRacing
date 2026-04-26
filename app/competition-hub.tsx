@@ -89,7 +89,7 @@ export default function CompetitionHubScreen() {
 
       <TouchableOpacity
         style={styles.card}
-        onPress={() => router.replace('/(app)/world-cup')}
+        onPress={() => router.replace('/(wc2026)')}
         activeOpacity={0.85}
       >
         <View style={styles.cardLeft}>

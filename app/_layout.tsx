@@ -30,6 +30,7 @@ function RootLayoutContent() {
         <Stack.Screen name="competition-hub" />
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(app)" />
+        <Stack.Screen name="(wc2026)" />
       </Stack>
     </>
   );
