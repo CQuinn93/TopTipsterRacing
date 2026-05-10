@@ -37,6 +37,9 @@ export default function AntePostSelectionsScreen() {
   const [isLocked, setIsLocked] = useState(false);
   const fixturesScrollViewRef = useRef<ScrollView>(null);
   const dbPredictionsLoadedRef = useRef(false);
+  /** Set true after the first getFixtures() attempt finishes (success or error). */
+  const fixturesFetchCompletedRef = useRef(false);
+  const [fixturesError, setFixturesError] = useState<string | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -59,9 +62,13 @@ export default function AntePostSelectionsScreen() {
 
   useEffect(() => {
     // Load group data when fixtures are available AND when group changes
-    // This ensures initial group loads properly when fixtures are first loaded
     if (allFixtures.length > 0) {
       loadGroupData();
+    } else if (fixturesFetchCompletedRef.current) {
+      // Important: when the DB returns zero matches, loadGroupData never ran — without this,
+      // `loading` stayed true forever and the screen looked stuck on "Loading...".
+      setFixtures([]);
+      setLoading(false);
     }
   }, [activeGroup, allFixtures]);
 
@@ -84,10 +91,17 @@ export default function AntePostSelectionsScreen() {
       // Only database call - get all fixtures once at startup
       const all = await getFixtures();
       setAllFixtures(all);
+      setFixturesError(null);
       // Group data will be loaded automatically by useEffect when allFixtures is set
     } catch (error) {
       console.error('Error loading all fixtures:', error);
+      setAllFixtures([]);
+      const message =
+        error instanceof Error ? error.message : 'Could not load fixtures from the server.';
+      setFixturesError(message);
       setLoading(false);
+    } finally {
+      fixturesFetchCompletedRef.current = true;
     }
   };
 
@@ -595,6 +609,21 @@ export default function AntePostSelectionsScreen() {
           <View style={styles.loadingContainer}>
             <Text style={styles.loadingText}>Loading...</Text>
           </View>
+        ) : allFixtures.length === 0 ? (
+          <View style={styles.emptyStateContainer}>
+            <Text style={styles.emptyStateTitle}>No group fixtures loaded</Text>
+            {fixturesError ? (
+              <Text style={styles.emptyStateBody}>{fixturesError}</Text>
+            ) : (
+              <Text style={styles.emptyStateBody}>
+                The app loads group-stage matches from your Supabase project (schema wc2026, table matches).
+                {'\n\n'}
+                If this is unexpected: run the WC2026 SQL seeds in order (see supabase/sql/wc2026_00_run_order.sql),
+                ensure the wc2026 schema is exposed in Supabase API settings, and sign in (RLS requires an
+                authenticated session to read matches).
+              </Text>
+            )}
+          </View>
         ) : (
           <KeyboardAvoidingView
             style={styles.keyboardAvoidingView}
@@ -812,6 +841,26 @@ const styles = StyleSheet.create({
   loadingText: {
     color: DesignColors.text,
     fontSize: 16,
+  },
+  emptyStateContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+  emptyStateTitle: {
+    color: DesignColors.text,
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  emptyStateBody: {
+    color: DesignColors.text,
+    fontSize: 14,
+    lineHeight: 22,
+    opacity: 0.85,
+    textAlign: 'left',
   },
   saveGroupButton: {
     backgroundColor: DesignColors.primary,

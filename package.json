@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web",
+    "start": "node ./scripts/expo-start.cjs",
+    "start:offline": "expo start --offline",
+    "start:expo": "expo start",
+    "android": "node ./scripts/expo-start.cjs start --android",
+    "ios": "node ./scripts/expo-start.cjs start --ios",
+    "web": "node ./scripts/expo-start.cjs start --web",
     "build:web": "expo export --platform web"
   },
   "dependencies": {
