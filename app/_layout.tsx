@@ -1,6 +1,6 @@
 import '../global.css';
 import { useEffect } from 'react';
-import { Platform } from 'react-native';
+import { Platform, Text, TextInput } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -45,6 +45,20 @@ export default function RootLayout() {
   });
 
   const isWeb = Platform.OS === 'web';
+
+  useEffect(() => {
+    if (isWeb) {
+      // Keep web text sizing consistent with app styles (avoid browser/OS inflation).
+      (Text as typeof Text & { defaultProps?: { allowFontScaling?: boolean } }).defaultProps = {
+        ...((Text as typeof Text & { defaultProps?: { allowFontScaling?: boolean } }).defaultProps ?? {}),
+        allowFontScaling: false,
+      };
+      (TextInput as typeof TextInput & { defaultProps?: { allowFontScaling?: boolean } }).defaultProps = {
+        ...((TextInput as typeof TextInput & { defaultProps?: { allowFontScaling?: boolean } }).defaultProps ?? {}),
+        allowFontScaling: false,
+      };
+    }
+  }, [isWeb]);
 
   useEffect(() => {
     if (isWeb || fontsLoaded || fontError) {
