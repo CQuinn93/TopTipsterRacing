@@ -43,16 +43,29 @@ export default function WorldCupTabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'World Cup',
-          tabBarLabel: 'Home',
+          title: 'Home',
           tabBarIcon: ({ color, size }) => <Ionicons name="football-outline" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="selections"
+        options={{
+          title: 'My selections',
+          tabBarIcon: ({ color, size }) => <Ionicons name="list" size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="competitions"
+        options={{
+          title: 'My Competitions',
+          tabBarIcon: ({ color, size }) => <Ionicons name="medal" size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="fixtures"
         options={{
           title: 'Fixtures',
-          tabBarIcon: ({ color, size }) => <Ionicons name="calendar-outline" size={size} color={color} />,
+          href: null,
         }}
       />
     </Tabs>
