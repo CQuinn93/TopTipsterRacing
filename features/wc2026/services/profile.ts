@@ -1,5 +1,8 @@
 import { supabase } from '@/lib/supabase';
+import type { Database } from '@/types/database';
 import { validateUsername } from '@/features/wc2026/utils/usernameValidation';
+
+type ProfilesInsert = Database['public']['Tables']['profiles']['Insert'];
 
 export interface SharedProfile {
   id: string;
@@ -26,25 +29,25 @@ export const upsertSharedProfileUsername = async (
     .from('profiles')
     .select('id, username')
     .ilike('username', normalizedUsername)
-    .maybeSingle();
+    .maybeSingle<{ id: string; username: string | null }>();
 
   if (checkError) throw checkError;
   if (existingProfile && existingProfile.id !== userId) {
     throw new Error('Username already taken. Please choose another.');
   }
 
+  const payload: ProfilesInsert = {
+    id: userId,
+    username: normalizedUsername,
+    updated_at: new Date().toISOString(),
+  };
+
   const { data, error } = await supabase
     .from('profiles')
-    .upsert(
-      {
-        id: userId,
-        username: normalizedUsername,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        onConflict: 'id',
-      }
-    )
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- matches login.tsx: Supabase infers insert/upsert as never for profiles with current Database generic
+    .upsert(payload as any, {
+      onConflict: 'id',
+    })
     .select('id, username, updated_at')
     .single();
 

@@ -176,3 +176,5 @@ export const getUpcomingFixtures = async (limit = 10): Promise<Match[]> => {
     .sort((a, b) => new Date(a.match_date).getTime() - new Date(b.match_date).getTime())
     .slice(0, limit);
 };
+
+export const refreshFixtures = (): Promise<Match[]> => getFixtures(true);

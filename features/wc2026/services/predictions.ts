@@ -37,6 +37,62 @@ export const getUserPredictions = async (userId: string): Promise<Prediction[]> 
   return data || [];
 };
 
+export const getUserPredictionsForMatch = async (
+  userId: string,
+  matchId: string
+): Promise<{ ante_post: Prediction | null; live: Prediction | null }> => {
+  const { data, error } = await wcSupabase
+    .from('predictions')
+    .select(
+      `
+      *,
+      predicted_winner:teams!predictions_predicted_winner_id_fkey(id, country_code, country_name)
+    `
+    )
+    .eq('user_id', userId)
+    .eq('match_id', matchId);
+
+  if (error) throw error;
+  const rows = (data ?? []) as Prediction[];
+  const ante_post = rows.find((p) => p.prediction_type === 'ante_post') ?? null;
+  const live = rows.find((p) => p.prediction_type === 'live') ?? null;
+  return { ante_post, live };
+};
+
+export const getUserPredictionsByMatchNumber = async (
+  userId: string,
+  matchNumber: number
+): Promise<Prediction[]> => {
+  const { data, error } = await wcSupabase
+    .from('predictions')
+    .select(
+      `
+      *,
+      predicted_winner:teams!predictions_predicted_winner_id_fkey(id, country_code, country_name)
+    `
+    )
+    .eq('user_id', userId)
+    .eq('match_number', matchNumber);
+
+  if (error) throw error;
+  return data || [];
+};
+
+export const hasRoundOf32Predictions = async (userId: string): Promise<boolean> => {
+  const { data, error } = await wcSupabase
+    .from('predictions')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('prediction_type', 'ante_post')
+    .gte('match_number', 73)
+    .lte('match_number', 88)
+    .not('match_number', 'is', null)
+    .limit(1);
+
+  if (error) return false;
+  return (data?.length ?? 0) > 0;
+};
+
 export const upsertPredictionByMatchNumber = async (
   userId: string,
   matchNumber: number,
@@ -73,4 +129,30 @@ export const upsertPredictionByMatchNumber = async (
   if (error) throw error;
   if (!data) throw new Error('No data returned from upsert operation');
   return data;
+};
+
+export const upsertPrediction = async (
+  userId: string,
+  matchId: string,
+  predictionType: 'ante_post' | 'live',
+  homeScore: number | null,
+  awayScore: number | null,
+  predictedWinnerId: string | null = null
+): Promise<Prediction> => {
+  const { data: matchData, error: matchError } = await wcSupabase
+    .from('matches')
+    .select('match_number')
+    .eq('id', matchId)
+    .single();
+
+  if (matchError || !matchData) throw new Error('Match not found');
+  return upsertPredictionByMatchNumber(
+    userId,
+    matchData.match_number as number,
+    predictionType,
+    homeScore,
+    awayScore,
+    predictedWinnerId,
+    matchId
+  );
 };

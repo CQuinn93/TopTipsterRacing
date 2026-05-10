@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { router } from 'expo-router';
+import { wcHref } from '@/features/wc2026/utils/href';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAuth } from '@/contexts/AuthContext';
@@ -169,7 +170,7 @@ export function WorldCupHomeScreen() {
           <Ionicons name="checkmark-circle-outline" size={14} color={theme.colors.accent} />
           <Text style={styles.chipText}>Shared auth with Top Tipster Racing enabled</Text>
         </View>
-        <TouchableOpacity style={styles.button} onPress={() => router.replace('/competition-hub')}>
+        <TouchableOpacity style={styles.button} onPress={() => router.replace(wcHref('/competition-hub'))}>
           <Ionicons name="swap-horizontal-outline" size={18} color={theme.colors.black} />
           <Text style={styles.buttonText}>Switch competition</Text>
         </TouchableOpacity>

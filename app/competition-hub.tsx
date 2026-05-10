@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '@/contexts/ThemeContext';
+import { wcHref } from '@/features/wc2026/utils/href';
 
 export default function CompetitionHubScreen() {
   const theme = useTheme();
@@ -89,7 +90,7 @@ export default function CompetitionHubScreen() {
 
       <TouchableOpacity
         style={styles.card}
-        onPress={() => router.replace('/(wc2026)')}
+        onPress={() => router.replace(wcHref('/(wc2026)/(tabs)'))}
         activeOpacity={0.85}
       >
         <View style={styles.cardLeft}>
