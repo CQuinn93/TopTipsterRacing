@@ -1,6 +1,23 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { wcSupabase } from '@/features/wc2026/lib/supabase';
 
+/** Supabase / PostgREST errors are often plain objects, not `instanceof Error`. */
+function formatLoadError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object') {
+    const o = err as Record<string, unknown>;
+    const parts = [o.message, o.details, o.hint, o.code].filter(
+      (v) => typeof v === 'string' && (v as string).length > 0
+    ) as string[];
+    if (parts.length) return parts.join(' — ');
+  }
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
 export interface Team {
   id: string;
   country_code: string;
@@ -68,6 +85,15 @@ const saveCache = async (fixtures: Match[], version?: string) => {
   if (version) await AsyncStorage.setItem(CACHE_VERSION_KEY, version);
 };
 
+/** Cache is optional; failures must not break loading fixtures from the DB. */
+const saveCacheSafe = async (fixtures: Match[], version?: string) => {
+  try {
+    await saveCache(fixtures, version);
+  } catch (e) {
+    console.warn('[wc2026] Fixture cache write failed (continuing without cache):', formatLoadError(e));
+  }
+};
+
 const loadCache = async (): Promise<Match[] | null> => {
   const [cachedData, cacheTimestamp] = await AsyncStorage.multiGet([CACHE_KEY, CACHE_TIMESTAMP_KEY]).then(
     (pairs) => [pairs[0]?.[1], pairs[1]?.[1]]
@@ -105,7 +131,7 @@ const fetchFixturesFromDatabase = async (): Promise<Match[]> => {
     .order('match_date', { ascending: true })
     .order('match_number', { ascending: true });
 
-  if (matchesError) throw matchesError;
+  if (matchesError) throw new Error(formatLoadError(matchesError));
   if (!matches || matches.length === 0) return [];
 
   const teamIds = new Set<string>();
@@ -121,12 +147,29 @@ const fetchFixturesFromDatabase = async (): Promise<Match[]> => {
     if (match.tournament_stage_id) stageIds.add(match.tournament_stage_id);
   });
 
+  const teamIdList = Array.from(teamIds);
+  const venueIdList = Array.from(venueIds);
+  const groupIdList = Array.from(groupIds);
+  const stageIdList = Array.from(stageIds);
+
   const [teamsResult, venuesResult, groupsResult, stagesResult] = await Promise.all([
-    wcSupabase.from('teams').select('id, country_code, country_name, confederation, fifa_ranking').in('id', Array.from(teamIds)),
-    wcSupabase.from('venues').select('id, name, city, country, capacity').in('id', Array.from(venueIds)),
-    wcSupabase.from('groups').select('id, group_name').in('id', Array.from(groupIds)),
-    wcSupabase.from('tournament_stages').select('id, stage_name, stage_order, is_knockout').in('id', Array.from(stageIds)),
+    teamIdList.length
+      ? wcSupabase.from('teams').select('id, country_code, country_name, confederation, fifa_ranking').in('id', teamIdList)
+      : Promise.resolve({ data: [] as Team[], error: null }),
+    venueIdList.length
+      ? wcSupabase.from('venues').select('id, name, city, country, capacity').in('id', venueIdList)
+      : Promise.resolve({ data: [] as Venue[], error: null }),
+    groupIdList.length
+      ? wcSupabase.from('groups').select('id, group_name').in('id', groupIdList)
+      : Promise.resolve({ data: [] as Group[], error: null }),
+    stageIdList.length
+      ? wcSupabase.from('tournament_stages').select('id, stage_name, stage_order, is_knockout').in('id', stageIdList)
+      : Promise.resolve({ data: [] as TournamentStage[], error: null }),
   ]);
+
+  const joinErr =
+    teamsResult.error || venuesResult.error || groupsResult.error || stagesResult.error;
+  if (joinErr) throw new Error(formatLoadError(joinErr));
 
   const teamsMap = new Map((teamsResult.data || []).map((t: Team) => [t.id, t]));
   const venuesMap = new Map((venuesResult.data || []).map((v: Venue) => [v.id, v]));
@@ -159,12 +202,17 @@ export const getFixtures = async (forceRefresh = false): Promise<Match[]> => {
 
     const fixtures = await fetchFixturesFromDatabase();
     const dbVersion = await getDatabaseVersion();
-    await saveCache(fixtures, dbVersion || undefined);
+    await saveCacheSafe(fixtures, dbVersion || undefined);
     return fixtures;
   } catch (error) {
-    const cachedFixtures = await loadCache();
+    let cachedFixtures: Match[] | null = null;
+    try {
+      cachedFixtures = await loadCache();
+    } catch {
+      cachedFixtures = null;
+    }
     if (cachedFixtures?.length) return cachedFixtures;
-    throw error;
+    throw new Error(formatLoadError(error));
   }
 };
 
