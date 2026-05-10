@@ -198,11 +198,11 @@ export default function CompetitionHubScreen() {
         },
         logoWrap: {
           alignItems: 'center',
-          marginBottom: theme.spacing.lg,
+          marginBottom: theme.spacing.xl,
         },
         logo: {
-          width: 220,
-          height: 72,
+          width: Math.min(320, maxContentWidth),
+          height: 104,
         },
         welcomeLabel: {
           fontFamily: theme.fontFamily.light,
@@ -210,15 +210,17 @@ export default function CompetitionHubScreen() {
           color: theme.colors.textMuted,
           textAlign: 'center',
           letterSpacing: 0.3,
+          marginBottom: theme.spacing.md,
         },
         welcomeName: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 22,
-          fontWeight: '700',
+          fontSize: 16,
+          fontWeight: '600',
           color: theme.colors.text,
           textAlign: 'center',
-          marginTop: 4,
-          marginBottom: theme.spacing.xs,
+          lineHeight: 20,
+          marginTop: 0,
+          marginBottom: theme.spacing.md,
         },
         headline: {
           fontFamily: theme.fontFamily.regular,
@@ -244,7 +246,7 @@ export default function CompetitionHubScreen() {
           width: '100%' as const,
         },
       }),
-    [theme]
+    [theme, maxContentWidth]
   );
 
   return (
