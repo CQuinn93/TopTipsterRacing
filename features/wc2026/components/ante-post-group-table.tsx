@@ -209,7 +209,7 @@ export function AntePostGroupTable({
             <CountryFlag
               countryCode={team.teamCode}
               countryName={team.teamName}
-              flagSize={24}
+              flagSize={22}
               showName={false}
             />
             <Text style={styles.teamName} numberOfLines={1} ellipsizeMode="tail">
@@ -235,22 +235,22 @@ export function AntePostGroupTable({
 
 const styles = StyleSheet.create({
   tableContainer: {
-    borderRadius: 18,
+    borderRadius: 12,
     backgroundColor: DesignColors.surface,
     overflow: 'hidden',
   },
   tableHeader: {
     flexDirection: 'row',
     backgroundColor: DesignColors.text,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderBottomWidth: 2,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderBottomWidth: 1.5,
     borderBottomColor: DesignColors.primary,
   },
   tableRow: {
     flexDirection: 'row',
-    paddingVertical: 12,
-    paddingHorizontal: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 6,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(71, 74, 74, 0.1)',
     alignItems: 'center',
@@ -274,49 +274,49 @@ const styles = StyleSheet.create({
   },
   headerCell: {
     color: DesignColors.textOnDark,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     textAlign: 'center',
   },
   cell: {
     color: DesignColors.text,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
   },
   positionCell: {
-    width: 35,
+    width: 30,
   },
   teamCell: {
     flex: 2,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingLeft: 4,
-    minWidth: 120,
+    gap: 6,
+    paddingLeft: 2,
+    minWidth: 108,
   },
   teamCellSmall: {
     flex: 1.5,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingLeft: 4,
-    minWidth: 90,
+    gap: 4,
+    paddingLeft: 2,
+    minWidth: 84,
   },
   teamName: {
     color: DesignColors.text,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '600',
     flex: 1,
   },
   statsCell: {
-    width: 35,
+    width: 30,
   },
   goalsCell: {
-    width: 50,
+    width: 44,
   },
   pointsCell: {
-    width: 45,
+    width: 40,
   },
   pointsText: {
     fontWeight: '700',

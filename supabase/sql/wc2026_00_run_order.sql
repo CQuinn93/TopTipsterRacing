@@ -21,6 +21,9 @@
 --
 -- 7) Optional diagnostics if something looks off
 --    wc2026_06_diagnose_missing_matches.sql
+--
+-- 8) API roles can use schema wc2026 (fixes 42501 after exposing schema in Dashboard)
+--    wc2026_07_api_grants.sql
 
 -- Notes:
 -- - These scripts target wc2026 schema tables.

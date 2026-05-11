@@ -1,9 +1,16 @@
-import { StyleSheet, Text, View, TextInput } from 'react-native';
+import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { DesignColors } from '@/features/wc2026/constants/design-colors';
 import { type Match } from '@/features/wc2026/services/fixtures';
 import { type Prediction } from '@/features/wc2026/services/predictions';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
+
+const scoreInputPlatformStyle = Platform.select({
+  android: { textAlignVertical: 'center' as const, includeFontPadding: false },
+  ios: { lineHeight: 32 },
+  web: { outlineStyle: 'none' as const },
+  default: {},
+});
 
 interface AntePostFixturesProps {
   fixtures: Match[];
@@ -98,7 +105,7 @@ function FixtureInput({ match, prediction, onScoreChange, disabled = false, scro
                 <CountryFlag
                   countryCode={match.home_team.country_code || getCountryCode(match.home_team.country_name)}
                   countryName={match.home_team.country_name}
-                  flagSize={30}
+                  flagSize={26}
                   showName={false}
                   align="center"
                 />
@@ -109,7 +116,7 @@ function FixtureInput({ match, prediction, onScoreChange, disabled = false, scro
             )}
           </View>
           <TextInput
-            style={[styles.scoreInput, hasPrediction && styles.scoreInputFilled]}
+            style={[styles.scoreInput, scoreInputPlatformStyle, hasPrediction && styles.scoreInputFilled]}
             value={homeScore}
             onChangeText={handleHomeScoreChange}
             placeholder="0"
@@ -127,7 +134,7 @@ function FixtureInput({ match, prediction, onScoreChange, disabled = false, scro
         {/* Away Team */}
         <View style={styles.teamSection}>
           <TextInput
-            style={[styles.scoreInput, hasPrediction && styles.scoreInputFilled]}
+            style={[styles.scoreInput, scoreInputPlatformStyle, hasPrediction && styles.scoreInputFilled]}
             value={awayScore}
             onChangeText={handleAwayScoreChange}
             placeholder="0"
@@ -143,7 +150,7 @@ function FixtureInput({ match, prediction, onScoreChange, disabled = false, scro
                 <CountryFlag
                   countryCode={match.away_team.country_code || getCountryCode(match.away_team.country_name)}
                   countryName={match.away_team.country_name}
-                  flagSize={30}
+                  flagSize={26}
                   showName={false}
                   align="center"
                 />
@@ -161,25 +168,25 @@ function FixtureInput({ match, prediction, onScoreChange, disabled = false, scro
 
 const styles = StyleSheet.create({
   container: {
-    gap: 16,
+    gap: 10,
   },
   groupCard: {
     backgroundColor: DesignColors.surface,
-    borderRadius: 12,
+    borderRadius: 10,
     overflow: 'hidden',
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: DesignColors.primary,
   },
   cardHeader: {
     backgroundColor: DesignColors.text,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-    borderBottomWidth: 2,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1.5,
     borderBottomColor: DesignColors.text,
   },
   headerText: {
     color: DesignColors.textOnDark,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     textAlign: 'center',
   },
@@ -187,8 +194,8 @@ const styles = StyleSheet.create({
     gap: 0,
   },
   matchRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(71, 74, 74, 0.1)',
   },
@@ -207,37 +214,41 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 6,
   },
   teamInfo: {
     flex: 1,
     alignItems: 'center',
-    gap: 8,
+    gap: 4,
   },
   teamName: {
     color: DesignColors.text,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
-    maxWidth: 100,
+    maxWidth: 92,
+    lineHeight: 15,
   },
   vsText: {
     color: DesignColors.text,
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '700',
-    marginHorizontal: 12,
+    marginHorizontal: 4,
     opacity: 0.5,
   },
   scoreInput: {
-    width: 60,
-    height: 40,
-    borderRadius: 12,
-    borderWidth: 2,
+    width: 44,
+    height: 32,
+    borderRadius: 8,
+    borderWidth: 1.5,
     borderColor: DesignColors.text,
     backgroundColor: DesignColors.surface,
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '700',
     color: DesignColors.primary,
+    textAlign: 'center',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
   },
   scoreInputFilled: {
     borderColor: DesignColors.primary,

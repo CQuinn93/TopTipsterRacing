@@ -819,8 +819,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   tableSection: {
-    padding: 20,
-    paddingBottom: 12,
+    padding: 12,
+    paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: DesignColors.surface,
     backgroundColor: '#FFFFFF',
@@ -829,9 +829,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   fixturesScrollContent: {
-    padding: 20,
+    padding: 12,
     paddingBottom: 100, // Extra padding for keyboard
-    gap: 16,
+    gap: 10,
   },
   loadingContainer: {
     flex: 1,
