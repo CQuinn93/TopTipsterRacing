@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { AppSidebar } from '@/components/AppSidebar';
 import { AppUnlockScreen } from '@/components/AppUnlockScreen';
+import { setLastRoute } from '@/lib/lastRoute';
 
 function MenuHeaderButton() {
   const theme = useTheme();
@@ -131,6 +133,10 @@ function AppTabs() {
 function AppLayoutContent() {
   const { session } = useAuth();
   const { isLocked } = useAppLock();
+
+  useEffect(() => {
+    if (session) void setLastRoute('/(app)');
+  }, [session?.user?.id]);
 
   return (
     <ForceRefreshProvider>

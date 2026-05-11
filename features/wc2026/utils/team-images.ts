@@ -50,7 +50,6 @@ const imageMap: Record<string, ImageSource> = {
   SN: require('@/assets/wc2026/images/Senegal.svg'),
   MA: require('@/assets/wc2026/images/Morroco.svg'),
   EG: require('@/assets/wc2026/images/Egypt.svg'),
-  NG: require('@/assets/wc2026/images/South Africa.svg'),
   GH: require('@/assets/wc2026/images/Ghana.svg'),
   TN: require('@/assets/wc2026/images/Tunisia.svg'),
   CI: require('@/assets/wc2026/images/Ivory Coast.svg'),

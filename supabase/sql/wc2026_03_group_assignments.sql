@@ -1,20 +1,37 @@
--- Group team assignments (wc2026 schema).
--- This is the schema-adapted equivalent of legacy group-assignments.sql.
+-- Group team assignments (wc2026 schema) — FIFA World Cup 2026™ group stage draw.
+-- Source: official draw (see also https://www.fifa.com/en/tournaments/mens/worldcup/canadamexicousa2026/articles/match-schedule-fixtures-results-teams-stadiums )
+--
+-- Slot order (position 1–4) is used by wc2026_04_all_group_stage_matches.sql to build the six
+-- round-robin fixtures per group. After changing this file on an existing database, run
+-- wc2026_08_reset_group_stage_for_new_draw.sql then re-run THIS file’s insert block, then
+-- wc2026_04_all_group_stage_matches.sql (or run 08 which chains reset + inserts + regenerate).
 
 with assignments(group_name, country_code, position) as (
   values
-    ('A','US',1), ('A','MX',2), ('A','BR',3), ('A','FR',4),
-    ('B','CA',1), ('B','AR',2), ('B','ES',3), ('B','DE',4),
-    ('C','IT',1), ('C','NL',2), ('C','PT',3), ('C','JP',4),
-    ('D','GB',1), ('D','BE',2), ('D','UY',3), ('D','KR',4),
-    ('E','CL',1), ('E','CO',2), ('E','HR',3), ('E','SA',4),
-    ('F','EC',1), ('F','DK',2), ('F','AU',3), ('F','SN',4),
-    ('G','PY',1), ('G','AT',2), ('G','MA',3), ('G','IR',4),
-    ('H','PE',1), ('H','CH',2), ('H','EG',3), ('H','QA',4),
-    ('I','JM',1), ('I','CZ',2), ('I','NG',3), ('I','AE',4),
-    ('J','CR',1), ('J','SE',2), ('J','GH',3), ('J','IQ',4),
-    ('K','NO',1), ('K','TN',2), ('K','TH',3), ('K','NZ',4),
-    ('L','FI',1), ('L','CI',2), ('L','CN',3), ('L','TR',4)
+    -- Group A: Mexico, South Africa, Korea Republic, Czechia
+    ('A', 'MX', 1), ('A', 'ZA', 2), ('A', 'KR', 3), ('A', 'CZ', 4),
+    -- Group B: Canada, Bosnia and Herzegovina, Qatar, Switzerland
+    ('B', 'CA', 1), ('B', 'BA', 2), ('B', 'QA', 3), ('B', 'CH', 4),
+    -- Group C: Brazil, Morocco, Haiti, Scotland
+    ('C', 'BR', 1), ('C', 'MA', 2), ('C', 'HT', 3), ('C', 'SC', 4),
+    -- Group D: USA, Paraguay, Australia, Türkiye
+    ('D', 'US', 1), ('D', 'PY', 2), ('D', 'AU', 3), ('D', 'TR', 4),
+    -- Group E: Germany, Curaçao, Côte d'Ivoire, Ecuador
+    ('E', 'DE', 1), ('E', 'CW', 2), ('E', 'CI', 3), ('E', 'EC', 4),
+    -- Group F: Netherlands, Japan, Sweden, Tunisia
+    ('F', 'NL', 1), ('F', 'JP', 2), ('F', 'SE', 3), ('F', 'TN', 4),
+    -- Group G: Belgium, Egypt, IR Iran, New Zealand
+    ('G', 'BE', 1), ('G', 'EG', 2), ('G', 'IR', 3), ('G', 'NZ', 4),
+    -- Group H: Spain, Cabo Verde, Saudi Arabia, Uruguay
+    ('H', 'ES', 1), ('H', 'CV', 2), ('H', 'SA', 3), ('H', 'UY', 4),
+    -- Group I: France, Senegal, Iraq, Norway
+    ('I', 'FR', 1), ('I', 'SN', 2), ('I', 'IQ', 3), ('I', 'NO', 4),
+    -- Group J: Argentina, Algeria, Austria, Jordan
+    ('J', 'AR', 1), ('J', 'DZ', 2), ('J', 'AT', 3), ('J', 'JO', 4),
+    -- Group K: Portugal, Congo DR, Uzbekistan, Colombia
+    ('K', 'PT', 1), ('K', 'CD', 2), ('K', 'UZ', 3), ('K', 'CO', 4),
+    -- Group L: England, Croatia, Ghana, Panama
+    ('L', 'GB', 1), ('L', 'HR', 2), ('L', 'GH', 3), ('L', 'PA', 4)
 )
 insert into wc2026.group_teams (group_id, team_id, position)
 select g.id, t.id, a.position

@@ -46,19 +46,26 @@ export default function LoginScreen() {
         formArea: {
           marginTop: 'auto',
         },
-        title: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 28,
+        wordmarkBlock: {
+          alignItems: 'center',
+          marginBottom: theme.spacing.xl,
+        },
+        wordmarkTop: {
+          fontFamily: theme.fontFamily.swish,
+          fontSize: Platform.OS === 'web' ? 40 : 48,
           color: theme.colors.text,
           textAlign: 'center',
           marginBottom: theme.spacing.xs,
+          letterSpacing: Platform.OS === 'web' ? 1 : 1.2,
         },
-        slogan: {
+        wordmarkSub: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
-          color: theme.colors.textMuted,
+          fontSize: Platform.OS === 'web' ? 14 : 15,
+          fontWeight: '700',
+          color: theme.colors.accent,
           textAlign: 'center',
-          marginBottom: theme.spacing.xl,
+          marginTop: 8,
+          letterSpacing: Platform.OS === 'web' ? 6 : 7,
         },
         input: {
           fontFamily: theme.fontFamily.input,
@@ -295,8 +302,12 @@ export default function LoginScreen() {
     >
       <View style={styles.content}>
         <View style={styles.formArea}>
-          <Text style={styles.title}>Top Tipster Racing</Text>
-          <Text style={styles.slogan}>A Fantasy Sports Racing App</Text>
+          <View style={styles.wordmarkBlock}>
+            <Text style={styles.wordmarkTop} accessibilityRole="header">
+              Top Tipster
+            </Text>
+            <Text style={styles.wordmarkSub}>SPORTS</Text>
+          </View>
 
           <TextInput
             style={styles.input}

@@ -24,6 +24,9 @@
 --
 -- 8) API roles can use schema wc2026 (fixes 42501 after exposing schema in Dashboard)
 --    wc2026_07_api_grants.sql
+--
+-- 9) When changing the official group draw: clear old group matches + predictions, then re-seed groups
+--    wc2026_08_reset_group_stage_for_new_draw.sql  →  wc2026_03  →  wc2026_04
 
 -- Notes:
 -- - These scripts target wc2026 schema tables.

@@ -5,6 +5,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts } from 'expo-font';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { darkTheme } from '@/constants/theme';
@@ -40,6 +41,7 @@ export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     'Laraz-Regular': require('../assets/fonts/LARAZ Regular.ttf'),
     'Laraz-Light': require('../assets/fonts/LARAZ Light.ttf'),
+    'Swish-Regular': require('../assets/fonts/Swish-Regular.ttf'),
     'Polygon-Regular': require('../assets/fonts/Polygon-Regular.otf'),
     'Polygon-Italic': require('../assets/fonts/Polygon-Italic.otf'),
   });
@@ -72,10 +74,12 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthProvider>
-      <ThemeProvider>
-        <RootLayoutContent />
-      </ThemeProvider>
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <ThemeProvider>
+          <RootLayoutContent />
+        </ThemeProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }

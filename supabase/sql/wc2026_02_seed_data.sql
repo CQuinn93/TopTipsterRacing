@@ -53,8 +53,8 @@ insert into wc2026.teams (country_code, country_name, confederation) values
 ('IT', 'Italy', 'UEFA'), ('NL', 'Netherlands', 'UEFA'), ('BE', 'Belgium', 'UEFA'),
 ('PT', 'Portugal', 'UEFA'), ('GB', 'England', 'UEFA'), ('SC', 'Scotland', 'UEFA'),
 ('PL', 'Poland', 'UEFA'), ('HR', 'Croatia', 'UEFA'), ('DK', 'Denmark', 'UEFA'),
-('AT', 'Austria', 'UEFA'), ('CH', 'Switzerland', 'UEFA'), ('CZ', 'Czech Republic', 'UEFA'),
-('SE', 'Sweden', 'UEFA'), ('NO', 'Norway', 'UEFA'), ('TR', 'Turkey', 'UEFA'),
+('AT', 'Austria', 'UEFA'), ('CH', 'Switzerland', 'UEFA'), ('CZ', 'Czechia', 'UEFA'),
+('SE', 'Sweden', 'UEFA'), ('NO', 'Norway', 'UEFA'), ('TR', 'Türkiye', 'UEFA'),
 ('UA', 'Ukraine', 'UEFA'), ('RS', 'Serbia', 'UEFA'), ('GR', 'Greece', 'UEFA'),
 ('HU', 'Hungary', 'UEFA'), ('RO', 'Romania', 'UEFA'), ('IE', 'Ireland', 'UEFA'),
 ('IS', 'Iceland', 'UEFA'), ('SK', 'Slovakia', 'UEFA'), ('FI', 'Finland', 'UEFA'),
@@ -68,5 +68,6 @@ insert into wc2026.teams (country_code, country_name, confederation) values
 ('NG', 'Nigeria', 'CAF'), ('GH', 'Ghana', 'CAF'), ('TN', 'Tunisia', 'CAF'),
 ('CI', 'Ivory Coast', 'CAF'), ('DZ', 'Algeria', 'CAF'), ('CM', 'Cameroon', 'CAF'),
 ('ZA', 'South Africa', 'CAF'), ('CV', 'Cape Verde', 'CAF'),
+('CD', 'Congo DR', 'CAF'),
 ('NZ', 'New Zealand', 'OFC')
 on conflict (country_code) do nothing;

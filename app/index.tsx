@@ -1,12 +1,14 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Redirect } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { getLastRoute } from '@/lib/lastRoute';
 
 export default function Index() {
   const theme = useTheme();
   const { session, isLoading } = useAuth();
+  const [resolvedRoute, setResolvedRoute] = useState<string | null>(null);
 
   const styles = useMemo(
     () =>
@@ -21,6 +23,21 @@ export default function Index() {
     [theme]
   );
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (!session) {
+        if (!cancelled) setResolvedRoute(null);
+        return;
+      }
+      const last = await getLastRoute();
+      if (!cancelled) setResolvedRoute(last || '/competition-hub');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id]);
+
   if (isLoading) {
     return (
       <View style={styles.centered}>
@@ -33,5 +50,13 @@ export default function Index() {
     return <Redirect href="/(auth)/login" />;
   }
 
-  return <Redirect href="/competition-hub" />;
+  if (!resolvedRoute) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={theme.colors.accent} />
+      </View>
+    );
+  }
+
+  return <Redirect href={resolvedRoute as any} />;
 }

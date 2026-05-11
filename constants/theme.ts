@@ -23,6 +23,7 @@ const radius = {
 const fontFamily = {
   regular: 'Laraz-Regular',
   light: 'Laraz-Light',
+  swish: 'Swish-Regular',
   input: 'Arial, Helvetica, sans-serif',
   polygon: 'Polygon-Regular',
   polygonItalic: 'Polygon-Italic',
