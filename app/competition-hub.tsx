@@ -37,91 +37,98 @@ function SportCard({ title, subtitle, icon, onPress, disabled, comingSoon, isDes
   const isLight = String(theme.colors.background) === String(lightTheme.colors.background);
   const accent = theme.colors.accent;
   const surface = isLight ? theme.colors.surface : theme.colors.surfaceElevated;
+  const isWeb = Platform.OS === 'web';
 
   const s = useMemo(
     () =>
       StyleSheet.create({
         outer: {
           width: '100%' as const,
-          borderRadius: 14,
+          borderRadius: 20,
           overflow: 'hidden',
           flexDirection: 'row' as const,
-          minHeight: isDesktop ? 88 : 76,
+          minHeight: isDesktop ? 96 : 80,
           backgroundColor: surface,
           borderWidth: 1,
-          borderColor: theme.colors.border,
+          borderColor: isLight ? `${accent}22` : theme.colors.border,
+          ...(isWeb && {
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.14,
+            shadowRadius: 16,
+            elevation: 4,
+          }),
         },
-        outerDisabled: { opacity: 0.85 },
+        outerDisabled: { opacity: 0.88 },
         accentRail: {
-          width: 3,
+          width: 4,
           backgroundColor: accent,
         },
         body: {
           flex: 1,
           flexDirection: 'row' as const,
           alignItems: 'center' as const,
-          paddingVertical: 12,
-          paddingLeft: 12,
-          paddingRight: 14,
-          gap: 12,
+          paddingVertical: 14,
+          paddingLeft: 14,
+          paddingRight: 16,
+          gap: 14,
         },
         ringOuter: {
-          width: 50,
-          height: 50,
-          borderRadius: 25,
-          borderWidth: 1,
-          borderColor: `${accent}40`,
+          width: 54,
+          height: 54,
+          borderRadius: 27,
+          backgroundColor: `${accent}14`,
           alignItems: 'center' as const,
           justifyContent: 'center' as const,
         },
         ringInner: {
-          width: 40,
-          height: 40,
-          borderRadius: 20,
-          borderWidth: 1,
-          borderColor: `${accent}70`,
+          width: 44,
+          height: 44,
+          borderRadius: 22,
+          backgroundColor: `${accent}22`,
           alignItems: 'center' as const,
           justifyContent: 'center' as const,
         },
         textCol: { flex: 1, minWidth: 0 },
         title: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
+          fontSize: isDesktop ? 17 : 16,
           fontWeight: '700',
           color: theme.colors.text,
+          letterSpacing: -0.2,
         },
         subtitle: {
           fontFamily: theme.fontFamily.light,
-          fontSize: 12,
-          lineHeight: 16,
+          fontSize: 13,
+          lineHeight: 18,
           color: theme.colors.textSecondary,
-          marginTop: 3,
+          marginTop: 4,
         },
         chevronCircle: {
-          width: 40,
-          height: 40,
-          borderRadius: 20,
-          borderWidth: 1.5,
-          borderColor: accent,
+          width: 44,
+          height: 44,
+          borderRadius: 22,
+          backgroundColor: `${accent}18`,
           alignItems: 'center' as const,
           justifyContent: 'center' as const,
         },
         comingSoonPill: {
-          paddingHorizontal: 10,
-          paddingVertical: 6,
-          borderRadius: 20,
-          borderWidth: 1.5,
-          borderColor: accent,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          borderRadius: 999,
+          backgroundColor: `${accent}16`,
+          borderWidth: 1,
+          borderColor: `${accent}55`,
         },
         comingSoonText: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 9,
+          fontSize: 10,
           fontWeight: '800',
           color: accent,
-          letterSpacing: 0.8,
+          letterSpacing: 1,
         },
       }),
-    [theme, isLight, surface, accent, isDesktop]
+    [theme, isLight, surface, accent, isDesktop, isWeb]
   );
 
   const inner = (
@@ -130,7 +137,7 @@ function SportCard({ title, subtitle, icon, onPress, disabled, comingSoon, isDes
       <View style={s.body}>
         <View style={s.ringOuter}>
           <View style={s.ringInner}>
-            <Ionicons name={icon} size={22} color={accent} />
+            <Ionicons name={icon} size={24} color={accent} />
           </View>
         </View>
         <View style={s.textCol}>
@@ -147,7 +154,7 @@ function SportCard({ title, subtitle, icon, onPress, disabled, comingSoon, isDes
           </View>
         ) : (
           <View style={s.chevronCircle}>
-            <Ionicons name="chevron-forward" size={20} color={accent} />
+            <Ionicons name="chevron-forward" size={22} color={accent} />
           </View>
         )}
       </View>
@@ -219,9 +226,10 @@ export default function CompetitionHubScreen() {
     };
   }, [userId, session?.user?.email]);
 
-  const maxContentWidth = isDesktop
-    ? Math.min(520, width - theme.spacing.lg * 2)
-    : Math.min(400, width - theme.spacing.md * 2);
+  const horizontalPad = theme.spacing.md;
+  const maxHubWidth = isDesktop ? 680 : 420;
+  /** Explicit width fixes RN Web: `width: '100%'` + maxWidth still stretches full viewport. */
+  const hubColumnWidth = Math.max(280, Math.min(maxHubWidth, width - horizontalPad * 2));
 
   const styles = useMemo(
     () =>
@@ -230,12 +238,20 @@ export default function CompetitionHubScreen() {
           flex: 1,
           backgroundColor: theme.colors.background,
         },
+        meshTop: {
+          position: 'absolute' as const,
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 220,
+          zIndex: 0,
+        },
         mesh: {
           position: 'absolute' as const,
           bottom: 0,
           left: 0,
           right: 0,
-          height: 100,
+          height: 180,
           zIndex: 0,
         },
         scroll: {
@@ -244,69 +260,72 @@ export default function CompetitionHubScreen() {
         },
         scrollContent: {
           flexGrow: 1,
-          paddingHorizontal: theme.spacing.md,
-          paddingBottom: theme.spacing.xxl + 24,
-          alignItems: 'center',
+          paddingHorizontal: horizontalPad,
+          paddingBottom: theme.spacing.xxl + 32,
+          alignItems: 'center' as const,
+          width: '100%' as const,
         },
         inner: {
-          width: '100%' as const,
+          alignSelf: 'center' as const,
         },
         wordmarkBlock: {
           alignItems: 'center',
-          marginBottom: theme.spacing.md + 4,
+          marginBottom: theme.spacing.lg,
         },
         wordmarkTop: {
           fontFamily: theme.fontFamily.swish,
-          fontSize: isNativeMobile ? 40 : isDesktop ? 38 : isWeb ? 34 : 36,
+          fontSize: isNativeMobile ? 42 : isDesktop ? 44 : isWeb ? 38 : 40,
           color: theme.colors.text,
           textAlign: 'center',
-          letterSpacing: isNativeMobile ? 1.2 : 1,
+          letterSpacing: isNativeMobile ? 1.2 : 1.1,
         },
         wordmarkSub: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: isNativeMobile ? 15 : isDesktop ? 13 : isWeb ? 14 : 14,
-          fontWeight: '700',
+          fontSize: isNativeMobile ? 15 : isDesktop ? 12 : isWeb ? 13 : 13,
+          fontWeight: '800',
           color: theme.colors.accent,
           textAlign: 'center',
-          marginTop: isNativeMobile ? 8 : 6,
-          letterSpacing: isNativeMobile ? 7 : 6,
+          marginTop: isNativeMobile ? 10 : 8,
+          letterSpacing: isNativeMobile ? 8 : 7,
         },
         welcomeLabel: {
           fontFamily: theme.fontFamily.light,
-          fontSize: 12,
+          fontSize: 13,
           color: theme.colors.textMuted,
           textAlign: 'center',
-          marginBottom: 4,
+          marginBottom: 6,
+          letterSpacing: 0.3,
         },
         welcomeName: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 17,
+          fontSize: isDesktop ? 22 : 19,
           fontWeight: '700',
           color: theme.colors.text,
           textAlign: 'center',
-          marginBottom: theme.spacing.md,
+          marginBottom: theme.spacing.lg,
         },
         headline: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 17,
+          fontSize: isDesktop ? 24 : 20,
           fontWeight: '700',
           color: theme.colors.text,
           textAlign: 'center',
-          marginBottom: 8,
+          marginBottom: 10,
+          letterSpacing: -0.3,
         },
         subHeadlineWrap: {
-          marginBottom: theme.spacing.lg,
+          marginBottom: theme.spacing.lg + 6,
           paddingHorizontal: theme.spacing.xs,
         },
         cardRow: {
           width: '100%' as const,
-          gap: 10,
+          gap: isDesktop ? 14 : 12,
         },
         cardRowDesktop: {
           flexDirection: 'row' as const,
           flexWrap: 'wrap' as const,
           justifyContent: 'center' as const,
-          gap: 12,
+          gap: 14,
         },
         cardRowMobile: {
           flexDirection: 'column' as const,
@@ -315,40 +334,51 @@ export default function CompetitionHubScreen() {
           flexGrow: 1,
           flexShrink: 1,
           flexBasis: 0,
-          minWidth: 240,
-          maxWidth: 360,
+          minWidth: 0,
         },
         cardSlotMobile: {
           width: '100%' as const,
         },
+        cardSlotFullRow: {
+          width: '100%' as const,
+          flexBasis: '100%' as const,
+        },
         footer: {
-          marginTop: theme.spacing.lg + 4,
+          marginTop: theme.spacing.xl,
           flexDirection: 'row' as const,
           alignItems: 'center' as const,
-          gap: 12,
-          paddingVertical: 14,
-          paddingHorizontal: 14,
-          borderRadius: 14,
+          gap: 14,
+          paddingVertical: 18,
+          paddingHorizontal: 18,
+          borderRadius: 18,
           borderWidth: 1,
           borderColor: theme.colors.border,
           backgroundColor: theme.colors.surfaceElevated,
+          ...(isWeb && {
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.12,
+            shadowRadius: 24,
+            elevation: 6,
+          }),
         },
         footerTexts: { flex: 1, minWidth: 0 },
         footerTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 15,
+          fontSize: 16,
           fontWeight: '700',
           color: theme.colors.text,
+          letterSpacing: -0.2,
         },
         footerSub: {
           fontFamily: theme.fontFamily.light,
-          fontSize: 12,
+          fontSize: 13,
           color: theme.colors.textSecondary,
-          marginTop: 3,
-          lineHeight: 17,
+          marginTop: 4,
+          lineHeight: 19,
         },
       }),
-    [theme, isDesktop, isNativeMobile, isWeb]
+    [theme, isDesktop, isNativeMobile, isWeb, horizontalPad]
   );
 
   const cardSlots = [
@@ -396,9 +426,15 @@ export default function CompetitionHubScreen() {
   return (
     <View style={styles.root}>
       <LinearGradient
+        style={styles.meshTop}
+        colors={[`${accentRgb}10`, 'transparent']}
+        locations={[0, 1]}
+        pointerEvents="none"
+      />
+      <LinearGradient
         style={styles.mesh}
-        colors={['transparent', `${accentRgb}12`, `${accentRgb}18`]}
-        locations={[0, 0.55, 1]}
+        colors={['transparent', `${accentRgb}0f`, `${accentRgb}16`]}
+        locations={[0, 0.5, 1]}
         pointerEvents="none"
       />
       <ScrollView
@@ -406,7 +442,6 @@ export default function CompetitionHubScreen() {
         contentContainerStyle={[
           styles.scrollContent,
           {
-            maxWidth: maxContentWidth + theme.spacing.md * 2,
             paddingTop: scrollPaddingTop,
             paddingBottom: scrollPaddingBottom,
           },
@@ -414,7 +449,7 @@ export default function CompetitionHubScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.inner, { maxWidth: maxContentWidth }]}>
+        <View style={[styles.inner, { width: hubColumnWidth }]}>
           <View style={[styles.wordmarkBlock, !isWeb && { paddingTop: theme.spacing.sm }]}>
             <Text style={styles.wordmarkTop} accessibilityRole="header">
               Top Tipster
@@ -436,8 +471,17 @@ export default function CompetitionHubScreen() {
               isDesktop ? styles.cardRowDesktop : styles.cardRowMobile,
             ]}
           >
-            {cardSlots.map((c) => (
-              <View key={c.title} style={isDesktop ? styles.cardSlotDesktop : styles.cardSlotMobile}>
+            {cardSlots.map((c, index) => (
+              <View
+                key={c.title}
+                style={
+                  isDesktop
+                    ? index === 2
+                      ? styles.cardSlotFullRow
+                      : styles.cardSlotDesktop
+                    : styles.cardSlotMobile
+                }
+              >
                 <SportCard
                   title={c.title}
                   subtitle={c.subtitle}

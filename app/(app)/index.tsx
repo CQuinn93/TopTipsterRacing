@@ -50,6 +50,7 @@ export default function HomeScreen() {
   const scrollRef = useRef<ScrollView>(null);
   const { width: windowWidth } = useWindowDimensions();
   const isNarrowWeb = Platform.OS === 'web' && windowWidth < 768;
+  const isWideWeb = Platform.OS === 'web' && windowWidth >= 768;
 
   useEffect(() => {
     if (!userId) return;
@@ -215,7 +216,20 @@ export default function HomeScreen() {
       return StyleSheet.create({
         wrapper: { flex: 1, backgroundColor: theme.colors.background, ...(isWeb && { paddingHorizontal: 0 }) },
         container: { flex: 1 },
-        content: { padding: theme.spacing.md, ...(isWeb && { padding: 24, paddingBottom: 48 }) },
+        webHomeScrollOuter: {
+          flex: 1,
+          width: '100%',
+          alignItems: 'center',
+        },
+        webHomeScroll: {
+          width: '100%',
+          maxWidth: 960,
+        },
+        content: {
+          padding: theme.spacing.md,
+          ...(isWeb && { padding: 24, paddingBottom: 48 }),
+          ...(isWeb && !compact && { paddingHorizontal: 28 }),
+        },
         sectionTitle: {
           fontFamily: theme.fontFamily.regular,
           fontSize: compact ? 13 : 15,
@@ -229,7 +243,7 @@ export default function HomeScreen() {
           marginBottom: theme.spacing.sm,
         },
         headerStrip: {
-          marginHorizontal: -theme.spacing.md,
+          marginHorizontal: isWideWeb ? 0 : -theme.spacing.md,
           paddingHorizontal: theme.spacing.md,
           paddingVertical: theme.spacing.lg,
           paddingTop: theme.spacing.lg + 4,
@@ -739,13 +753,13 @@ export default function HomeScreen() {
         },
       });
     },
-    [theme, isWeb, isNarrowWeb]
+    [theme, isWeb, isNarrowWeb, isWideWeb]
   );
 
-  const mainContent = (
+  const homeScroll = (
     <ScrollView
         ref={scrollRef}
-        style={styles.container}
+        style={[styles.container, isWideWeb && styles.webHomeScroll]}
         contentContainerStyle={[styles.content, { paddingBottom: theme.spacing.lg, paddingTop: theme.spacing.sm }]}
         showsVerticalScrollIndicator={false}
       >
@@ -959,11 +973,13 @@ export default function HomeScreen() {
     </ScrollView>
   );
 
+  const mainContent = isWideWeb ? <View style={styles.webHomeScrollOuter}>{homeScroll}</View> : homeScroll;
+
   if (Platform.OS === 'web' && hasJoinedAny && effectiveCompId && !isNarrowWeb) {
     const compName = summaryByComp?.byComp[effectiveCompId]?.name ?? compListFiltered.find((c) => c.id === effectiveCompId)?.name ?? 'Competition';
     return (
-      <View style={[styles.wrapper, { flexDirection: 'row', gap: 24, paddingRight: 24 }]}>
-        <View style={{ flex: 1, minWidth: 0 }}>{mainContent}</View>
+      <View style={[styles.wrapper, { flexDirection: 'row', gap: 24, paddingRight: 24, alignItems: 'flex-start' }]}>
+        <View style={{ flex: 1, minWidth: 0, alignItems: 'center' }}>{mainContent}</View>
         <HomeLeaderboardPanel competitionId={effectiveCompId} competitionName={compName} />
       </View>
     );
