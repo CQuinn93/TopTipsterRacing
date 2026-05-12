@@ -12,7 +12,7 @@ module.exports = {
     slug: 'cheltenham-top-tipster',
     version: '1.0.0',
     orientation: 'portrait',
-    icon: './assets/appstore.png',
+    icon: './assets/TT Logo.png',
     scheme: 'cheltenhamtipster',
     userInterfaceStyle: 'automatic',
     newArchEnabled: true,
@@ -31,7 +31,7 @@ module.exports = {
     },
     android: {
       adaptiveIcon: {
-        foregroundImage: './assets/playstore.png',
+        foregroundImage: './assets/TT Logo.png',
         backgroundColor: '#0a0a0a',
       },
       package: 'com.cheltenhamtoptipster.app',
@@ -40,7 +40,7 @@ module.exports = {
     web: {
       bundler: 'metro',
       output: 'static',
-      favicon: './assets/logo/TopTipster_Logo-Light.png',
+      favicon: './assets/TT Logo.png',
     },
     plugins: [
       'expo-router',

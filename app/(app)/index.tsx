@@ -376,7 +376,7 @@ export default function HomeScreen() {
           fontFamily: theme.fontFamily.regular,
           fontSize: compact ? 11 : 13,
           fontWeight: '600',
-          color: theme.colors.black,
+          color: theme.colors.white,
         },
         homePrimaryBtnTextSecondary: {
           fontFamily: theme.fontFamily.regular,
@@ -516,7 +516,7 @@ export default function HomeScreen() {
           color: theme.colors.textSecondary,
         },
         compTabTextActive: {
-          color: theme.colors.white,
+          color: '#ffffff',
           fontWeight: '600',
         },
         homeCompHint: {
@@ -802,7 +802,7 @@ export default function HomeScreen() {
                 onPress={() => router.push('/(app)/selections')}
                 activeOpacity={0.85}
               >
-                <Ionicons name="list-outline" size={20} color={theme.colors.black} />
+                <Ionicons name="list-outline" size={20} color={theme.colors.white} />
                 <Text style={styles.homePrimaryBtnText}>My selections</Text>
               </TouchableOpacity>
               <TouchableOpacity

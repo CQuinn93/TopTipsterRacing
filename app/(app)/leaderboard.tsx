@@ -17,10 +17,12 @@ import { decimalToFractional } from '@/lib/oddsFormat';
 import { getLeaderboardBulkCache, setLeaderboardBulkCache } from '@/lib/leaderboardBulkCache';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
 import { useRealtimeRaces } from '@/lib/useRealtimeRaces';
+import type { Race, RaceResult } from '@/types/races';
 
 const LEADERBOARD_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes – use cache to save egress on repeat visits
 const LEADERBOARD_VISIT_REFRESH_COOLDOWN_MS = 30 * 1000; // avoid repeat refreshes on rapid revisits
-import type { Race, RaceResult } from '@/types/races';
+
+type RaceDayRow = { id: string; race_date: string; races: Race[] };
 
 type LeaderboardRow = {
   display_name: string;
@@ -51,8 +53,13 @@ export default function LeaderboardScreen() {
   const { width: screenWidth } = useWindowDimensions();
   const { userId } = useAuth();
   const router = useRouter();
-  const params = useLocalSearchParams<{ competitionId?: string }>();
-  const competitionId = params.competitionId as string | undefined;
+  const params = useLocalSearchParams<{ competitionId?: string | string[] }>();
+  const competitionId = (() => {
+    const v = params.competitionId;
+    if (v == null) return undefined;
+    const s = Array.isArray(v) ? v[0] : v;
+    return typeof s === 'string' && s.length > 0 ? s : undefined;
+  })();
 
   const [selectedId, setSelectedId] = useState<string | undefined>(competitionId);
   const [competitionName, setCompetitionName] = useState<string>('');
@@ -80,7 +87,7 @@ export default function LeaderboardScreen() {
     const now = new Date();
     setRefreshing(true);
     try {
-      let raceDaysRows: { id: string; race_date: string; races: unknown[] }[];
+      let raceDaysRows: RaceDayRow[];
       let selectionsDataForPoints: { user_id: string; race_date: string; selections: Record<string, { runnerId?: string; runnerName?: string; oddsDecimal?: number }> | null }[];
       let compRes: { data: { name?: string; festival_start_date?: string; festival_end_date?: string } | null };
       let partsRes: { data: { user_id: string; display_name: string }[] | null };
@@ -109,14 +116,14 @@ export default function LeaderboardScreen() {
         }
       } else {
         const [raceDaysData, partsResF, selectionsRes, compResF] = await Promise.all([
-          fetchRaceDaysForCompetition(supabase, selectedId, 'id, race_date, races'),
+          fetchRaceDaysForCompetition<RaceDayRow>(supabase, selectedId, 'id, race_date, races'),
           supabase.from('competition_participants').select('user_id, display_name').eq('competition_id', selectedId),
           supabase.from('daily_selections').select('user_id, race_date, selections').eq('competition_id', selectedId),
           supabase.from('competitions').select('name, festival_start_date, festival_end_date').eq('id', selectedId).maybeSingle(),
         ]);
         compRes = compResF;
         partsRes = partsResF;
-        raceDaysRows = (raceDaysData ?? []) as { id: string; race_date: string; races: unknown[] }[];
+        raceDaysRows = (raceDaysData ?? []) as RaceDayRow[];
         selectionsDataForPoints = (selectionsRes.data ?? []) as { user_id: string; race_date: string; selections: Record<string, { runnerId?: string; runnerName?: string; oddsDecimal?: number }> | null }[];
         const selectionsByUser: Record<string, Record<string, Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }>>> = {};
         for (const s of selectionsDataForPoints) {
@@ -134,7 +141,11 @@ export default function LeaderboardScreen() {
         const compRowForCache = compRes.data as { name?: string; festival_start_date?: string | null; festival_end_date?: string | null } | null;
         const partsForCache = (partsRes.data ?? []) as { user_id: string; display_name: string }[];
         await setLeaderboardBulkCache(selectedId, {
-          raceDays: raceDaysRows.slice(0, 4).map((d) => ({ id: d.id, race_date: d.race_date, races: d.races ?? [] })),
+          raceDays: raceDaysRows.slice(0, 4).map((d) => ({
+            id: d.id,
+            race_date: d.race_date,
+            races: (d.races ?? []) as Race[],
+          })),
           selectionsByUser,
           competitionName: compRowForCache?.name,
           festivalStart: compRowForCache?.festival_start_date ?? null,
@@ -166,8 +177,8 @@ export default function LeaderboardScreen() {
 
       const usernameByUserId: Record<string, string> = {};
       const { data: profiles } = await supabase.from('profiles').select('id, username').in('id', parts.map((p) => p.user_id));
-      for (const pr of profiles ?? []) {
-        usernameByUserId[pr.id] = pr.username;
+      for (const pr of (profiles ?? []) as { id: string; username: string | null }[]) {
+        usernameByUserId[pr.id] = pr.username ?? '';
       }
 
       const dateToIndex: Record<string, number> = {};

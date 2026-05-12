@@ -7,23 +7,20 @@ import {
   ActivityIndicator,
   TextInput,
   TouchableOpacity,
-  Modal,
-  FlatList,
   Platform,
   Alert,
   RefreshControl,
 } from 'react-native';
-import { Redirect } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { supabase } from '@/lib/supabase';
 import {
   wcFootballJoinCompetition,
   wcFootballListMyCompetitions,
   type WcFootballCompetition,
 } from '@/features/wc2026/services/football-competitions';
-import { wcFootballLeaderboard, type WcFootballLeaderboardRow } from '@/features/wc2026/services/football-leaderboard';
+import { wcHrefWithParams } from '@/features/wc2026/utils/href';
 
 function joinAlert(title: string, message?: string) {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -42,12 +39,6 @@ export default function WorldCupCompetitionsTab() {
   const [list, setList] = useState<WcFootballCompetition[]>([]);
   const [code, setCode] = useState('');
   const [joinBusy, setJoinBusy] = useState(false);
-
-  const [lbOpen, setLbOpen] = useState(false);
-  const [lbTitle, setLbTitle] = useState('');
-  const [lbRows, setLbRows] = useState<WcFootballLeaderboardRow[]>([]);
-  const [lbNames, setLbNames] = useState<Record<string, string>>({});
-  const [lbLoading, setLbLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!userId) {
@@ -82,28 +73,13 @@ export default function WorldCupCompetitionsTab() {
     }
   };
 
-  const openLeaderboard = async (c: WcFootballCompetition) => {
-    setLbTitle(c.name);
-    setLbOpen(true);
-    setLbLoading(true);
-    setLbRows([]);
-    setLbNames({});
-    try {
-      const rows = await wcFootballLeaderboard(c.id);
-      setLbRows(rows);
-      const ids = [...new Set(rows.map((r) => r.user_id))];
-      if (ids.length) {
-        const { data: profiles } = await supabase.from('profiles').select('id, username').in('id', ids);
-        const map: Record<string, string> = {};
-        for (const p of profiles ?? []) {
-          const row = p as { id: string; username: string | null };
-          map[row.id] = row.username?.trim() || 'Player';
-        }
-        setLbNames(map);
-      }
-    } finally {
-      setLbLoading(false);
-    }
+  const openLeaderboard = (c: WcFootballCompetition) => {
+    router.push(
+      wcHrefWithParams('/(wc2026)/leaderboard', {
+        competitionId: c.id,
+        name: c.name,
+      }) as any
+    );
   };
 
   const join = async () => {
@@ -192,32 +168,6 @@ export default function WorldCupCompetitionsTab() {
           borderColor: theme.colors.accent,
         },
         lbBtnText: { fontFamily: theme.fontFamily.regular, fontSize: 12, fontWeight: '700', color: theme.colors.accent },
-        modalBackdrop: {
-          flex: 1,
-          backgroundColor: 'rgba(0,0,0,0.45)',
-          justifyContent: 'center',
-          padding: 20,
-        },
-        modalCard: {
-          maxHeight: '80%',
-          backgroundColor: theme.colors.surface,
-          borderRadius: 14,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          padding: 16,
-        },
-        modalTitle: { fontFamily: theme.fontFamily.regular, fontSize: 17, fontWeight: '700', color: theme.colors.text },
-        modalClose: { alignSelf: 'flex-end', marginBottom: 8 },
-        lbLine: {
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          paddingVertical: 10,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: theme.colors.border,
-        },
-        lbRank: { width: 28, fontFamily: theme.fontFamily.regular, color: theme.colors.textMuted },
-        lbUser: { flex: 1, fontFamily: theme.fontFamily.regular, color: theme.colors.text },
-        lbPts: { fontFamily: theme.fontFamily.regular, fontWeight: '700', color: theme.colors.accent },
       }),
     [theme]
   );
@@ -266,7 +216,7 @@ export default function WorldCupCompetitionsTab() {
                 <Text style={styles.compName} numberOfLines={2}>
                   {c.name}
                 </Text>
-                <TouchableOpacity style={styles.lbBtn} onPress={() => void openLeaderboard(c)}>
+                <TouchableOpacity style={styles.lbBtn} onPress={() => openLeaderboard(c)}>
                   <Text style={styles.lbBtnText}>Leaderboard</Text>
                 </TouchableOpacity>
               </View>
@@ -274,36 +224,6 @@ export default function WorldCupCompetitionsTab() {
           )}
         </View>
       </ScrollView>
-
-      <Modal visible={lbOpen} transparent animationType="fade" onRequestClose={() => setLbOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <TouchableOpacity style={styles.modalClose} onPress={() => setLbOpen(false)}>
-              <Text style={{ color: theme.colors.accent, fontWeight: '700' }}>Close</Text>
-            </TouchableOpacity>
-            <Text style={styles.modalTitle}>{lbTitle}</Text>
-            {lbLoading ? (
-              <ActivityIndicator style={{ marginTop: 16 }} color={theme.colors.accent} />
-            ) : (
-              <FlatList
-                data={lbRows}
-                keyExtractor={(item) => item.user_id}
-                style={{ marginTop: 12 }}
-                renderItem={({ item, index }) => (
-                  <View style={styles.lbLine}>
-                    <Text style={styles.lbRank}>{index + 1}</Text>
-                    <Text style={styles.lbUser} numberOfLines={1}>
-                      {lbNames[item.user_id] ?? (item.user_id === userId ? 'You' : 'Player')}
-                    </Text>
-                    <Text style={styles.lbPts}>{item.total_points}</Text>
-                  </View>
-                )}
-                ListEmptyComponent={<Text style={styles.body}>No scores yet.</Text>}
-              />
-            )}
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }

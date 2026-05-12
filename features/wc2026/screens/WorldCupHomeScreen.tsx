@@ -8,6 +8,7 @@ import {
   ScrollView,
   Platform,
   useWindowDimensions,
+  ImageBackground,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +24,12 @@ import { getAntePostLockedStatus } from '@/features/wc2026/services/async-predic
 import { getMatchDayTipsUnlocked } from '@/features/wc2026/services/tournament-gates';
 import { getUserPredictions, type Prediction } from '@/features/wc2026/services/predictions';
 import { WC_STAGE_SLICES, sumPointsInRange } from '@/features/wc2026/utils/match-number-stage';
+import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
+
+function countryCodeFromTeam(countryCode: string | undefined, countryName: string): string {
+  if (countryCode && countryCode.length >= 2) return countryCode;
+  return countryName.toUpperCase().slice(0, 2);
+}
 
 export function WorldCupHomeScreen() {
   const theme = useTheme();
@@ -176,39 +183,116 @@ export function WorldCupHomeScreen() {
         alignItems: 'center',
         gap: theme.spacing.xs,
       },
-      nextBlock: {
-        backgroundColor: theme.colors.surface,
+      nextBlockTouchable: {
+        marginBottom: theme.spacing.lg,
         borderRadius: theme.radius.md,
-        padding: theme.spacing.md,
+        overflow: 'hidden',
         borderWidth: cardBorderWidth,
         borderColor: cardBorder,
-        marginBottom: theme.spacing.lg,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 12,
         ...webCard,
       },
-      nextBlockMain: { flex: 1, minWidth: 0 },
+      nextBlockImageBg: {
+        width: '100%',
+        minHeight: 156,
+        overflow: 'hidden',
+      },
+      nextBlockImageRadius: {
+        borderRadius: theme.radius.md,
+      },
+      nextBlockTint: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.52)',
+        borderRadius: theme.radius.md,
+      },
+      nextBlockForeground: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: theme.spacing.md,
+        width: '100%',
+        minHeight: 156,
+        zIndex: 1,
+      },
+      nextBlockMain: {
+        width: '100%',
+        maxWidth: 520,
+        alignItems: 'center',
+      },
       nextLabel: {
         fontFamily: theme.fontFamily.regular,
         fontSize: 11,
-        color: theme.colors.textMuted,
-        marginBottom: theme.spacing.xs,
+        color: 'rgba(255,255,255,0.88)',
+        marginBottom: theme.spacing.sm,
         textTransform: 'uppercase',
         letterSpacing: 0.4,
+        textAlign: 'center',
+        width: '100%',
       },
-      nextTitle: {
+      nextMatchRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        width: '100%',
+        minHeight: 76,
+        marginBottom: theme.spacing.sm,
+      },
+      nextMatchSide: {
+        flex: 1,
+        minWidth: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+      },
+      nextMatchSideHome: {
+        justifyContent: 'flex-end',
+        paddingRight: 6,
+      },
+      nextMatchSideAway: {
+        justifyContent: 'flex-start',
+        paddingLeft: 6,
+      },
+      nextMatchTeamBlock: {
+        width: 148,
+        maxWidth: '100%',
+        flexShrink: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+      },
+      nextMatchTeamName: {
+        color: '#ffffff',
+        fontSize: 13,
+        fontWeight: '600',
+        textAlign: 'center',
+        width: '100%',
+        lineHeight: 17,
         fontFamily: theme.fontFamily.regular,
-        fontSize: 15,
-        fontWeight: '700',
-        color: theme.colors.text,
+        textShadowColor: 'rgba(0,0,0,0.45)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 3,
+      },
+      nextMatchVs: {
+        width: 32,
+        flexShrink: 0,
+        textAlign: 'center',
+        color: theme.colors.accent,
+        fontSize: 20,
+        fontWeight: '800',
+        fontFamily: theme.fontFamily.regular,
+        fontStyle: 'italic',
+        textShadowColor: 'rgba(0,0,0,0.5)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 4,
       },
       nextMeta: {
         fontFamily: theme.fontFamily.regular,
         fontSize: 12,
-        color: theme.colors.textSecondary,
+        color: 'rgba(255,255,255,0.9)',
         marginTop: 4,
+        textAlign: 'center',
+        width: '100%',
+      },
+      nextPitchMuted: {
+        color: 'rgba(255,255,255,0.82)',
+        textAlign: 'center',
+        width: '100%',
       },
       homePrimaryRow: {
         flexDirection: 'row',
@@ -243,7 +327,7 @@ export function WorldCupHomeScreen() {
         fontFamily: theme.fontFamily.regular,
         fontSize: compact ? 11 : 13,
         fontWeight: '600',
-        color: theme.colors.black,
+        color: theme.colors.white,
       },
       homePrimaryBtnTextSecondary: {
         fontFamily: theme.fontFamily.regular,
@@ -467,33 +551,95 @@ export function WorldCupHomeScreen() {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.nextBlock} onPress={goFixturesAndResults} activeOpacity={0.85}>
-          <View style={styles.nextBlockMain}>
-            <Text style={styles.nextLabel}>Next match</Text>
-            {loading ? (
-              <ActivityIndicator color={theme.colors.accent} />
-            ) : nextFixture ? (
-              <>
-                <Text style={styles.nextTitle} numberOfLines={2}>
-                  {nextFixture.home_team?.country_name ?? nextFixture.home_team_id} vs{' '}
-                  {nextFixture.away_team?.country_name ?? nextFixture.away_team_id}
-                </Text>
-                <Text style={styles.nextMeta}>
-                  {new Date(nextFixture.match_date).toLocaleDateString(undefined, {
-                    weekday: 'short',
-                    day: 'numeric',
-                    month: 'short',
-                  })}{' '}
-                  ·{' '}
-                  {new Date(nextFixture.match_date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                </Text>
-                <Text style={[styles.muted, { marginBottom: 0, marginTop: 8 }]}>Tap for fixtures & results</Text>
-              </>
-            ) : (
-              <Text style={styles.muted}>No upcoming fixtures loaded yet. Tap to open fixtures & results.</Text>
-            )}
-          </View>
-          <Ionicons name="chevron-forward" size={22} color={theme.colors.textMuted} />
+        <TouchableOpacity style={styles.nextBlockTouchable} onPress={goFixturesAndResults} activeOpacity={0.85}>
+          <ImageBackground
+            source={require('../../../assets/Pitch.jpg')}
+            style={styles.nextBlockImageBg}
+            imageStyle={styles.nextBlockImageRadius}
+            resizeMode="cover"
+          >
+            <View style={styles.nextBlockTint} pointerEvents="none" />
+            <View style={styles.nextBlockForeground}>
+              <View style={styles.nextBlockMain}>
+                <Text style={styles.nextLabel}>Next match</Text>
+                {loading ? (
+                  <ActivityIndicator color="#ffffff" />
+                ) : nextFixture ? (
+                  <>
+                    <View style={styles.nextMatchRow}>
+                      <View style={[styles.nextMatchSide, styles.nextMatchSideHome]}>
+                        <View style={styles.nextMatchTeamBlock}>
+                          {nextFixture.home_team ? (
+                            <>
+                              <CountryFlag
+                                countryCode={countryCodeFromTeam(
+                                  nextFixture.home_team.country_code,
+                                  nextFixture.home_team.country_name
+                                )}
+                                countryName={nextFixture.home_team.country_name}
+                                flagSize={40}
+                                showName={false}
+                                align="center"
+                              />
+                              <Text style={styles.nextMatchTeamName} numberOfLines={2} ellipsizeMode="tail">
+                                {nextFixture.home_team.country_name}
+                              </Text>
+                            </>
+                          ) : (
+                            <Text style={styles.nextMatchTeamName} numberOfLines={2}>
+                              {nextFixture.home_team_id}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                      <Text style={styles.nextMatchVs}>v</Text>
+                      <View style={[styles.nextMatchSide, styles.nextMatchSideAway]}>
+                        <View style={styles.nextMatchTeamBlock}>
+                          {nextFixture.away_team ? (
+                            <>
+                              <CountryFlag
+                                countryCode={countryCodeFromTeam(
+                                  nextFixture.away_team.country_code,
+                                  nextFixture.away_team.country_name
+                                )}
+                                countryName={nextFixture.away_team.country_name}
+                                flagSize={40}
+                                showName={false}
+                                align="center"
+                              />
+                              <Text style={styles.nextMatchTeamName} numberOfLines={2} ellipsizeMode="tail">
+                                {nextFixture.away_team.country_name}
+                              </Text>
+                            </>
+                          ) : (
+                            <Text style={styles.nextMatchTeamName} numberOfLines={2}>
+                              {nextFixture.away_team_id}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    </View>
+                    <Text style={styles.nextMeta}>
+                      {new Date(nextFixture.match_date).toLocaleDateString(undefined, {
+                        weekday: 'short',
+                        day: 'numeric',
+                        month: 'short',
+                      })}{' '}
+                      ·{' '}
+                      {new Date(nextFixture.match_date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                    <Text style={[styles.muted, styles.nextPitchMuted, { marginBottom: 0, marginTop: 8 }]}>
+                      Tap for fixtures & results
+                    </Text>
+                  </>
+                ) : (
+                  <Text style={[styles.muted, styles.nextPitchMuted]}>
+                    No upcoming fixtures loaded yet. Tap to open fixtures & results.
+                  </Text>
+                )}
+              </View>
+            </View>
+          </ImageBackground>
         </TouchableOpacity>
 
         <View style={styles.homePrimaryRow}>
@@ -502,7 +648,7 @@ export function WorldCupHomeScreen() {
             onPress={() => router.push(wcHref('/(wc2026)/(tabs)/selections'))}
             activeOpacity={0.85}
           >
-            <Ionicons name="list-outline" size={20} color={theme.colors.black} />
+            <Ionicons name="list-outline" size={20} color={theme.colors.white} />
             <Text style={styles.homePrimaryBtnText}>My selections</Text>
           </TouchableOpacity>
           <TouchableOpacity
