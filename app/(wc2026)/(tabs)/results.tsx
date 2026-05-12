@@ -70,10 +70,34 @@ export default function WorldCupResultsTab() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View>
-        <Text style={styles.title}>Results</Text>
-        <Text style={styles.subtitle}>Knockout results are generated from your saved predictions as you progress.</Text>
+        <Text style={styles.title}>Fixtures & results</Text>
+        <Text style={styles.subtitle}>
+          Browse the schedule and official outcomes, then review your saved knockout brackets below.
+        </Text>
       </View>
 
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => router.push(wcHref('/(wc2026)/(tabs)/fixtures') as any)}
+        style={styles.card}
+      >
+        <View style={styles.cardLeft}>
+          <Ionicons name="calendar-outline" size={18} color={theme.colors.accent} />
+          <View style={styles.cardText}>
+            <Text style={styles.cardTitle} numberOfLines={1}>
+              Fixtures
+            </Text>
+            <Text style={styles.cardSub} numberOfLines={2}>
+              Full schedule — kickoff times and match list
+            </Text>
+          </View>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />
+      </TouchableOpacity>
+
+      <Text style={[styles.subtitle, { marginTop: 8, marginBottom: 4, fontWeight: '600', color: theme.colors.text }]}>
+        Your bracket results
+      </Text>
       {links.map((l) => (
         <TouchableOpacity key={l.href} activeOpacity={0.8} onPress={() => router.push(wcHref(l.href) as any)} style={styles.card}>
           <View style={styles.cardLeft}>

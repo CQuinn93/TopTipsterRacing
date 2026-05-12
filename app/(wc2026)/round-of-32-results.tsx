@@ -1,19 +1,18 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { Alert } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  StyleSheet, 
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
   ScrollView,
-  ActivityIndicator
+  ActivityIndicator,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { IconSymbol } from '@/features/wc2026/components/IconSymbol';
-import { DesignColors } from '@/features/wc2026/constants/design-colors';
+import { useTheme } from '@/contexts/ThemeContext';
+import { WcKnockoutResultsHeader } from '@/features/wc2026/components/WcKnockoutResultsHeader';
 import { WC2026_STORAGE_PREFIX } from '@/features/wc2026/constants/storage-keys';
 import { AntePostGroupTable } from '@/features/wc2026/components/ante-post-group-table';
 import { type Match } from '@/features/wc2026/services/fixtures';
@@ -38,7 +37,7 @@ interface RouteParams {
 }
 
 export default function RoundOf32ResultsScreen() {
-  const insets = useSafeAreaInsets();
+  const theme = useTheme();
   const params = useLocalSearchParams() as RouteParams;
   const [groupStandings, setGroupStandings] = useState<Record<string, FinalGroupStanding[]>>({});
   const [advancingTeams, setAdvancingTeams] = useState<Set<string>>(new Set());
@@ -118,6 +117,78 @@ export default function RoundOf32ResultsScreen() {
     loadData();
   }, [params.groupStandings, params.advancingTeams, params.knockedOutTeams]);
 
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        container: {
+          flex: 1,
+          backgroundColor: theme.colors.background,
+        },
+        loadingContainer: {
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: theme.spacing.md,
+          padding: theme.spacing.lg,
+        },
+        loadingText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          color: theme.colors.textSecondary,
+          textAlign: 'center',
+        },
+        scrollView: {
+          flex: 1,
+        },
+        scrollContent: {
+          padding: theme.spacing.md,
+          paddingBottom: 100,
+        },
+        sectionTitle: {
+          fontFamily: theme.fontFamily.regular,
+          color: theme.colors.text,
+          fontSize: 22,
+          fontWeight: '700',
+          marginBottom: theme.spacing.sm,
+        },
+        description: {
+          fontFamily: theme.fontFamily.light,
+          color: theme.colors.textSecondary,
+          fontSize: 14,
+          lineHeight: 22,
+          marginBottom: theme.spacing.lg,
+        },
+        groupContainer: {
+          marginBottom: theme.spacing.lg,
+        },
+        groupTitle: {
+          fontFamily: theme.fontFamily.regular,
+          color: theme.colors.text,
+          fontSize: 18,
+          fontWeight: '700',
+          marginBottom: theme.spacing.sm,
+        },
+        tableWrapper: {
+          position: 'relative',
+        },
+        continueButton: {
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.md,
+          paddingVertical: theme.spacing.md,
+          paddingHorizontal: theme.spacing.lg,
+          alignItems: 'center',
+          marginTop: theme.spacing.lg,
+        },
+        continueButtonText: {
+          fontFamily: theme.fontFamily.regular,
+          color: theme.colors.white,
+          fontSize: 17,
+          fontWeight: '700',
+        },
+      }),
+    [theme]
+  );
+
   // Removed handleReorderThirdPlace - no longer needed with matrix-based assignments
 
   const handleContinue = async () => {
@@ -153,18 +224,12 @@ export default function RoundOf32ResultsScreen() {
   if (loading) {
     return (
       <View style={styles.container}>
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <IconSymbol name="chevron.left" size={24} color={DesignColors.text} />
-            <Text style={styles.backButtonText}>Back</Text>
-          </TouchableOpacity>
-          <View style={styles.backButton} />
-        </View>
+        <WcKnockoutResultsHeader
+          subtitle="Final standings from Group Stage"
+          onBack={() => router.back()}
+        />
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={DesignColors.primary} />
+          <ActivityIndicator size="large" color={theme.colors.accent} />
           <Text style={styles.loadingText}>Generating Round of 32 fixtures based on your predictions...</Text>
         </View>
       </View>
@@ -173,21 +238,10 @@ export default function RoundOf32ResultsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <IconSymbol name="chevron.left" size={24} color={DesignColors.text} />
-          <Text style={styles.backButtonText}>Back</Text>
-          </TouchableOpacity>
-        <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>Ante Post</Text>
-          <Text style={styles.headerSubtitle}>Final standings from Group Stage</Text>
-        </View>
-        <View style={styles.backButton} />
-      </View>
+      <WcKnockoutResultsHeader
+        subtitle="Final standings from Group Stage"
+        onBack={() => router.back()}
+      />
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         <Text style={styles.sectionTitle}>Teams Advancing to Round of 32</Text>
@@ -230,111 +284,3 @@ export default function RoundOf32ResultsScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: DesignColors.surface,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-    minWidth: 80,
-  },
-  backButtonText: {
-    color: DesignColors.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  headerTitle: {
-    color: DesignColors.text,
-    fontSize: 18,
-    fontWeight: '700',
-    fontFamily: 'Ethnocentric',
-    textAlign: 'center',
-    marginTop: 50,
-  },
-  headerSubtitle: {
-    color: DesignColors.text,
-    fontSize: 14,
-    fontWeight: '400',
-    textAlign: 'center',
-    marginTop: 2,
-    opacity: 0.7,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 16,
-  },
-  loadingText: {
-    color: DesignColors.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 100,
-  },
-  sectionTitle: {
-    color: DesignColors.text,
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  description: {
-    color: DesignColors.text,
-    fontSize: 14,
-    marginBottom: 24,
-    opacity: 0.7,
-  },
-  groupContainer: {
-    marginBottom: 24,
-  },
-  groupTitle: {
-    color: DesignColors.text,
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  tableWrapper: {
-    position: 'relative',
-  },
-  continueButton: {
-    backgroundColor: DesignColors.actionButton,
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  continueButtonText: {
-    color: DesignColors.textOnDark,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  
-  headerTitleContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    pointerEvents: 'none',
-  },
-});

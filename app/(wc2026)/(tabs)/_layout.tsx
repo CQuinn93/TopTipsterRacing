@@ -1,25 +1,11 @@
-import { Tabs, useSegments } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, Platform, useColorScheme } from 'react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useWcShell } from '@/contexts/WcShellContext';
-import { router } from 'expo-router';
+import { Tabs, useSegments, router } from 'expo-router';
 import { wcHref } from '@/features/wc2026/utils/href';
-
-function HubHeaderButton() {
-  const theme = useTheme();
-  const scheme = useColorScheme();
-  const isLight = scheme !== 'dark';
-  const iconColor = isLight ? theme.colors.white : theme.colors.text;
-
-  return (
-    <TouchableOpacity onPress={() => router.replace(wcHref('/competition-hub'))} style={{ marginLeft: 12 }} hitSlop={12}>
-      <Ionicons name="swap-horizontal-outline" size={22} color={iconColor} />
-    </TouchableOpacity>
-  );
-}
 
 function WebWcHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
   const theme = useTheme();
@@ -30,7 +16,7 @@ function WebWcHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
     index: 'Home',
     selections: 'My Selections',
     competitions: 'My Competitions',
-    results: 'Results',
+    results: 'Fixtures & results',
     fixtures: 'Fixtures',
   };
   const title = titleMap[current] ?? 'Top Tipster Football';
@@ -91,7 +77,7 @@ function WebWcTopNav() {
     { key: 'index', label: 'Home', icon: 'home-outline', href: wcHref('/(wc2026)/(tabs)') },
     { key: 'selections', label: 'My Selections', icon: 'list', href: wcHref('/(wc2026)/(tabs)/selections') },
     { key: 'competitions', label: 'My Competitions', icon: 'medal-outline', href: wcHref('/(wc2026)/(tabs)/competitions') },
-    { key: 'results', label: 'Results', icon: 'trophy-outline', href: wcHref('/(wc2026)/(tabs)/results') },
+    { key: 'results', label: 'Fixtures & results', icon: 'calendar-outline', href: wcHref('/(wc2026)/(tabs)/results') },
   ];
 
   const styles = useMemo(
@@ -166,7 +152,7 @@ export default function WorldCupTabsLayout() {
           headerStyle: { backgroundColor: isLight ? theme.colors.accent : theme.colors.background },
           headerTintColor: isLight ? theme.colors.white : theme.colors.text,
           headerTitleStyle: { fontFamily: theme.fontFamily.regular },
-          headerLeft: () => <HubHeaderButton />,
+          headerLeft: Platform.OS === 'web' ? undefined : () => null,
           tabBarStyle: isWeb
             ? ({ display: 'none' } as any)
             : ({
@@ -210,8 +196,8 @@ export default function WorldCupTabsLayout() {
         <Tabs.Screen
           name="results"
           options={{
-            title: 'Results',
-            tabBarIcon: ({ color, size }) => <Ionicons name="trophy-outline" size={size} color={color} />,
+            title: 'Fixtures & results',
+            tabBarIcon: ({ color, size }) => <Ionicons name="calendar-outline" size={size} color={color} />,
           }}
         />
         <Tabs.Screen

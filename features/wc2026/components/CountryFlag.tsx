@@ -23,7 +23,7 @@ export function CountryFlag({
   namePosition = 'beside',
   reverseOrder = false,
 }: CountryFlagProps) {
-  const flagImage = getTeamImage(countryCode);
+  const flagImage = getTeamImage(countryCode, countryName);
 
   const alignStyle =
     align === 'left' ? styles.alignLeft : align === 'right' ? styles.alignRight : styles.alignCenter;

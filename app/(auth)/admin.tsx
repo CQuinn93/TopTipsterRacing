@@ -479,6 +479,15 @@ export default function AdminScreen() {
         <Text style={styles.adminSubTitle}>
           Join requests, admin access, competition list (codes & creators), new competitions, and selection edits.
         </Text>
+        <TouchableOpacity
+          style={styles.wcFootballLink}
+          onPress={() => router.push('/(auth)/admin-wc-football')}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="football-outline" size={18} color={activeTheme.colors.accent} />
+          <Text style={styles.wcFootballLinkText}>World Cup football — mini-leagues & tournament gates</Text>
+          <Ionicons name="chevron-forward" size={16} color={activeTheme.colors.textMuted} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -1060,6 +1069,25 @@ function createAdminStyles(t: Theme) {
     fontSize: 13,
     color: t.colors.textMuted,
     lineHeight: 19,
+  },
+  wcFootballLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: t.spacing.sm,
+    marginTop: t.spacing.md,
+    paddingVertical: t.spacing.sm,
+    paddingHorizontal: t.spacing.md,
+    borderRadius: t.radius.md,
+    borderWidth: 1,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surface,
+  },
+  wcFootballLinkText: {
+    flex: 1,
+    fontFamily: t.fontFamily.regular,
+    fontSize: 13,
+    fontWeight: '600',
+    color: t.colors.text,
   },
   backButton: {
     alignSelf: 'flex-start',

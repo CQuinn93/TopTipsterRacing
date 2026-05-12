@@ -1,7 +1,8 @@
+import { useMemo } from 'react';
 import { StyleSheet, Text, View, Dimensions } from 'react-native';
 
+import { useTheme } from '@/contexts/ThemeContext';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
-import { DesignColors } from '@/features/wc2026/constants/design-colors';
 import { type Match } from '@/features/wc2026/services/fixtures';
 import { type Prediction } from '@/features/wc2026/services/predictions';
 
@@ -51,6 +52,109 @@ export function AntePostGroupTable({
   advancingTeams,
   knockedOutTeams
 }: AntePostGroupTableProps) {
+  const theme = useTheme();
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        tableContainer: {
+          borderRadius: 12,
+          backgroundColor: theme.colors.surface,
+          overflow: 'hidden',
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        tableHeader: {
+          flexDirection: 'row',
+          backgroundColor: theme.colors.surfaceElevated,
+          paddingVertical: 8,
+          paddingHorizontal: 6,
+          borderBottomWidth: 2,
+          borderBottomColor: theme.colors.accent,
+        },
+        tableRow: {
+          flexDirection: 'row',
+          paddingVertical: 7,
+          paddingHorizontal: 6,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+          alignItems: 'center',
+        },
+        tableRowWithOverlay: {
+          position: 'relative',
+        },
+        overlay: {
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          borderRadius: 0,
+        },
+        advancingOverlay: {
+          backgroundColor: theme.colors.accentMuted,
+        },
+        knockedOutOverlay: {
+          backgroundColor: 'rgba(220, 38, 38, 0.18)',
+        },
+        headerCell: {
+          color: theme.colors.text,
+          fontSize: 10,
+          fontWeight: '700',
+          textAlign: 'center',
+          fontFamily: theme.fontFamily.regular,
+        },
+        cell: {
+          color: theme.colors.text,
+          fontSize: 12,
+          fontWeight: '600',
+          textAlign: 'center',
+          fontFamily: theme.fontFamily.regular,
+        },
+        positionCell: {
+          width: 30,
+        },
+        teamCell: {
+          flex: 2,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          paddingLeft: 2,
+          minWidth: 108,
+        },
+        teamCellSmall: {
+          flex: 1.5,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+          paddingLeft: 2,
+          minWidth: 84,
+        },
+        teamName: {
+          color: theme.colors.text,
+          fontSize: 12,
+          fontWeight: '600',
+          flex: 1,
+          fontFamily: theme.fontFamily.regular,
+        },
+        statsCell: {
+          width: 30,
+        },
+        goalsCell: {
+          width: 44,
+        },
+        pointsCell: {
+          width: 40,
+        },
+        pointsText: {
+          fontWeight: '700',
+          color: theme.colors.accent,
+          fontFamily: theme.fontFamily.regular,
+        },
+      }),
+    [theme]
+  );
+
   // Use provided standings if available, otherwise calculate
   const calculateStandings = (): TeamStanding[] => {
     // If standings are provided, use them (for results screen)
@@ -232,94 +336,3 @@ export function AntePostGroupTable({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  tableContainer: {
-    borderRadius: 12,
-    backgroundColor: DesignColors.surface,
-    overflow: 'hidden',
-  },
-  tableHeader: {
-    flexDirection: 'row',
-    backgroundColor: DesignColors.text,
-    paddingVertical: 8,
-    paddingHorizontal: 6,
-    borderBottomWidth: 1.5,
-    borderBottomColor: DesignColors.primary,
-  },
-  tableRow: {
-    flexDirection: 'row',
-    paddingVertical: 7,
-    paddingHorizontal: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(71, 74, 74, 0.1)',
-    alignItems: 'center',
-  },
-  tableRowWithOverlay: {
-    position: 'relative',
-  },
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: 0,
-  },
-  advancingOverlay: {
-    backgroundColor: 'rgba(60, 172, 59, 0.2)', // Green semi-transparent
-  },
-  knockedOutOverlay: {
-    backgroundColor: 'rgba(230, 29, 37, 0.2)', // Red semi-transparent
-  },
-  headerCell: {
-    color: DesignColors.textOnDark,
-    fontSize: 10,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  cell: {
-    color: DesignColors.text,
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  positionCell: {
-    width: 30,
-  },
-  teamCell: {
-    flex: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingLeft: 2,
-    minWidth: 108,
-  },
-  teamCellSmall: {
-    flex: 1.5,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingLeft: 2,
-    minWidth: 84,
-  },
-  teamName: {
-    color: DesignColors.text,
-    fontSize: 12,
-    fontWeight: '600',
-    flex: 1,
-  },
-  statsCell: {
-    width: 30,
-  },
-  goalsCell: {
-    width: 44,
-  },
-  pointsCell: {
-    width: 40,
-  },
-  pointsText: {
-    fontWeight: '700',
-    color: DesignColors.primary,
-  },
-});

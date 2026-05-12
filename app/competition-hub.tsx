@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode, cloneElement, isValidElement, type ReactElement } from 'react';
 import {
   View,
   Text,
@@ -7,14 +7,14 @@ import {
   ScrollView,
   useWindowDimensions,
   Platform,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/contexts/ThemeContext';
-import { lightTheme } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { wcHref } from '@/features/wc2026/utils/href';
@@ -22,171 +22,228 @@ import { setLastRoute } from '@/lib/lastRoute';
 
 const DESKTOP_BREAKPOINT = 768;
 
-type SportCardProps = {
+const TERMS_OF_USE_URL =
+  'https://doc-hosting.flycricket.io/top-tipster-racing-terms-of-use/bf206b6c-02a2-4394-aedc-dbf95f95d955/terms';
+const PRIVACY_POLICY_URL =
+  'https://doc-hosting.flycricket.io/top-tipster-racing-fantasy-sports-privacy-policy/98fbb3c4-4795-4774-bba7-c2ebb872eb92/privacy';
+
+function iconWithColor(icon: ReactNode, color: string) {
+  if (isValidElement(icon)) {
+    return cloneElement(icon as ReactElement<{ color?: string }>, { color });
+  }
+  return icon;
+}
+
+type SportIconTileProps = {
   title: string;
-  subtitle: string;
-  icon: keyof typeof Ionicons.glyphMap;
+  /** Uppercase sport line (replaces “SPORTS” in the mini wordmark) */
+  sportWordmark: string;
+  icon: ReactNode;
   onPress?: () => void;
   disabled?: boolean;
   comingSoon?: boolean;
   isDesktop: boolean;
+  isNativeMobile: boolean;
 };
 
-function SportCard({ title, subtitle, icon, onPress, disabled, comingSoon, isDesktop }: SportCardProps) {
+function SportIconTile({
+  title,
+  sportWordmark,
+  icon,
+  onPress,
+  disabled,
+  comingSoon,
+  isDesktop,
+  isNativeMobile,
+}: SportIconTileProps) {
   const theme = useTheme();
-  const isLight = String(theme.colors.background) === String(lightTheme.colors.background);
-  const accent = theme.colors.accent;
-  const surface = isLight ? theme.colors.surface : theme.colors.surfaceElevated;
   const isWeb = Platform.OS === 'web';
+  const brandOnWhite = theme.colors.black;
+  const mutedIcon = iconWithColor(icon, theme.colors.textMuted);
+  const sportLetterSpacing = sportWordmark.length > 6 ? (isNativeMobile ? 4 : 3.5) : isNativeMobile ? 6 : 5.5;
+  const sportFontSize = isNativeMobile ? 14 : isDesktop ? 13 : 13;
 
   const s = useMemo(
     () =>
       StyleSheet.create({
-        outer: {
+        col: {
           width: '100%' as const,
-          borderRadius: 20,
-          overflow: 'hidden',
-          flexDirection: 'row' as const,
-          minHeight: isDesktop ? 96 : 80,
-          backgroundColor: surface,
-          borderWidth: 1,
-          borderColor: isLight ? `${accent}22` : theme.colors.border,
+          alignItems: 'center' as const,
+        },
+        colDisabled: { opacity: 0.72 },
+        /** Active sport: white tile, green border */
+        cardFace: {
+          width: '100%' as const,
+          borderRadius: 14,
+          backgroundColor: theme.colors.white,
+          borderWidth: 2,
+          borderColor: theme.colors.accent,
+          paddingHorizontal: 0,
+          paddingTop: isDesktop ? 5 : 4,
+          paddingBottom: isDesktop ? 6 : 5,
+          alignItems: 'center' as const,
+          justifyContent: 'flex-start' as const,
           ...(isWeb && {
             shadowColor: '#000',
-            shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.14,
-            shadowRadius: 16,
-            elevation: 4,
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.08,
+            shadowRadius: 6,
+            elevation: 2,
           }),
         },
-        outerDisabled: { opacity: 0.88 },
-        accentRail: {
-          width: 4,
-          backgroundColor: accent,
-        },
-        body: {
-          flex: 1,
-          flexDirection: 'row' as const,
-          alignItems: 'center' as const,
-          paddingVertical: 14,
-          paddingLeft: 14,
-          paddingRight: 16,
-          gap: 14,
-        },
-        ringOuter: {
-          width: 54,
-          height: 54,
-          borderRadius: 27,
-          backgroundColor: `${accent}14`,
+        cardIconWrap: {
+          width: '100%' as const,
+          paddingHorizontal: 0,
           alignItems: 'center' as const,
           justifyContent: 'center' as const,
+          paddingBottom: isDesktop ? 7 : 6,
         },
-        ringInner: {
-          width: 44,
-          height: 44,
-          borderRadius: 22,
-          backgroundColor: `${accent}22`,
-          alignItems: 'center' as const,
-          justifyContent: 'center' as const,
+        cardTextPad: {
+          width: '100%' as const,
+          paddingHorizontal: isDesktop ? 8 : 6,
+          paddingBottom: 2,
         },
-        textCol: { flex: 1, minWidth: 0 },
-        title: {
+        cardBrand: {
+          fontFamily: theme.fontFamily.swish,
+          fontSize: isDesktop ? 35 : isNativeMobile ? 30 : 25,
+          /** Must be ≥ fontSize or Swish ascenders clip (RN uses lineHeight as the line box height). */
+          lineHeight: isDesktop ? 44 : isNativeMobile ? 38 : 32,
+          color: brandOnWhite,
+          textAlign: 'center' as const,
+          letterSpacing: isNativeMobile ? 0.9 : 0.75,
+        },
+        cardSportTitle: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: isDesktop ? 17 : 16,
-          fontWeight: '700',
-          color: theme.colors.text,
-          letterSpacing: -0.2,
-        },
-        subtitle: {
-          fontFamily: theme.fontFamily.light,
-          fontSize: 13,
-          lineHeight: 18,
-          color: theme.colors.textSecondary,
-          marginTop: 4,
-        },
-        chevronCircle: {
-          width: 44,
-          height: 44,
-          borderRadius: 22,
-          backgroundColor: `${accent}18`,
-          alignItems: 'center' as const,
-          justifyContent: 'center' as const,
-        },
-        comingSoonPill: {
-          paddingHorizontal: 12,
-          paddingVertical: 8,
-          borderRadius: 999,
-          backgroundColor: `${accent}16`,
-          borderWidth: 1,
-          borderColor: `${accent}55`,
-        },
-        comingSoonText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 10,
+          fontSize: sportFontSize,
           fontWeight: '800',
-          color: accent,
-          letterSpacing: 1,
+          color: theme.colors.accent,
+          textAlign: 'center' as const,
+          letterSpacing: sportLetterSpacing,
+          textTransform: 'uppercase' as const,
+          marginTop: isNativeMobile ? 4 : 3,
+        },
+        /** Golf: same white tile + ribbon; content greyed */
+        soonCard: {
+          width: '100%' as const,
+          borderRadius: 14,
+          backgroundColor: theme.colors.white,
+          borderWidth: 2,
+          borderColor: theme.colors.accent,
+          overflow: 'hidden' as const,
+          position: 'relative' as const,
+          ...(isWeb && {
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.08,
+            shadowRadius: 6,
+            elevation: 2,
+          }),
+        },
+        soonInner: {
+          paddingHorizontal: 0,
+          paddingTop: isDesktop ? 5 : 4,
+          paddingBottom: isDesktop ? 6 : 5,
+          alignItems: 'center' as const,
+          justifyContent: 'flex-start' as const,
+          opacity: 0.5,
+        },
+        soonIconWrap: {
+          width: '100%' as const,
+          paddingHorizontal: 0,
+          alignItems: 'center' as const,
+          justifyContent: 'center' as const,
+          paddingBottom: isDesktop ? 7 : 6,
+        },
+        soonTextPad: {
+          width: '100%' as const,
+          paddingHorizontal: isDesktop ? 8 : 6,
+          paddingBottom: 2,
+        },
+        soonBrand: {
+          fontFamily: theme.fontFamily.swish,
+          fontSize: isDesktop ? 17 : isNativeMobile ? 16 : 15,
+          lineHeight: isDesktop ? 22 : 20,
+          color: theme.colors.textMuted,
+          textAlign: 'center' as const,
+          letterSpacing: isNativeMobile ? 0.9 : 0.75,
+        },
+        soonSportTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: sportFontSize,
+          fontWeight: '800',
+          color: theme.colors.accent,
+          textAlign: 'center' as const,
+          letterSpacing: sportLetterSpacing,
+          textTransform: 'uppercase' as const,
+          marginTop: isNativeMobile ? 4 : 3,
+        },
+        soonRibbon: {
+          position: 'absolute' as const,
+          left: -28,
+          right: -28,
+          top: '40%',
+          backgroundColor: theme.colors.accent,
+          paddingVertical: isDesktop ? 9 : 8,
+          alignItems: 'center' as const,
+          justifyContent: 'center' as const,
+          transform: [{ rotate: '-14deg' }],
+        },
+        soonRibbonText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: isDesktop ? 11 : 10,
+          fontWeight: '800',
+          color: theme.colors.white,
+          letterSpacing: 2,
         },
       }),
-    [theme, isLight, surface, accent, isDesktop, isWeb]
+    [theme, isDesktop, isWeb, isNativeMobile, brandOnWhite, sportLetterSpacing, sportFontSize]
   );
 
-  const inner = (
-    <View style={[s.outer, disabled && s.outerDisabled]}>
-      <View style={s.accentRail} />
-      <View style={s.body}>
-        <View style={s.ringOuter}>
-          <View style={s.ringInner}>
-            <Ionicons name={icon} size={24} color={accent} />
+  if (comingSoon) {
+    return (
+      <View style={s.col} accessibilityState={{ disabled: true }} accessibilityLabel={`${title}, coming soon`}>
+        <View style={s.soonCard}>
+          <View style={s.soonInner}>
+            <View style={s.soonIconWrap}>{mutedIcon}</View>
+            <View style={s.soonTextPad}>
+              <Text style={s.soonBrand} numberOfLines={2}>
+                Top Tipster
+              </Text>
+              <Text style={s.soonSportTitle}>{sportWordmark}</Text>
+            </View>
+          </View>
+          <View style={s.soonRibbon} pointerEvents="none">
+            <Text style={s.soonRibbonText}>COMING SOON</Text>
           </View>
         </View>
-        <View style={s.textCol}>
-          <Text style={s.title} numberOfLines={1}>
-            {title}
-          </Text>
-          <Text style={s.subtitle} numberOfLines={2}>
-            {subtitle}
-          </Text>
-        </View>
-        {comingSoon ? (
-          <View style={s.comingSoonPill}>
-            <Text style={s.comingSoonText}>COMING SOON</Text>
-          </View>
-        ) : (
-          <View style={s.chevronCircle}>
-            <Ionicons name="chevron-forward" size={22} color={accent} />
-          </View>
-        )}
+      </View>
+    );
+  }
+
+  const cardInner = (
+    <View style={s.cardFace}>
+      <View style={s.cardIconWrap}>{icon}</View>
+      <View style={s.cardTextPad}>
+        <Text style={s.cardBrand} numberOfLines={4}>
+          Top Tipster
+        </Text>
+        <Text style={s.cardSportTitle}>{sportWordmark}</Text>
       </View>
     </View>
   );
 
   if (disabled || !onPress) {
-    return inner;
+    return (
+      <View style={[s.col, disabled && s.colDisabled]}>
+        {cardInner}
+      </View>
+    );
   }
 
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.88}>
-      {inner}
+    <TouchableOpacity onPress={onPress} activeOpacity={0.88} style={s.col} accessibilityRole="button">
+      {cardInner}
     </TouchableOpacity>
-  );
-}
-
-function SubHeadline() {
-  const theme = useTheme();
-  const base = {
-    fontFamily: theme.fontFamily.light,
-    fontSize: 14,
-    lineHeight: 21,
-    textAlign: 'center' as const,
-    color: theme.colors.textSecondary,
-  };
-  const green = { color: theme.colors.accent, fontFamily: theme.fontFamily.regular, fontWeight: '600' as const };
-  return (
-    <Text style={base}>
-      Same account everywhere — pick <Text style={green}>Football</Text>, <Text style={green}>Racing</Text>, or{' '}
-      <Text style={green}>Golf</Text> (soon).
-    </Text>
   );
 }
 
@@ -261,7 +318,6 @@ export default function CompetitionHubScreen() {
         scrollContent: {
           flexGrow: 1,
           paddingHorizontal: horizontalPad,
-          paddingBottom: theme.spacing.xxl + 32,
           alignItems: 'center' as const,
           width: '100%' as const,
         },
@@ -302,7 +358,16 @@ export default function CompetitionHubScreen() {
           fontWeight: '700',
           color: theme.colors.text,
           textAlign: 'center',
+        },
+        welcomeSection: {
+          width: '100%' as const,
+          paddingBottom: theme.spacing.lg,
           marginBottom: theme.spacing.lg,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+        },
+        sportSection: {
+          width: '100%' as const,
         },
         headline: {
           fontFamily: theme.fontFamily.regular,
@@ -310,118 +375,115 @@ export default function CompetitionHubScreen() {
           fontWeight: '700',
           color: theme.colors.text,
           textAlign: 'center',
-          marginBottom: 10,
+          marginBottom: theme.spacing.md,
           letterSpacing: -0.3,
         },
-        subHeadlineWrap: {
-          marginBottom: theme.spacing.lg + 6,
-          paddingHorizontal: theme.spacing.xs,
-        },
-        cardRow: {
+        sportIconGrid: {
           width: '100%' as const,
-          gap: isDesktop ? 14 : 12,
-        },
-        cardRowDesktop: {
           flexDirection: 'row' as const,
           flexWrap: 'wrap' as const,
           justifyContent: 'center' as const,
-          gap: 14,
         },
-        cardRowMobile: {
-          flexDirection: 'column' as const,
-        },
-        cardSlotDesktop: {
-          flexGrow: 1,
-          flexShrink: 1,
-          flexBasis: 0,
-          minWidth: 0,
-        },
-        cardSlotMobile: {
-          width: '100%' as const,
-        },
-        cardSlotFullRow: {
-          width: '100%' as const,
-          flexBasis: '100%' as const,
-        },
-        footer: {
-          marginTop: theme.spacing.xl,
+        legalRow: {
           flexDirection: 'row' as const,
+          justifyContent: 'center' as const,
           alignItems: 'center' as const,
-          gap: 14,
-          paddingVertical: 18,
-          paddingHorizontal: 18,
-          borderRadius: 18,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.surfaceElevated,
-          ...(isWeb && {
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 8 },
-            shadowOpacity: 0.12,
-            shadowRadius: 24,
-            elevation: 6,
-          }),
+          flexWrap: 'wrap' as const,
+          gap: theme.spacing.md,
+          marginBottom: theme.spacing.md,
         },
-        footerTexts: { flex: 1, minWidth: 0 },
-        footerTitle: {
+        legalLink: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+          textDecorationLine: 'underline' as const,
+        },
+        bottomBar: {
+          zIndex: 1,
+          alignItems: 'center' as const,
+          paddingTop: theme.spacing.md,
+          paddingHorizontal: horizontalPad,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.colors.border,
+          backgroundColor: theme.colors.background,
+          maxWidth: maxHubWidth,
+          width: '100%' as const,
+          alignSelf: 'center' as const,
+        },
+        bottomBarTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
           fontWeight: '700',
           color: theme.colors.text,
           letterSpacing: -0.2,
+          textAlign: 'center' as const,
         },
-        footerSub: {
+        bottomBarSub: {
           fontFamily: theme.fontFamily.light,
-          fontSize: 13,
+          fontSize: 12,
           color: theme.colors.textSecondary,
           marginTop: 4,
-          lineHeight: 19,
+          lineHeight: 18,
+          textAlign: 'center' as const,
         },
       }),
-    [theme, isDesktop, isNativeMobile, isWeb, horizontalPad]
+    [theme, isDesktop, isNativeMobile, isWeb, horizontalPad, maxHubWidth]
   );
 
-  const cardSlots = [
-    {
-      title: 'Football',
-      subtitle: 'World Cup 2026 — predictions and fixtures',
-      icon: 'football-outline' as const,
-      onPress: () => {
-        void setLastRoute('/(wc2026)/(tabs)');
-        router.replace(wcHref('/(wc2026)/(tabs)'));
+  const sportTileGap = theme.spacing.md;
+  const sportTileWidth = (hubColumnWidth - sportTileGap) / 2;
+
+  const cardSlots = useMemo(() => {
+    const iconSz = isDesktop ? 56 : isNativeMobile ? 52 : 54;
+    const iconColor = theme.colors.accent;
+    return [
+      {
+        title: 'Football',
+        sportWordmark: 'FOOTBALL',
+        icon: <Ionicons name="football-outline" size={iconSz} color={iconColor} />,
+        onPress: () => {
+          void setLastRoute('/(wc2026)/(tabs)');
+          router.replace(wcHref('/(wc2026)/(tabs)'));
+        },
+        disabled: false,
+        comingSoon: false,
       },
-      disabled: false,
-      comingSoon: false,
-    },
-    {
-      title: 'Racing',
-      subtitle: 'Horse racing competitions and daily selections',
-      icon: 'trophy-outline' as const,
-      onPress: () => {
-        void setLastRoute('/(app)');
-        router.replace('/(app)');
+      {
+        title: 'Racing',
+        sportWordmark: 'RACING',
+        icon: <MaterialCommunityIcons name="horse-variant" size={iconSz} color={iconColor} />,
+        onPress: () => {
+          void setLastRoute('/(app)');
+          router.replace('/(app)');
+        },
+        disabled: false,
+        comingSoon: false,
       },
-      disabled: false,
-      comingSoon: false,
-    },
-    {
-      title: 'Golf',
-      subtitle: 'Fantasy golf — launching here soon',
-      icon: 'flag-outline' as const,
-      onPress: undefined,
-      disabled: true,
-      comingSoon: true,
-    },
-  ];
+      {
+        title: 'Golf',
+        sportWordmark: 'GOLF',
+        icon: <Ionicons name="flag-outline" size={iconSz} color={iconColor} />,
+        onPress: undefined,
+        disabled: true,
+        comingSoon: true,
+      },
+    ];
+  }, [isDesktop, isNativeMobile, theme.colors.accent]);
 
   const accentRgb = theme.colors.accent;
 
   const scrollPaddingTop = isWeb
     ? theme.spacing.lg + 8
     : insets.top + theme.spacing.lg + 20;
-  const scrollPaddingBottom = isWeb
-    ? theme.spacing.xxl + 24
-    : theme.spacing.xxl + 24 + Math.max(insets.bottom, theme.spacing.sm);
+  /** Space so content clears the fixed bottom bar (legal links + tagline + safe area) */
+  const bottomBarReserve =
+    theme.spacing.md +
+    36 +
+    theme.spacing.md +
+    52 +
+    theme.spacing.sm +
+    Math.max(insets.bottom, theme.spacing.md);
+  const scrollPaddingBottom = theme.spacing.lg + bottomBarReserve;
 
   return (
     <View style={styles.root}>
@@ -457,53 +519,60 @@ export default function CompetitionHubScreen() {
             <Text style={styles.wordmarkSub}>SPORTS</Text>
           </View>
 
-          <Text style={styles.welcomeLabel}>Welcome back</Text>
-          <Text style={styles.welcomeName}>{displayName || 'there'}</Text>
-
-          <Text style={styles.headline}>Choose a sport</Text>
-          <View style={styles.subHeadlineWrap}>
-            <SubHeadline />
+          <View style={styles.welcomeSection}>
+            <Text style={styles.welcomeLabel}>Welcome back</Text>
+            <Text style={styles.welcomeName}>{displayName || 'there'}</Text>
           </View>
 
-          <View
-            style={[
-              styles.cardRow,
-              isDesktop ? styles.cardRowDesktop : styles.cardRowMobile,
-            ]}
-          >
-            {cardSlots.map((c, index) => (
-              <View
-                key={c.title}
-                style={
-                  isDesktop
-                    ? index === 2
-                      ? styles.cardSlotFullRow
-                      : styles.cardSlotDesktop
-                    : styles.cardSlotMobile
-                }
-              >
-                <SportCard
-                  title={c.title}
-                  subtitle={c.subtitle}
-                  icon={c.icon}
-                  onPress={c.onPress}
-                  disabled={c.disabled}
-                  comingSoon={c.comingSoon}
-                  isDesktop={isDesktop}
-                />
-              </View>
-            ))}
-          </View>
+          <View style={styles.sportSection}>
+            <Text style={styles.headline}>Choose a sport</Text>
 
-          <View style={styles.footer}>
-            <Ionicons name="shield-checkmark" size={28} color={theme.colors.accent} />
-            <View style={styles.footerTexts}>
-              <Text style={styles.footerTitle}>One account. Every sport.</Text>
-              <Text style={styles.footerSub}>Track, tip and compete — all in one place.</Text>
+            <View style={[styles.sportIconGrid, { gap: sportTileGap }]}>
+              {cardSlots.map((c) => (
+                <View key={c.title} style={{ width: sportTileWidth }}>
+                  <SportIconTile
+                    title={c.title}
+                    sportWordmark={c.sportWordmark}
+                    icon={c.icon}
+                    onPress={c.onPress}
+                    disabled={c.disabled}
+                    comingSoon={c.comingSoon}
+                    isDesktop={isDesktop}
+                    isNativeMobile={isNativeMobile}
+                  />
+                </View>
+              ))}
             </View>
           </View>
         </View>
       </ScrollView>
+      <View
+        style={[
+          styles.bottomBar,
+          { paddingBottom: Math.max(insets.bottom, theme.spacing.md) },
+        ]}
+      >
+        <View style={styles.legalRow}>
+          <TouchableOpacity
+            onPress={() => {
+              void Linking.openURL(TERMS_OF_USE_URL);
+            }}
+            accessibilityRole="link"
+          >
+            <Text style={styles.legalLink}>Terms & conditions</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => {
+              void Linking.openURL(PRIVACY_POLICY_URL);
+            }}
+            accessibilityRole="link"
+          >
+            <Text style={styles.legalLink}>Privacy policy</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.bottomBarTitle}>One account. Every sport.</Text>
+        <Text style={styles.bottomBarSub}>Track, tip and compete — all in one place.</Text>
+      </View>
     </View>
   );
 }

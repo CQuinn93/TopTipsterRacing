@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -20,15 +20,9 @@ import { getUpcomingFixtures, type Match } from '@/features/wc2026/services/fixt
 import { getSharedProfile } from '@/features/wc2026/services/profile';
 import { wcHref } from '@/features/wc2026/utils/href';
 import { getAntePostLockedStatus } from '@/features/wc2026/services/async-predictions';
-
-const WC_TOURNAMENT_START = new Date('2026-06-11T00:00:00.000Z');
-const WC_TOURNAMENT_END = new Date('2026-07-20T04:59:59.000Z');
-
-function tournamentPhase(now: Date): 'upcoming' | 'live' | 'complete' {
-  if (now < WC_TOURNAMENT_START) return 'upcoming';
-  if (now > WC_TOURNAMENT_END) return 'complete';
-  return 'live';
-}
+import { getMatchDayTipsUnlocked } from '@/features/wc2026/services/tournament-gates';
+import { getUserPredictions, type Prediction } from '@/features/wc2026/services/predictions';
+import { WC_STAGE_SLICES, sumPointsInRange } from '@/features/wc2026/utils/match-number-stage';
 
 export function WorldCupHomeScreen() {
   const theme = useTheme();
@@ -39,16 +33,22 @@ export function WorldCupHomeScreen() {
   const isNarrowWeb = width < 900;
 
   const [loading, setLoading] = useState(true);
+  const [predsLoading, setPredsLoading] = useState(false);
   const [username, setUsername] = useState('there');
   const [upcomingFixtures, setUpcomingFixtures] = useState<Match[]>([]);
   const [antePostLocked, setAntePostLocked] = useState(false);
-  const [compTab, setCompTab] = useState<'upcoming' | 'live' | 'complete'>('upcoming');
+  const [matchDayTipsUnlocked, setMatchDayTipsUnlocked] = useState(false);
+  const [predictions, setPredictions] = useState<Prediction[]>([]);
+  const [selectionKind, setSelectionKind] = useState<'ante_post' | 'match_day'>('ante_post');
+  const [expandAnteStats, setExpandAnteStats] = useState(false);
+  const [expandMatchDayStats, setExpandMatchDayStats] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     const load = async () => {
       setLoading(true);
+      setPredsLoading(true);
       try {
         if (userId) {
           const profile = await getSharedProfile(userId);
@@ -56,12 +56,26 @@ export function WorldCupHomeScreen() {
         }
         const locked = await getAntePostLockedStatus().catch(() => false);
         if (!cancelled) setAntePostLocked(locked);
+        const md = await getMatchDayTipsUnlocked().catch(() => false);
+        if (!cancelled) setMatchDayTipsUnlocked(md);
         const fixtures = await getUpcomingFixtures(8);
         if (!cancelled) setUpcomingFixtures(fixtures);
+
+        if (userId) {
+          try {
+            const preds = await getUserPredictions(userId);
+            if (!cancelled) setPredictions(preds);
+          } catch {
+            if (!cancelled) setPredictions([]);
+          }
+        } else if (!cancelled) setPredictions([]);
       } catch {
         if (!cancelled) setUpcomingFixtures([]);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setPredsLoading(false);
+        }
       }
     };
 
@@ -72,8 +86,45 @@ export function WorldCupHomeScreen() {
   }, [userId]);
 
   const nextFixture = upcomingFixtures[0] ?? null;
-  const phase = tournamentPhase(new Date());
-  const showCompetitionInTab = compTab === phase;
+
+  const antePreds = useMemo(() => predictions.filter((p) => p.prediction_type === 'ante_post'), [predictions]);
+  const livePreds = useMemo(() => predictions.filter((p) => p.prediction_type === 'live'), [predictions]);
+
+  const anteTotalPoints = useMemo(
+    () => antePreds.reduce((s, p) => s + (p.points_awarded ?? 0), 0),
+    [antePreds]
+  );
+  const matchDayTotalPoints = useMemo(
+    () => livePreds.reduce((s, p) => s + (p.points_awarded ?? 0), 0),
+    [livePreds]
+  );
+
+  const anteStageLines = useMemo(() => {
+    return WC_STAGE_SLICES.map((st) => {
+      const { rows, points } = sumPointsInRange(antePreds, 'ante_post', st.min, st.max);
+      return { ...st, rows, points };
+    }).filter((x) => x.rows > 0 || x.points > 0);
+  }, [antePreds]);
+
+  const matchDayStageLines = useMemo(() => {
+    return WC_STAGE_SLICES.filter((st) => st.min >= 73).map((st) => {
+      const { rows, points } = sumPointsInRange(livePreds, 'live', st.min, st.max, { liveMustHaveTip: true });
+      return { ...st, rows, points };
+    });
+  }, [livePreds]);
+
+  const anteSummaryText = useMemo(() => {
+    if (!userId || predsLoading) return '';
+    const parts = anteStageLines.map((l) => `${l.label}: ${l.rows}`);
+    return parts.length ? parts.join(' · ') : 'No ante post picks saved to the database yet.';
+  }, [userId, predsLoading, anteStageLines]);
+
+  const matchDaySummaryText = useMemo(() => {
+    if (!userId || predsLoading) return '';
+    const withTips = matchDayStageLines.filter((l) => l.rows > 0);
+    if (!withTips.length) return 'No Match Day tips saved yet.';
+    return withTips.map((l) => `${l.label}: ${l.rows}`).join(' · ');
+  }, [userId, predsLoading, matchDayStageLines]);
 
   const styles = useMemo(() => {
     const isLight = String(theme.colors.background) === String(lightTheme.colors.background);
@@ -125,6 +176,40 @@ export function WorldCupHomeScreen() {
         alignItems: 'center',
         gap: theme.spacing.xs,
       },
+      nextBlock: {
+        backgroundColor: theme.colors.surface,
+        borderRadius: theme.radius.md,
+        padding: theme.spacing.md,
+        borderWidth: cardBorderWidth,
+        borderColor: cardBorder,
+        marginBottom: theme.spacing.lg,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        ...webCard,
+      },
+      nextBlockMain: { flex: 1, minWidth: 0 },
+      nextLabel: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 11,
+        color: theme.colors.textMuted,
+        marginBottom: theme.spacing.xs,
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
+      },
+      nextTitle: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 15,
+        fontWeight: '700',
+        color: theme.colors.text,
+      },
+      nextMeta: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 12,
+        color: theme.colors.textSecondary,
+        marginTop: 4,
+      },
       homePrimaryRow: {
         flexDirection: 'row',
         gap: theme.spacing.sm,
@@ -171,20 +256,18 @@ export function WorldCupHomeScreen() {
         fontSize: compact ? 13 : 15,
         fontWeight: '700',
         color: theme.colors.text,
-        marginTop: theme.spacing.lg,
-        marginBottom: compact ? theme.spacing.xs : theme.spacing.sm,
+        marginBottom: theme.spacing.sm,
       },
       sectionTitleFirst: {
         marginTop: 0,
-        marginBottom: theme.spacing.sm,
       },
-      compTabsRow: {
+      selTabsRow: {
         flexDirection: 'row',
         width: '100%',
         marginBottom: theme.spacing.sm,
         gap: theme.spacing.xs,
       },
-      compTab: {
+      selTab: {
         flex: 1,
         paddingVertical: compact ? theme.spacing.xs : theme.spacing.sm,
         paddingHorizontal: theme.spacing.sm,
@@ -193,29 +276,24 @@ export function WorldCupHomeScreen() {
         alignItems: 'center',
         justifyContent: 'center',
       },
-      compTabActive: {
+      selTabActive: {
         backgroundColor: theme.colors.accent,
       },
-      compTabText: {
+      selTabText: {
         fontFamily: theme.fontFamily.regular,
         fontSize: compact ? 11 : 13,
         color: theme.colors.textSecondary,
       },
-      compTabTextActive: {
+      selTabTextActive: {
         color: theme.colors.white,
         fontWeight: '600',
-      },
-      homeCompHint: {
-        fontFamily: theme.fontFamily.regular,
-        fontSize: compact ? 10 : 11,
-        color: theme.colors.textMuted,
-        marginBottom: theme.spacing.xs,
-        lineHeight: compact ? 14 : 15,
       },
       muted: {
         fontFamily: theme.fontFamily.regular,
         fontSize: compact ? 11 : 13,
         color: theme.colors.textMuted,
+        lineHeight: 18,
+        marginBottom: theme.spacing.sm,
       },
       compDropdownTrigger: {
         flexDirection: 'column',
@@ -295,42 +373,51 @@ export function WorldCupHomeScreen() {
         fontSize: compact ? 11 : 12,
         fontWeight: '600',
         color: theme.colors.textMuted,
-        marginTop: compact ? 2 : theme.spacing.sm,
         marginBottom: theme.spacing.sm,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
       },
-      statsGrid: {
-        gap: theme.spacing.xs,
-      },
-      statsRow: {
+      statExpandHeader: {
         flexDirection: 'row',
-        gap: theme.spacing.xs,
-      },
-      statCard: {
-        backgroundColor: theme.colors.accentMuted ?? 'rgba(21, 128, 61, 0.15)',
-        borderRadius: theme.radius.md,
-        padding: compact ? theme.spacing.xs : theme.spacing.sm,
-        borderWidth: 1,
-        borderColor: theme.colors.accentDim ?? theme.colors.accent,
         alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 12,
+        paddingHorizontal: 10,
+        borderRadius: theme.radius.md,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.surfaceElevated,
+        marginBottom: theme.spacing.xs,
       },
-      statCardHalf: {
-        flex: 1,
-      },
-      statCardLabel: {
+      statExpandTitle: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: compact ? 10 : 11,
-        color: theme.colors.textSecondary,
-        marginTop: 4,
-        textAlign: 'center',
-      },
-      statCardValue: {
-        fontFamily: theme.fontFamily.regular,
-        fontSize: compact ? 16 : 20,
+        fontSize: 14,
         fontWeight: '700',
-        color: theme.colors.accent,
+        color: theme.colors.text,
       },
+      statExpandSub: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 12,
+        color: theme.colors.textSecondary,
+        marginTop: 2,
+      },
+      statExpandPoints: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 18,
+        fontWeight: '800',
+        color: theme.colors.accent,
+        marginRight: 4,
+      },
+      statBreakRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: theme.colors.border,
+      },
+      statBreakLabel: { fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.text },
+      statBreakVal: { fontFamily: theme.fontFamily.regular, fontSize: 13, fontWeight: '600', color: theme.colors.accent },
       quickLinksRow: {
         flexDirection: 'row',
         gap: theme.spacing.sm,
@@ -356,48 +443,10 @@ export function WorldCupHomeScreen() {
         fontWeight: '600',
         color: theme.colors.accent,
       },
-      nextBlock: {
-        backgroundColor: theme.colors.surface,
-        borderRadius: theme.radius.md,
-        padding: theme.spacing.md,
-        borderWidth: cardBorderWidth,
-        borderColor: cardBorder,
-        marginBottom: theme.spacing.md,
-        ...webCard,
-      },
-      nextLabel: {
-        fontFamily: theme.fontFamily.regular,
-        fontSize: 11,
-        color: theme.colors.textMuted,
-        marginBottom: theme.spacing.xs,
-        textTransform: 'uppercase',
-        letterSpacing: 0.4,
-      },
-      nextTitle: {
-        fontFamily: theme.fontFamily.regular,
-        fontSize: 15,
-        fontWeight: '700',
-        color: theme.colors.text,
-      },
-      nextMeta: {
-        fontFamily: theme.fontFamily.regular,
-        fontSize: 12,
-        color: theme.colors.textSecondary,
-        marginTop: 4,
-      },
     });
   }, [theme, isWeb, isNarrowWeb]);
 
-  const isCompletePhase = phase === 'complete';
-  const secondStatLabel = isCompletePhase ? 'Final position' : 'Daily points';
-  const secondStatValue = isCompletePhase ? '—' : 0;
-
-  const StatBox = ({ label, value }: { label: string; value: ReactNode }) => (
-    <View style={[styles.statCard, styles.statCardHalf]}>
-      <Text style={styles.statCardValue}>{value}</Text>
-      <Text style={styles.statCardLabel}>{label}</Text>
-    </View>
-  );
+  const goFixturesAndResults = () => router.push(wcHref('/(wc2026)/(tabs)/results'));
 
   return (
     <View style={styles.wrapper}>
@@ -418,6 +467,35 @@ export function WorldCupHomeScreen() {
           </View>
         </View>
 
+        <TouchableOpacity style={styles.nextBlock} onPress={goFixturesAndResults} activeOpacity={0.85}>
+          <View style={styles.nextBlockMain}>
+            <Text style={styles.nextLabel}>Next match</Text>
+            {loading ? (
+              <ActivityIndicator color={theme.colors.accent} />
+            ) : nextFixture ? (
+              <>
+                <Text style={styles.nextTitle} numberOfLines={2}>
+                  {nextFixture.home_team?.country_name ?? nextFixture.home_team_id} vs{' '}
+                  {nextFixture.away_team?.country_name ?? nextFixture.away_team_id}
+                </Text>
+                <Text style={styles.nextMeta}>
+                  {new Date(nextFixture.match_date).toLocaleDateString(undefined, {
+                    weekday: 'short',
+                    day: 'numeric',
+                    month: 'short',
+                  })}{' '}
+                  ·{' '}
+                  {new Date(nextFixture.match_date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+                <Text style={[styles.muted, { marginBottom: 0, marginTop: 8 }]}>Tap for fixtures & results</Text>
+              </>
+            ) : (
+              <Text style={styles.muted}>No upcoming fixtures loaded yet. Tap to open fixtures & results.</Text>
+            )}
+          </View>
+          <Ionicons name="chevron-forward" size={22} color={theme.colors.textMuted} />
+        </TouchableOpacity>
+
         <View style={styles.homePrimaryRow}>
           <TouchableOpacity
             style={styles.homePrimaryBtn}
@@ -437,99 +515,161 @@ export function WorldCupHomeScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={[styles.sectionTitle, styles.sectionTitleFirst]}>Your competitions</Text>
-        <View style={styles.compTabsRow}>
-          {(['upcoming', 'live', 'complete'] as const).map((tab) => {
-            const isActive = compTab === tab;
-            const label = tab === 'upcoming' ? 'Upcoming' : tab === 'live' ? 'Live' : 'Complete';
-            return (
-              <TouchableOpacity
-                key={tab}
-                style={[styles.compTab, isActive && styles.compTabActive]}
-                onPress={() => setCompTab(tab)}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.compTabText, isActive && styles.compTabTextActive]}>{label}</Text>
-              </TouchableOpacity>
-            );
-          })}
+        <Text style={[styles.sectionTitle, styles.sectionTitleFirst]}>Your selections</Text>
+        <View style={styles.selTabsRow}>
+          <TouchableOpacity
+            style={[styles.selTab, selectionKind === 'ante_post' && styles.selTabActive]}
+            onPress={() => setSelectionKind('ante_post')}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.selTabText, selectionKind === 'ante_post' && styles.selTabTextActive]}>Ante post</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.selTab, selectionKind === 'match_day' && styles.selTabActive]}
+            onPress={() => setSelectionKind('match_day')}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.selTabText, selectionKind === 'match_day' && styles.selTabTextActive]}>
+              Match Day picks
+            </Text>
+          </TouchableOpacity>
         </View>
-        <Text style={styles.homeCompHint}>
-          Browse by tournament phase. Make picks in My selections when fixtures are published.
-        </Text>
 
-        {!showCompetitionInTab ? (
-          <Text style={[styles.muted, { marginBottom: theme.spacing.md }]}>No competitions in this category.</Text>
-        ) : (
-          <>
-            <View style={styles.compDropdownTrigger}>
-              <View>
-                <Text style={styles.compMeetingNameAbove} numberOfLines={2}>
-                  FIFA World Cup 2026
-                </Text>
-                <Text style={styles.compMetaAbove}>Multi-stage event · 11 Jun – 19 Jul 2026</Text>
-              </View>
-              <View style={styles.modeDivider}>
-                <TouchableOpacity
-                  style={styles.modeRow}
-                  activeOpacity={0.8}
-                  onPress={() => router.push(wcHref('/(wc2026)/ante-post-navigation'))}
-                >
-                  <View style={styles.modeLeft}>
-                    <Ionicons name="create-outline" size={18} color={theme.colors.accent} />
-                    <View style={styles.modeText}>
-                      <Text style={styles.modeTitle} numberOfLines={1}>
-                        Ante Post selections
-                      </Text>
-                      <Text style={styles.modeDesc} numberOfLines={2}>
-                        Group stage picks → generates your knockout bracket
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.statusPill}>
-                    <Text style={styles.statusText}>{antePostLocked ? 'COMPLETE' : 'UPCOMING'}</Text>
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.modeRow}
-                  activeOpacity={0.8}
-                  onPress={() => router.push(wcHref('/(wc2026)/(tabs)/fixtures'))}
-                >
-                  <View style={styles.modeLeft}>
-                    <Ionicons name="flash-outline" size={18} color={theme.colors.accent} />
-                    <View style={styles.modeText}>
-                      <Text style={styles.modeTitle} numberOfLines={1}>
-                        Live predictions
-                      </Text>
-                      <Text style={styles.modeDesc} numberOfLines={2}>
-                        Predict matches as the tournament unfolds
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.statusPill}>
-                    <Text style={styles.statusText}>
-                      {phase === 'complete' ? 'COMPLETE' : phase === 'live' ? 'LIVE' : 'UPCOMING'}
+        <View style={styles.compDropdownTrigger}>
+          <View>
+            <Text style={styles.compMeetingNameAbove} numberOfLines={2}>
+              FIFA World Cup 2026
+            </Text>
+            <Text style={styles.compMetaAbove}>Multi-stage event · 11 Jun – 19 Jul 2026</Text>
+          </View>
+          {predsLoading ? (
+            <ActivityIndicator style={{ marginTop: 8 }} color={theme.colors.accent} />
+          ) : (
+            <Text style={styles.muted}>{selectionKind === 'ante_post' ? anteSummaryText : matchDaySummaryText}</Text>
+          )}
+          <View style={styles.modeDivider}>
+            {selectionKind === 'ante_post' ? (
+              <TouchableOpacity
+                style={styles.modeRow}
+                activeOpacity={0.8}
+                onPress={() => router.push(wcHref('/(wc2026)/ante-post-navigation'))}
+              >
+                <View style={styles.modeLeft}>
+                  <Ionicons name="create-outline" size={18} color={theme.colors.accent} />
+                  <View style={styles.modeText}>
+                    <Text style={styles.modeTitle} numberOfLines={1}>
+                      Ante post selections
+                    </Text>
+                    <Text style={styles.modeDesc} numberOfLines={2}>
+                      Group stage through final — saved picks sync to your account
                     </Text>
                   </View>
-                </TouchableOpacity>
+                </View>
+                <View style={styles.statusPill}>
+                  <Text style={styles.statusText}>{antePostLocked ? 'LOCKED' : 'OPEN'}</Text>
+                </View>
+              </TouchableOpacity>
+            ) : matchDayTipsUnlocked ? (
+              <TouchableOpacity
+                style={styles.modeRow}
+                activeOpacity={0.8}
+                onPress={() => router.push(wcHref('/(wc2026)/match-day-tips'))}
+              >
+                <View style={styles.modeLeft}>
+                  <Ionicons name="football-outline" size={18} color={theme.colors.accent} />
+                  <View style={styles.modeText}>
+                    <Text style={styles.modeTitle} numberOfLines={1}>
+                      Match Day picks
+                    </Text>
+                    <Text style={styles.modeDesc} numberOfLines={2}>
+                      1X2, total goals in 90 minutes, and BTTS (round of 32 through final)
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.statusPill}>
+                  <Text style={styles.statusText}>OPEN</Text>
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <View style={[styles.modeRow, { opacity: 0.85 }]}>
+                <View style={styles.modeLeft}>
+                  <Ionicons name="lock-closed-outline" size={18} color={theme.colors.textMuted} />
+                  <View style={styles.modeText}>
+                    <Text style={styles.modeTitle} numberOfLines={1}>
+                      Match Day picks
+                    </Text>
+                    <Text style={styles.modeDesc} numberOfLines={2}>
+                      Opens when organisers enable Match Day Tips after the group stage.
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.statusPill}>
+                  <Text style={styles.statusText}>LOCKED</Text>
+                </View>
               </View>
-            </View>
+            )}
+          </View>
+        </View>
 
-            <View style={styles.competitionsCard}>
-              <Text style={styles.statsTitle}>Your stats</Text>
-              <View style={styles.statsGrid}>
-                <View style={styles.statsRow}>
-                  <StatBox label="Points" value={0} />
-                  <StatBox label={secondStatLabel} value={secondStatValue} />
-                </View>
-                <View style={styles.statsRow}>
-                  <StatBox label="Top pick" value="—" />
-                  <StatBox label="Participants" value={1} />
-                </View>
-              </View>
+        <View style={styles.competitionsCard}>
+          <Text style={styles.statsTitle}>Points</Text>
+
+          <TouchableOpacity
+            style={styles.statExpandHeader}
+            onPress={() => setExpandAnteStats((e) => !e)}
+            activeOpacity={0.85}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.statExpandTitle}>Ante post</Text>
+              <Text style={styles.statExpandSub}>Total from saved tournament picks</Text>
             </View>
-          </>
-        )}
+            <Text style={styles.statExpandPoints}>{anteTotalPoints}</Text>
+            <Ionicons name={expandAnteStats ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.textMuted} />
+          </TouchableOpacity>
+          {expandAnteStats ? (
+            <View style={{ marginBottom: theme.spacing.sm }}>
+              {WC_STAGE_SLICES.map((st) => {
+                const { rows, points } = sumPointsInRange(antePreds, 'ante_post', st.min, st.max);
+                return (
+                  <View key={st.id} style={styles.statBreakRow}>
+                    <Text style={styles.statBreakLabel}>{st.label}</Text>
+                    <Text style={styles.statBreakVal}>
+                      {points} pts{rows ? ` · ${rows} saved` : ''}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+
+          <TouchableOpacity
+            style={styles.statExpandHeader}
+            onPress={() => setExpandMatchDayStats((e) => !e)}
+            activeOpacity={0.85}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.statExpandTitle}>Match Day picks</Text>
+              <Text style={styles.statExpandSub}>Knockout tips (when entered)</Text>
+            </View>
+            <Text style={styles.statExpandPoints}>{matchDayTotalPoints}</Text>
+            <Ionicons name={expandMatchDayStats ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.textMuted} />
+          </TouchableOpacity>
+          {expandMatchDayStats ? (
+            <View>
+              {WC_STAGE_SLICES.filter((st) => st.min >= 73).map((st) => {
+                const { rows, points } = sumPointsInRange(livePreds, 'live', st.min, st.max, { liveMustHaveTip: true });
+                return (
+                  <View key={st.id} style={styles.statBreakRow}>
+                    <Text style={styles.statBreakLabel}>{st.label}</Text>
+                    <Text style={styles.statBreakVal}>
+                      {points} pts{rows ? ` · ${rows} tips` : ''}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
 
         {(!isWeb || isNarrowWeb) && (
           <View style={styles.quickLinksRow}>
@@ -541,41 +681,12 @@ export function WorldCupHomeScreen() {
               <Ionicons name="podium-outline" size={18} color={theme.colors.accent} />
               <Text style={styles.quickLinkBtnText}>Leaderboard</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.quickLinkBtn}
-              onPress={() => router.push(wcHref('/(wc2026)/(tabs)/results'))}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="trophy-outline" size={18} color={theme.colors.accent} />
-              <Text style={styles.quickLinkBtnText}>Results</Text>
+            <TouchableOpacity style={styles.quickLinkBtn} onPress={goFixturesAndResults} activeOpacity={0.8}>
+              <Ionicons name="calendar-outline" size={18} color={theme.colors.accent} />
+              <Text style={styles.quickLinkBtnText}>Fixtures & results</Text>
             </TouchableOpacity>
           </View>
         )}
-
-        <View style={styles.nextBlock}>
-          <Text style={styles.nextLabel}>Next match</Text>
-          {loading ? (
-            <ActivityIndicator color={theme.colors.accent} />
-          ) : nextFixture ? (
-            <>
-              <Text style={styles.nextTitle}>
-                {nextFixture.home_team?.country_name ?? nextFixture.home_team_id} vs{' '}
-                {nextFixture.away_team?.country_name ?? nextFixture.away_team_id}
-              </Text>
-              <Text style={styles.nextMeta}>
-                {new Date(nextFixture.match_date).toLocaleDateString(undefined, {
-                  weekday: 'short',
-                  day: 'numeric',
-                  month: 'short',
-                })}{' '}
-                ·{' '}
-                {new Date(nextFixture.match_date).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-              </Text>
-            </>
-          ) : (
-            <Text style={styles.muted}>No upcoming fixtures loaded yet.</Text>
-          )}
-        </View>
       </ScrollView>
     </View>
   );

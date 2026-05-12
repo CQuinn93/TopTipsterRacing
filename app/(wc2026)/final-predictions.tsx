@@ -1,25 +1,29 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  StyleSheet, 
+import {
+  View,
+  Text,
+  TouchableOpacity,
   ScrollView,
   TextInput,
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 
-import { IconSymbol } from '@/features/wc2026/components/IconSymbol';
-import { DesignColors } from '@/features/wc2026/constants/design-colors';
+import { useTheme } from '@/contexts/ThemeContext';
+import { WcKnockoutResultsHeader } from '@/features/wc2026/components/WcKnockoutResultsHeader';
+import {
+  useKnockoutPredictionsScreenStyles,
+  useFinalPredictionExtrasStyles,
+} from '@/features/wc2026/components/useKnockoutPredictionsScreenStyles';
 import { WC2026_STORAGE_PREFIX } from '@/features/wc2026/constants/storage-keys';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
+import { KnockoutMatchScorePresets } from '@/features/wc2026/components/KnockoutMatchScorePresets';
+import { applyKnockoutScorePreset } from '@/features/wc2026/utils/knockout-preset-score';
 import { type KnockoutMatch } from '@/features/wc2026/services/knockout-bracket';
 import { supabase } from '@/lib/supabase';
 import { batchSaveAllAntePostPredictions } from '@/features/wc2026/services/batch-save-predictions';
@@ -38,11 +42,10 @@ interface KnockoutPrediction {
   predictedWinnerId?: string | null;
 }
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const IS_SMALL_SCREEN = SCREEN_WIDTH < 375;
-
 export default function FinalPredictionsScreen() {
-  const insets = useSafeAreaInsets();
+  const theme = useTheme();
+  const s = useKnockoutPredictionsScreenStyles();
+  const fin = useFinalPredictionExtrasStyles();
   const params = useLocalSearchParams() as RouteParams;
   const [bracket, setBracket] = useState<KnockoutMatch[]>([]);
   const [predictions, setPredictions] = useState<Record<number, KnockoutPrediction>>({});
@@ -389,26 +392,24 @@ export default function FinalPredictionsScreen() {
     router.replace(wcHref('/(wc2026)/ante-post-navigation'));
   };
 
+  const completedCount = useMemo(
+    () =>
+      bracket.filter((match) => {
+        const pred = predictions[match.matchNumber];
+        return pred && pred.homeScore.trim() !== '' && pred.awayScore.trim() !== '';
+      }).length,
+    [bracket, predictions]
+  );
+  const progressLine =
+    bracket.length > 0 ? `${completedCount} of ${bracket.length} matches completed` : undefined;
+
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={handleBackPress}
-          >
-            <IconSymbol name="chevron.left" size={24} color={DesignColors.text} />
-            <Text style={styles.backButtonText}>Back</Text>
-          </TouchableOpacity>
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.headerTitle}>Ante Post</Text>
-            <Text style={styles.headerSubtitle}>Final</Text>
-          </View>
-          <View style={styles.backButton} />
-        </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={DesignColors.primary} />
-          <Text style={styles.loadingText}>Loading...</Text>
+      <View style={s.container}>
+        <WcKnockoutResultsHeader subtitle="Final" onBack={handleBackPress} />
+        <View style={s.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.accent} />
+          <Text style={s.loadingText}>Loading...</Text>
         </View>
       </View>
     );
@@ -416,23 +417,10 @@ export default function FinalPredictionsScreen() {
 
   if (bracket.length === 0) {
     return (
-      <View style={styles.container}>
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={handleBackPress}
-          >
-            <IconSymbol name="chevron.left" size={24} color={DesignColors.text} />
-            <Text style={styles.backButtonText}>Back</Text>
-          </TouchableOpacity>
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.headerTitle}>Ante Post</Text>
-            <Text style={styles.headerSubtitle}>Final</Text>
-          </View>
-          <View style={styles.backButton} />
-        </View>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>No Final bracket available. Please go back and complete previous stages.</Text>
+      <View style={s.container}>
+        <WcKnockoutResultsHeader subtitle="Final" onBack={handleBackPress} />
+        <View style={s.loadingContainer}>
+          <Text style={s.loadingText}>No Final bracket available. Please go back and complete previous stages.</Text>
         </View>
       </View>
     );
@@ -440,45 +428,24 @@ export default function FinalPredictionsScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.keyboardAvoidingView}
+      style={s.keyboardAvoidingView}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
     >
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={handleBackPress}
-          >
-            <IconSymbol name="chevron.left" size={24} color={DesignColors.text} />
-            <Text style={styles.backButtonText}>Back</Text>
-          </TouchableOpacity>
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.headerTitle}>Ante Post</Text>
-            <Text style={styles.headerSubtitle}>Final</Text>
-            {(() => {
-              const completedCount = bracket.filter((match) => {
-                const pred = predictions[match.matchNumber];
-                return pred && pred.homeScore.trim() !== '' && pred.awayScore.trim() !== '';
-              }).length;
-              return (
-                <Text style={styles.progressText}>
-                  {completedCount} of {bracket.length} matches completed
-                </Text>
-              );
-            })()}
-          </View>
-          <View style={styles.backButton} />
-        </View>
+      <View style={s.container}>
+        <WcKnockoutResultsHeader
+          subtitle="Final · Enter scores"
+          progressText={progressLine}
+          onBack={handleBackPress}
+        />
 
         <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
+          style={s.scrollView}
+          contentContainerStyle={s.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.headerSection}>
-            <Text style={styles.description}>
+          <View style={s.headerSection}>
+            <Text style={s.description}>
               Make your prediction for the Final match. If the match ends in a draw, select which team will win.
             </Text>
           </View>
@@ -507,35 +474,35 @@ export default function FinalPredictionsScreen() {
             const winner = winnerId ? (winnerId === match.homeTeam.id ? match.homeTeam : match.awayTeam) : null;
 
             return (
-              <View key={match.matchNumber} style={styles.matchCardWrapper}>
-                <Text style={styles.finaleText}>Finale</Text>
-                <View style={[styles.matchCard, hasPrediction && styles.matchCardFilled, styles.matchCardGold]}>
-                  <Text style={styles.matchNumber}>Game #{match.matchNumber}</Text>
+              <View key={match.matchNumber} style={fin.matchCardWrapper}>
+                <Text style={fin.finaleText}>Finale</Text>
+                <View style={[s.matchCard, hasPrediction && s.matchCardFilled, fin.matchCardGold]}>
+                  <Text style={s.matchNumber}>Game #{match.matchNumber}</Text>
                   
-                  <View style={styles.matchContent}>
+                  <View style={s.matchContent}>
                     {/* Home Team */}
-                    <View style={styles.teamSection}>
-                      <View style={styles.teamInfo}>
+                    <View style={s.teamSection}>
+                      <View style={s.teamInfo}>
                         <CountryFlag
                           countryCode={match.homeTeam.code}
                           countryName={match.homeTeam.name}
-                          flagSize={50}
+                          flagSize={40}
                           showName={false}
                           align="center"
                         />
-                        <Text style={styles.teamName} numberOfLines={2} ellipsizeMode="tail">
+                        <Text style={s.teamName} numberOfLines={2} ellipsizeMode="tail">
                           {match.homeTeam.name}
                         </Text>
-                        <Text style={styles.teamSource} numberOfLines={1} ellipsizeMode="tail">
+                        <Text style={s.teamSource} numberOfLines={1} ellipsizeMode="tail">
                           {match.homeTeam.source}
                         </Text>
                       </View>
                       <TextInput
-                        style={[styles.scoreInput, hasPrediction && styles.scoreInputFilled]}
+                        style={[s.scoreInput, hasPrediction && s.scoreInputFilled]}
                         value={pred.homeScore}
                         onChangeText={(text) => handleScoreChange(match.matchNumber, 'home', text, match.homeTeam.id, match.awayTeam.id)}
                         placeholder="0"
-                        placeholderTextColor="rgba(71, 74, 74, 0.5)"
+                        placeholderTextColor={theme.colors.textMuted}
                         keyboardType="numeric"
                         maxLength={2}
                         textAlign="center"
@@ -544,82 +511,101 @@ export default function FinalPredictionsScreen() {
                     </View>
 
                     {/* VS */}
-                    <Text style={styles.vsText}>vs</Text>
+                    <Text style={s.vsText}>vs</Text>
 
                     {/* Away Team */}
-                    <View style={styles.teamSection}>
+                    <View style={s.teamSection}>
                       <TextInput
-                        style={[styles.scoreInput, hasPrediction && styles.scoreInputFilled]}
+                        style={[s.scoreInput, hasPrediction && s.scoreInputFilled]}
                         value={pred.awayScore}
                         onChangeText={(text) => handleScoreChange(match.matchNumber, 'away', text, match.homeTeam.id, match.awayTeam.id)}
                         placeholder="0"
-                        placeholderTextColor="rgba(71, 74, 74, 0.5)"
+                        placeholderTextColor={theme.colors.textMuted}
                         keyboardType="numeric"
                         maxLength={2}
                         textAlign="center"
                         editable={!isLocked}
                       />
-                      <View style={styles.teamInfo}>
+                      <View style={s.teamInfo}>
                         <CountryFlag
                           countryCode={match.awayTeam.code}
                           countryName={match.awayTeam.name}
-                          flagSize={50}
+                          flagSize={40}
                           showName={false}
                           align="center"
                         />
-                        <Text style={styles.teamName} numberOfLines={2} ellipsizeMode="tail">
+                        <Text style={s.teamName} numberOfLines={2} ellipsizeMode="tail">
                           {match.awayTeam.name}
                         </Text>
-                        <Text style={styles.teamSource} numberOfLines={1} ellipsizeMode="tail">
+                        <Text style={s.teamSource} numberOfLines={1} ellipsizeMode="tail">
                           {match.awayTeam.source}
                         </Text>
                       </View>
                     </View>
                   </View>
 
+                  <KnockoutMatchScorePresets
+                    disabled={isLocked}
+                    homeScoreStr={pred.homeScore}
+                    awayScoreStr={pred.awayScore}
+                    onSelect={(h, a) => {
+                      if (isLocked) return;
+                      setPredictions((prev) =>
+                        applyKnockoutScorePreset(
+                          prev,
+                          match.matchNumber,
+                          h,
+                          a,
+                          match.homeTeam.id,
+                          match.awayTeam.id
+                        )
+                      );
+                    }}
+                  />
+
                   {/* Team to Advance Selection (required for draws) */}
                   {isDraw && (
-                    <View style={styles.advanceSection}>
-                      <Text style={styles.advanceTitle}>Team to Advance:</Text>
-                      <View style={styles.advanceButtons}>
+                    <View style={s.advanceSection}>
+                      <Text style={s.advanceTitle}>Team to Advance:</Text>
+                      <View style={s.advanceButtons}>
                         <TouchableOpacity
                           style={[
-                            styles.advanceButton,
-                            homeSelected && styles.advanceButtonSelected
+                            s.advanceButton,
+                            homeSelected && s.advanceButtonSelected
                           ]}
                           onPress={() => handleWinnerSelection(match.matchNumber, match.homeTeam.id)}
                         >
                           <CountryFlag
                             countryCode={match.homeTeam.code}
                             countryName={match.homeTeam.name}
-                            flagSize={30}
+                            flagSize={26}
                             showName={false}
                             align="center"
                           />
                           <Text style={[
-                            styles.advanceButtonText,
-                            homeSelected && styles.advanceButtonTextSelected
+                            s.advanceButtonText,
+                            homeSelected && s.advanceButtonTextSelected
                           ]}>
                             {match.homeTeam.name}
                           </Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                           style={[
-                            styles.advanceButton,
-                            awaySelected && styles.advanceButtonSelected
+                            s.advanceButton,
+                            awaySelected && s.advanceButtonSelected
                           ]}
                           onPress={() => handleWinnerSelection(match.matchNumber, match.awayTeam.id)}
                         >
                           <CountryFlag
                             countryCode={match.awayTeam.code}
                             countryName={match.awayTeam.name}
-                            flagSize={30}
+                            flagSize={26}
                             showName={false}
                             align="center"
                           />
                           <Text style={[
-                            styles.advanceButtonText,
-                            awaySelected && styles.advanceButtonTextSelected
+                            s.advanceButtonText,
+                            awaySelected && s.advanceButtonTextSelected
                           ]}>
                             {match.awayTeam.name}
                           </Text>
@@ -630,9 +616,9 @@ export default function FinalPredictionsScreen() {
 
                   {/* Show Winner with Trophy */}
                   {winner && (
-                    <View style={styles.winnerSection}>
-                      <View style={styles.winnerContent}>
-                        <IconSymbol name="trophy.fill" size={40} color="#FFD700" />
+                    <View style={[s.winnerSection, fin.championSection]}>
+                      <View style={fin.winnerChampionBlock}>
+                        <Ionicons name="trophy" size={40} color={theme.colors.statusAccent} />
                         <CountryFlag
                           countryCode={winner.code}
                           countryName={winner.name}
@@ -640,8 +626,8 @@ export default function FinalPredictionsScreen() {
                           showName={false}
                           align="center"
                         />
-                        <Text style={styles.winnerName}>{winner.name}</Text>
-                        <Text style={styles.winnerLabel}>2026 Winners</Text>
+                        <Text style={fin.championName}>{winner.name}</Text>
+                        <Text style={fin.winnerSubtitle}>2026 Winners</Text>
                       </View>
                     </View>
                   )}
@@ -651,22 +637,22 @@ export default function FinalPredictionsScreen() {
           })}
 
           {/* Save and Submit Buttons */}
-          <View style={styles.buttonContainer}>
+          <View style={fin.buttonColumn}>
             {!isLocked && (
               <>
                 <TouchableOpacity
-                  style={[styles.saveButton, saving && styles.buttonDisabled]}
+                  style={[s.saveButton, saving && fin.mutedButton]}
                   onPress={handleSave}
                   disabled={saving}
                 >
-                  <Text style={styles.saveButtonText}>
+                  <Text style={s.saveButtonText}>
                     {saving ? 'Saving...' : 'Save Predictions'}
                   </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={[
-                    styles.submitButton,
+                    fin.submitCTA,
                     (submitting || !bracket.every((match) => {
                       const pred = predictions[match.matchNumber];
                       if (!pred || pred.homeScore.trim() === '' || pred.awayScore.trim() === '') {
@@ -681,21 +667,21 @@ export default function FinalPredictionsScreen() {
                         return false;
                       }
                       return true;
-                    })) && styles.buttonDisabled,
+                    })) && fin.mutedButton,
                   ]}
                   onPress={handleSubmit}
                   disabled={submitting}
                 >
-                  <Text style={styles.submitButtonText}>
+                  <Text style={fin.submitCTAText}>
                     {submitting ? 'Submitting...' : 'Submit All Ante Post Selections'}
                   </Text>
                 </TouchableOpacity>
               </>
             )}
             {isLocked && (
-              <View style={styles.lockedMessage}>
-                <IconSymbol name="lock.fill" size={32} color={DesignColors.text} />
-                <Text style={styles.lockedText}>Your ante post selections have been submitted and are now locked.</Text>
+              <View style={fin.lockedStack}>
+                <Ionicons name="lock-closed-outline" size={32} color={theme.colors.textMuted} />
+                <Text style={fin.lockedCaption}>Your ante post selections have been submitted and are now locked.</Text>
               </View>
             )}
           </View>
@@ -705,308 +691,3 @@ export default function FinalPredictionsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: DesignColors.surface,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    minWidth: 80,
-  },
-  backButtonText: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 14 : 16,
-    fontWeight: '600',
-  },
-  headerTitleContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    pointerEvents: 'none',
-    paddingHorizontal: IS_SMALL_SCREEN ? 60 : 80, // Ensure text doesn't overlap with back buttons
-  },
-  headerTitle: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 16 : 18,
-    fontWeight: '700',
-    fontFamily: 'Ethnocentric',
-    textAlign: 'center',
-    marginTop: IS_SMALL_SCREEN ? 40 : 50,
-  },
-  headerSubtitle: {
-    color: DesignColors.text,
-    fontSize: 14,
-    fontWeight: '400',
-    textAlign: 'center',
-    marginTop: 2,
-    opacity: 0.7,
-  },
-  progressText: {
-    color: DesignColors.primary,
-    fontSize: 11,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginTop: 4,
-    paddingHorizontal: 8,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 12,
-  },
-  loadingText: {
-    color: DesignColors.text,
-    fontSize: 16,
-  },
-  keyboardAvoidingView: {
-    flex: 1,
-    margin: 0,
-    padding: 0,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: IS_SMALL_SCREEN ? 14 : 20,
-    paddingBottom: IS_SMALL_SCREEN ? 30 : 40,
-  },
-  headerSection: {
-    marginBottom: 24,
-  },
-  description: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 13 : 14,
-    marginBottom: 8,
-    opacity: 0.7,
-    textAlign: 'center',
-    lineHeight: IS_SMALL_SCREEN ? 18 : 20,
-  },
-  matchCardWrapper: {
-    marginBottom: 24,
-    alignItems: 'center',
-  },
-  finaleText: {
-    color: DesignColors.primary,
-    fontSize: IS_SMALL_SCREEN ? 26 : 32,
-    fontWeight: '700',
-    fontFamily: 'Ethnocentric',
-    textAlign: 'center',
-    marginBottom: 12,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-  },
-  matchCard: {
-    backgroundColor: DesignColors.surface,
-    borderRadius: 12,
-    padding: IS_SMALL_SCREEN ? 12 : 16,
-    width: '100%',
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  matchCardFilled: {
-    borderColor: DesignColors.primary,
-  },
-  matchCardGold: {
-    borderWidth: 3,
-    borderColor: '#FFD700',
-    shadowColor: '#FFD700',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  matchNumber: {
-    color: DesignColors.primary,
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  matchContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: IS_SMALL_SCREEN ? 10 : 16,
-  },
-  teamSection: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: IS_SMALL_SCREEN ? 8 : 12,
-  },
-  teamInfo: {
-    flex: 1,
-    alignItems: 'center',
-    gap: IS_SMALL_SCREEN ? 6 : 8,
-  },
-  teamName: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 12 : 14,
-    fontWeight: '600',
-    textAlign: 'center',
-    maxWidth: IS_SMALL_SCREEN ? 90 : 100,
-  },
-  teamSource: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 10 : 11,
-    fontWeight: '400',
-    textAlign: 'center',
-    opacity: 0.6,
-    maxWidth: IS_SMALL_SCREEN ? 90 : 100,
-  },
-  scoreInput: {
-    width: IS_SMALL_SCREEN ? 50 : 60,
-    height: IS_SMALL_SCREEN ? 44 : 50,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: DesignColors.surface,
-    backgroundColor: '#FFFFFF',
-    fontSize: IS_SMALL_SCREEN ? 20 : 24,
-    fontWeight: '700',
-    color: DesignColors.text,
-    textAlign: 'center',
-  },
-  scoreInputFilled: {
-    borderColor: DesignColors.primary,
-    backgroundColor: DesignColors.primary + '20',
-  },
-  vsText: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 14 : 18,
-    fontWeight: '700',
-    marginHorizontal: IS_SMALL_SCREEN ? 6 : 12,
-    opacity: 0.5,
-  },
-  advanceSection: {
-    marginTop: 16,
-    marginBottom: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: DesignColors.surface,
-  },
-  advanceTitle: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 13 : 14,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  advanceButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'space-around',
-  },
-  advanceButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: DesignColors.surface,
-    backgroundColor: '#FFFFFF',
-  },
-  advanceButtonSelected: {
-    borderColor: DesignColors.primary,
-    backgroundColor: DesignColors.primary + '20',
-  },
-  advanceButtonText: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 12 : 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  advanceButtonTextSelected: {
-    color: DesignColors.primary,
-    fontWeight: '700',
-  },
-  winnerSection: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 2,
-    borderTopColor: '#FFD700',
-    alignItems: 'center',
-  },
-  winnerContent: {
-    alignItems: 'center',
-    gap: 12,
-  },
-  winnerName: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 16 : 18,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  winnerLabel: {
-    color: DesignColors.primary,
-    fontSize: IS_SMALL_SCREEN ? 14 : 16,
-    fontWeight: '600',
-    textAlign: 'center',
-    fontFamily: 'Ethnocentric',
-  },
-  buttonContainer: {
-    gap: 12,
-    marginTop: 24,
-  },
-  saveButton: {
-    backgroundColor: DesignColors.surface,
-    borderRadius: 12,
-    paddingVertical: IS_SMALL_SCREEN ? 14 : 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: DesignColors.primary,
-  },
-  saveButtonText: {
-    color: DesignColors.primary,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  submitButton: {
-    backgroundColor: DesignColors.primary,
-    borderRadius: 12,
-    paddingVertical: IS_SMALL_SCREEN ? 14 : 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-  },
-  submitButtonText: {
-    color: DesignColors.textOnDark,
-    fontSize: IS_SMALL_SCREEN ? 16 : 18,
-    fontWeight: '700',
-  },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  lockedMessage: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    gap: 12,
-  },
-  lockedText: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 14 : 16,
-    fontWeight: '600',
-    textAlign: 'center',
-    opacity: 0.7,
-  },
-});

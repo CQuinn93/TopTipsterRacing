@@ -1,18 +1,19 @@
-import { useEffect, useState } from 'react';
-import { router } from 'expo-router';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  StyleSheet, 
+import { useCallback, useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
   ScrollView,
-  ActivityIndicator
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 
-import { IconSymbol } from '@/features/wc2026/components/IconSymbol';
-import { DesignColors } from '@/features/wc2026/constants/design-colors';
+import { useTheme } from '@/contexts/ThemeContext';
 import { WC2026_STORAGE_PREFIX } from '@/features/wc2026/constants/storage-keys';
 import {
   getGroupPredictions,
@@ -25,41 +26,42 @@ import {
   getAntePostLockedStatus,
 } from '@/features/wc2026/services/async-predictions';
 import { getFixtures } from '@/features/wc2026/services/fixtures';
+import { getKnockoutAnteEnabled } from '@/features/wc2026/services/tournament-gates';
 import { wcHref } from '@/features/wc2026/utils/href';
 
 interface StageStatus {
   id: string;
   name: string;
   route: string;
-  isLocked: boolean;
+  /** User tapped “submit all” on Final — picks are read-only (AsyncStorage `ante_post_is_locked`). */
+  userCommittedLocked: boolean;
+  /** Previous knockout stage is not finished yet (sequential flow). Not the same as committed lock. */
+  waitingOnPriorKnockoutStage: boolean;
+  /** Server / product gate: knockout ante post not open. */
+  knockoutAnteDisabled: boolean;
   isComplete: boolean;
   completedCount?: number;
   total?: number;
 }
 
 export default function AntePostNavigationScreen() {
+  const theme = useTheme();
   const insets = useSafeAreaInsets();
   const [stages, setStages] = useState<StageStatus[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    loadStageStatuses();
-  }, []);
-
-  const loadStageStatuses = async () => {
-    // Set a maximum timeout to ensure loading always stops
+  const loadStageStatuses = useCallback(async () => {
     const timeoutId = setTimeout(() => {
       console.warn('loadStageStatuses took too long, forcing loading to stop');
       setLoading(false);
-    }, 10000); // 10 second max timeout
+    }, 10000);
 
     try {
       setLoading(true);
-      
-      // First check if selections are globally locked
+
       const isGloballyLocked = await getAntePostLockedStatus().catch(() => false);
-      
-      // Load predictions from AsyncStorage (these are fast and shouldn't fail)
+
       const [
         groupPredictions,
         r32Predictions,
@@ -67,7 +69,8 @@ export default function AntePostNavigationScreen() {
         qfPredictions,
         sfPredictions,
         bronzeFinalPredictions,
-        finalPredictions
+        finalPredictions,
+        knockoutAnteServer,
       ] = await Promise.all([
         getGroupPredictions().catch(() => ({})),
         getR32Predictions().catch(() => ({})),
@@ -76,28 +79,26 @@ export default function AntePostNavigationScreen() {
         getSFPredictions().catch(() => ({})),
         getBronzeFinalPredictions().catch(() => ({})),
         getFinalPredictions().catch(() => ({})),
+        getKnockoutAnteEnabled().catch(() => false),
       ]);
 
-      // Load fixtures separately with timeout/error handling
-      // Group stage has 72 matches (12 groups * 6 matches per group)
-      let allFixtures: any[] = [];
+      let allFixtures: unknown[] = [];
       try {
         allFixtures = await Promise.race([
           getFixtures(),
-          new Promise<any[]>((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout')), 5000)
-          )
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000)),
         ]);
       } catch (fixturesError) {
         console.error('Error loading fixtures (using fallback):', fixturesError);
-        // Use fallback: Group stage has 72 matches
-        allFixtures = Array(72).fill(null).map((_, i) => ({ 
-          id: `fallback-${i}`, 
-          group: { group_name: String.fromCharCode(65 + Math.floor(i / 6)) } 
-        }));
+        allFixtures = Array(72)
+          .fill(null)
+          .map((_, i) => ({
+            id: `fallback-${i}`,
+            group: { group_name: String.fromCharCode(65 + Math.floor(i / 6)) },
+          }));
       }
 
-      const groupMatches = allFixtures.filter(f => f.group !== null);
+      const groupMatches = (allFixtures as { group?: { group_name?: string } | null }[]).filter((f) => f.group != null);
       const groupCompleted = Object.keys(groupPredictions).length;
       const groupTotal = groupMatches.length;
       const groupIsComplete = groupCompleted === groupTotal && groupTotal > 0;
@@ -107,52 +108,54 @@ export default function AntePostNavigationScreen() {
       const r32Completed = Object.keys(r32Predictions).length;
       const r32Total = r32BracketData.length;
       const r32IsComplete = r32Completed === r32Total && r32Total > 0;
-      const r32IsLocked = !groupIsComplete;
 
       const r16Bracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}round_of_16_bracket`);
       const r16BracketData = r16Bracket ? JSON.parse(r16Bracket) : [];
       const r16Completed = Object.keys(r16Predictions).length;
       const r16Total = r16BracketData.length;
       const r16IsComplete = r16Completed === r16Total && r16Total > 0;
-      const r16IsLocked = !r32IsComplete;
 
       const qfBracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}quarter_finals_bracket`);
       const qfBracketData = qfBracket ? JSON.parse(qfBracket) : [];
       const qfCompleted = Object.keys(qfPredictions).length;
       const qfTotal = qfBracketData.length;
       const qfIsComplete = qfCompleted === qfTotal && qfTotal > 0;
-      const qfIsLocked = !r16IsComplete;
 
       const sfBracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}semi_finals_bracket`);
       const sfBracketData = sfBracket ? JSON.parse(sfBracket) : [];
       const sfCompleted = Object.keys(sfPredictions).length;
       const sfTotal = sfBracketData.length;
       const sfIsComplete = sfCompleted === sfTotal && sfTotal > 0;
-      const sfIsLocked = !qfIsComplete;
 
       const bronzeBracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}bronze_final_bracket`);
       const bronzeBracketData = bronzeBracket ? JSON.parse(bronzeBracket) : [];
       const bronzeCompleted = Object.keys(bronzeFinalPredictions).length;
       const bronzeTotal = bronzeBracketData.length;
       const bronzeIsComplete = bronzeCompleted === bronzeTotal && bronzeTotal > 0;
-      const bronzeIsLocked = !sfIsComplete;
 
       const finalBracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}final_bracket`);
       const finalBracketData = finalBracket ? JSON.parse(finalBracket) : [];
       const finalCompleted = Object.keys(finalPredictions).length;
       const finalTotal = finalBracketData.length;
       const finalIsComplete = finalCompleted === finalTotal && finalTotal > 0;
-      const finalIsLocked = !bronzeIsComplete;
 
-      // If globally locked, all stages are locked (view-only)
-      const globalLock = isGloballyLocked;
+      const r32IsWaiting = !groupIsComplete || !knockoutAnteServer;
+      const r16IsWaiting = !r32IsComplete || !knockoutAnteServer;
+      const qfIsWaiting = !r16IsComplete || !knockoutAnteServer;
+      const sfIsWaiting = !qfIsComplete || !knockoutAnteServer;
+      const bronzeIsWaiting = !sfIsComplete || !knockoutAnteServer;
+      const finalIsWaiting = !bronzeIsComplete || !knockoutAnteServer;
+
+      const userCommittedLocked = isGloballyLocked;
 
       setStages([
         {
           id: 'group',
-          name: 'Group Stage',
+          name: 'Group stage',
           route: '/(wc2026)/ante-post-selections',
-          isLocked: globalLock || false,
+          userCommittedLocked,
+          waitingOnPriorKnockoutStage: false,
+          knockoutAnteDisabled: false,
           isComplete: groupIsComplete,
           completedCount: groupCompleted,
           total: groupTotal,
@@ -161,7 +164,9 @@ export default function AntePostNavigationScreen() {
           id: 'r32',
           name: 'Round of 32',
           route: '/(wc2026)/round-of-32-predictions',
-          isLocked: globalLock || r32IsLocked,
+          userCommittedLocked,
+          waitingOnPriorKnockoutStage: r32IsWaiting,
+          knockoutAnteDisabled: !knockoutAnteServer,
           isComplete: r32IsComplete,
           completedCount: r32Completed,
           total: r32Total,
@@ -170,34 +175,42 @@ export default function AntePostNavigationScreen() {
           id: 'r16',
           name: 'Round of 16',
           route: '/(wc2026)/round-of-16-predictions',
-          isLocked: globalLock || r16IsLocked,
+          userCommittedLocked,
+          waitingOnPriorKnockoutStage: r16IsWaiting,
+          knockoutAnteDisabled: !knockoutAnteServer,
           isComplete: r16IsComplete,
           completedCount: r16Completed,
           total: r16Total,
         },
         {
           id: 'qf',
-          name: 'Quarter Finals',
+          name: 'Quarter-finals',
           route: '/(wc2026)/quarter-finals-predictions',
-          isLocked: globalLock || qfIsLocked,
+          userCommittedLocked,
+          waitingOnPriorKnockoutStage: qfIsWaiting,
+          knockoutAnteDisabled: !knockoutAnteServer,
           isComplete: qfIsComplete,
           completedCount: qfCompleted,
           total: qfTotal,
         },
         {
           id: 'sf',
-          name: 'Semi Finals',
+          name: 'Semi-finals',
           route: '/(wc2026)/semi-finals-predictions',
-          isLocked: globalLock || sfIsLocked,
+          userCommittedLocked,
+          waitingOnPriorKnockoutStage: sfIsWaiting,
+          knockoutAnteDisabled: !knockoutAnteServer,
           isComplete: sfIsComplete,
           completedCount: sfCompleted,
           total: sfTotal,
         },
         {
           id: 'bronze',
-          name: '3rd Place Final',
+          name: '3rd place final',
           route: '/(wc2026)/bronze-final-predictions',
-          isLocked: globalLock || bronzeIsLocked,
+          userCommittedLocked,
+          waitingOnPriorKnockoutStage: bronzeIsWaiting,
+          knockoutAnteDisabled: !knockoutAnteServer,
           isComplete: bronzeIsComplete,
           completedCount: bronzeCompleted,
           total: bronzeTotal,
@@ -206,7 +219,9 @@ export default function AntePostNavigationScreen() {
           id: 'final',
           name: 'Final',
           route: '/(wc2026)/final-predictions',
-          isLocked: globalLock || finalIsLocked,
+          userCommittedLocked,
+          waitingOnPriorKnockoutStage: finalIsWaiting,
+          knockoutAnteDisabled: !knockoutAnteServer,
           isComplete: finalIsComplete,
           completedCount: finalCompleted,
           total: finalTotal,
@@ -214,226 +229,240 @@ export default function AntePostNavigationScreen() {
       ]);
     } catch (error) {
       console.error('Error loading stage statuses:', error);
-      // Set default empty stages if there's an error
       setStages([]);
     } finally {
       clearTimeout(timeoutId);
       setLoading(false);
     }
-  };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadStageStatuses();
+    }, [loadStageStatuses])
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadStageStatuses();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadStageStatuses]);
 
   const handleStagePress = (stage: StageStatus) => {
-    // Allow navigation even when locked - users can view their predictions
     router.push(wcHref(stage.route));
   };
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.replace(wcHref('/(wc2026)/(tabs)'))}
-          >
-            <IconSymbol name="chevron.left" size={24} color={DesignColors.text} />
-            <Text style={styles.backButtonText}>Back</Text>
-          </TouchableOpacity>
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.headerTitle}>Ante Post</Text>
-            <Text style={styles.headerSubtitle}>Navigation</Text>
-          </View>
-          <View style={styles.backButton} />
-        </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={DesignColors.primary} />
-          <Text style={styles.loadingText}>Loading...</Text>
-        </View>
-      </View>
-    );
-  }
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        root: { flex: 1, backgroundColor: theme.colors.background },
+        header: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: theme.spacing.md,
+          paddingBottom: 12,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+        },
+        back: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+        backText: { fontFamily: theme.fontFamily.regular, color: theme.colors.accent, fontSize: 16 },
+        headerTitleCol: {
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: theme.spacing.xs,
+        },
+        brandTitle: {
+          fontFamily: theme.fontFamily.swish,
+          fontSize: 20,
+          lineHeight: 26,
+          color: theme.colors.text,
+          textAlign: 'center',
+          letterSpacing: 0.5,
+        },
+        brandSport: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 10,
+          fontWeight: '800',
+          color: theme.colors.accent,
+          textTransform: 'uppercase',
+          letterSpacing: 1.2,
+          marginTop: 2,
+        },
+        brandHint: {
+          marginTop: 4,
+          fontFamily: theme.fontFamily.light,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        headerSpacer: { width: 72 },
+        scroll: { flex: 1 },
+        scrollContent: {
+          padding: theme.spacing.md,
+          paddingBottom: insets.bottom + theme.spacing.xl,
+          maxWidth: 720,
+          width: '100%',
+          alignSelf: 'center',
+        },
+        description: {
+          fontFamily: theme.fontFamily.light,
+          fontSize: 14,
+          lineHeight: 22,
+          color: theme.colors.textSecondary,
+          marginBottom: theme.spacing.lg,
+          textAlign: 'center',
+        },
+        stageCard: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          padding: theme.spacing.md,
+          marginBottom: theme.spacing.sm,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        stageCardLocked: {
+          opacity: 0.55,
+        },
+        stageCardComplete: {
+          borderWidth: 2,
+          borderColor: theme.colors.accent,
+        },
+        stageRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        },
+        stageLeft: { flex: 1, minWidth: 0 },
+        stageName: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          fontWeight: '700',
+          color: theme.colors.text,
+          marginBottom: 4,
+        },
+        stageProgress: {
+          fontFamily: theme.fontFamily.light,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        stageRight: {
+          alignItems: 'center',
+          justifyContent: 'center',
+          minWidth: 56,
+        },
+        stageCount: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          fontWeight: '700',
+          color: theme.colors.accent,
+        },
+        centered: {
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: theme.spacing.lg,
+        },
+        loadingText: {
+          marginTop: theme.spacing.md,
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          color: theme.colors.textSecondary,
+        },
+      }),
+    [theme, insets.bottom]
+  );
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.replace(wcHref('/(wc2026)/(tabs)'))}
-        >
-          <IconSymbol name="chevron.left" size={24} color={DesignColors.text} />
-          <Text style={styles.backButtonText}>Back</Text>
+    <View style={styles.root}>
+      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <TouchableOpacity style={styles.back} onPress={() => router.replace(wcHref('/(wc2026)/(tabs)/selections'))}>
+          <Ionicons name="chevron-back" size={22} color={theme.colors.accent} />
+          <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
-        <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>Ante Post</Text>
-          <Text style={styles.headerSubtitle}>Navigation</Text>
+        <View style={styles.headerTitleCol}>
+          <Text style={styles.brandTitle}>Top Tipster</Text>
+          <Text style={styles.brandSport}>Football</Text>
+          <Text style={styles.brandHint}>Ante post</Text>
         </View>
-        <View style={styles.backButton} />
+        <View style={styles.headerSpacer} />
       </View>
 
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.description}>
-          {stages.length > 0 && stages.some(s => s.isLocked && s.isComplete) 
-            ? 'Your predictions are locked. Select a stage to view your selections.'
-            : 'Select a stage to make or continue your predictions. Complete each stage in order to unlock the next.'}
-        </Text>
+      {loading && stages.length === 0 ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={theme.colors.accent} />
+          <Text style={styles.loadingText}>Loading stages…</Text>
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={theme.colors.accent} />
+          }
+        >
+          <Text style={styles.description}>
+            {stages.length > 0 && stages.some((s) => s.userCommittedLocked)
+              ? 'Your ante post picks are locked in. Open a stage to review them (scores cannot be changed).'
+              : 'Open each stage in order. Your scores are saved as you go and stay editable until you submit from the Final screen—then you can compare with others who have locked in too.'}
+          </Text>
 
-        {stages.map((stage) => (
-          <TouchableOpacity
-            key={stage.id}
-            style={[
-              styles.stageCard,
-              stage.isLocked && styles.stageCardLocked,
-              stage.isComplete && styles.stageCardComplete,
-            ]}
-            onPress={() => handleStagePress(stage)}
-          >
-            <View style={styles.stageContent}>
-              <View style={styles.stageLeft}>
-                <Text style={styles.stageName}>{stage.name}</Text>
-                {!stage.isComplete && !stage.isLocked && stage.completedCount !== undefined && stage.total !== undefined && (
-                  <Text style={styles.stageProgress}>
-                    {stage.completedCount} of {stage.total} matches completed
-                  </Text>
-                )}
+          {stages.map((stage) => (
+            <TouchableOpacity
+              key={stage.id}
+              style={[
+                styles.stageCard,
+                stage.userCommittedLocked && !stage.isComplete && styles.stageCardLocked,
+                stage.isComplete && styles.stageCardComplete,
+              ]}
+              onPress={() => handleStagePress(stage)}
+              activeOpacity={0.85}
+            >
+              <View style={styles.stageRow}>
+                <View style={styles.stageLeft}>
+                  <Text style={styles.stageName}>{stage.name}</Text>
+                  {stage.userCommittedLocked ? (
+                    <Text style={styles.stageProgress}>Locked in — view only</Text>
+                  ) : stage.knockoutAnteDisabled && stage.id !== 'group' ? (
+                    <Text style={styles.stageProgress}>Knockout ante post not open yet</Text>
+                  ) : !stage.isComplete && stage.waitingOnPriorKnockoutStage ? (
+                    <Text style={styles.stageProgress}>Finish the previous stage first</Text>
+                  ) : !stage.isComplete &&
+                    !stage.waitingOnPriorKnockoutStage &&
+                    stage.completedCount !== undefined &&
+                    stage.total !== undefined ? (
+                    <Text style={styles.stageProgress}>
+                      {stage.completedCount} of {stage.total} matches predicted
+                    </Text>
+                  ) : stage.isComplete ? (
+                    <Text style={styles.stageProgress}>Complete</Text>
+                  ) : null}
+                </View>
+                <View style={styles.stageRight}>
+                  {stage.userCommittedLocked ? (
+                    <Ionicons name="lock-closed-outline" size={22} color={theme.colors.accent} />
+                  ) : stage.knockoutAnteDisabled && stage.id !== 'group' ? (
+                    <Ionicons name="pause-circle-outline" size={24} color={theme.colors.textMuted} />
+                  ) : stage.waitingOnPriorKnockoutStage && !stage.isComplete ? (
+                    <Ionicons name="hourglass-outline" size={22} color={theme.colors.textMuted} />
+                  ) : stage.isComplete ? (
+                    <Ionicons name="checkmark-circle" size={24} color={theme.colors.accent} />
+                  ) : stage.completedCount !== undefined && stage.completedCount > 0 ? (
+                    <Text style={styles.stageCount}>
+                      {stage.completedCount}/{stage.total}
+                    </Text>
+                  ) : (
+                    <Ionicons name="chevron-forward" size={22} color={theme.colors.textMuted} />
+                  )}
+                </View>
               </View>
-              <View style={styles.stageRight}>
-                {stage.isLocked ? (
-                  <IconSymbol name="lock.fill" size={24} color={DesignColors.text} style={styles.stageIcon} />
-                ) : stage.isComplete ? (
-                  <IconSymbol name="checkmark.circle.fill" size={24} color={DesignColors.primary} style={styles.stageIcon} />
-                ) : stage.completedCount !== undefined && stage.completedCount > 0 ? (
-                  <Text style={styles.stageCount}>{stage.completedCount}/{stage.total}</Text>
-                ) : null}
-              </View>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: DesignColors.surface,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    minWidth: 80,
-  },
-  backButtonText: {
-    color: DesignColors.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  headerTitleContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    pointerEvents: 'none',
-    paddingHorizontal: 80,
-  },
-  headerTitle: {
-    color: DesignColors.text,
-    fontSize: 18,
-    fontWeight: '700',
-    fontFamily: 'Ethnocentric',
-    textAlign: 'center',
-    marginTop: 50,
-  },
-  headerSubtitle: {
-    color: DesignColors.text,
-    fontSize: 14,
-    fontWeight: '400',
-    textAlign: 'center',
-    marginTop: 2,
-    opacity: 0.7,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 12,
-  },
-  loadingText: {
-    color: DesignColors.text,
-    fontSize: 16,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  description: {
-    color: DesignColors.text,
-    fontSize: 14,
-    marginBottom: 24,
-    opacity: 0.7,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  stageCard: {
-    backgroundColor: DesignColors.surface,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  stageCardLocked: {
-    opacity: 0.5,
-    borderColor: 'rgba(71, 74, 74, 0.3)',
-  },
-  stageCardComplete: {
-    borderColor: DesignColors.primary,
-  },
-  stageContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  stageLeft: {
-    flex: 1,
-  },
-  stageName: {
-    color: DesignColors.text,
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  stageProgress: {
-    color: DesignColors.text,
-    fontSize: 12,
-    opacity: 0.7,
-  },
-  stageRight: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 60,
-  },
-  stageIcon: {
-    opacity: 0.7,
-  },
-  stageCount: {
-    color: DesignColors.primary,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-});

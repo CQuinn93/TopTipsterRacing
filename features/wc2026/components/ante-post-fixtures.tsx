@@ -1,16 +1,38 @@
-import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
-
-import { DesignColors } from '@/features/wc2026/constants/design-colors';
+import { useMemo } from 'react';
+import {
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  type TextStyle,
+} from 'react-native';
+import { useTheme } from '@/contexts/ThemeContext';
 import { type Match } from '@/features/wc2026/services/fixtures';
 import { type Prediction } from '@/features/wc2026/services/predictions';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
 
-const scoreInputPlatformStyle = Platform.select({
-  android: { textAlignVertical: 'center' as const, includeFontPadding: false },
-  ios: { lineHeight: 32 },
-  web: { outlineStyle: 'none' as const },
+/** Inner field only — border lives on `scoreInputShell` for consistent layout. */
+const scoreFieldPlatformStyle = Platform.select<TextStyle | undefined>({
+  android: { textAlignVertical: 'center', includeFontPadding: false },
+  ios: {},
+  // RN TextStyle typings omit web-only outline props; cast keeps focus ring off on web.
+  web: { outlineStyle: 'none' } as unknown as TextStyle,
   default: {},
 });
+
+/** Common scorelines — tap to fill both boxes for this match. */
+const QUICK_SCORE_PRESETS: ReadonlyArray<{ label: string; home: number; away: number }> = [
+  { label: '1–0', home: 1, away: 0 },
+  { label: '0–0', home: 0, away: 0 },
+  { label: '0–1', home: 0, away: 1 },
+  { label: '2–1', home: 2, away: 1 },
+  { label: '2–0', home: 2, away: 0 },
+  { label: '0–2', home: 0, away: 2 },
+  { label: '1–2', home: 1, away: 2 },
+];
 
 interface AntePostFixturesProps {
   fixtures: Match[];
@@ -20,21 +42,61 @@ interface AntePostFixturesProps {
   scrollViewRef?: React.RefObject<any>;
 }
 
-export function AntePostFixtures({ fixtures, predictions, onScoreChange, disabled = false, scrollViewRef }: AntePostFixturesProps) {
+export function AntePostFixtures({
+  fixtures,
+  predictions,
+  onScoreChange,
+  disabled = false,
+  scrollViewRef,
+}: AntePostFixturesProps) {
+  const theme = useTheme();
+  const layoutStyles = useMemo(
+    () =>
+      StyleSheet.create({
+        container: {
+          gap: theme.spacing.sm,
+        },
+        groupCard: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          overflow: 'hidden',
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        cardHeader: {
+          backgroundColor: theme.colors.surfaceElevated,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: 10,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+        },
+        headerText: {
+          color: theme.colors.text,
+          fontSize: 13,
+          fontWeight: '700',
+          textAlign: 'center',
+          fontFamily: theme.fontFamily.regular,
+        },
+        fixturesList: {
+          gap: 0,
+        },
+      }),
+    [theme]
+  );
+
   return (
-    <View style={styles.container}>
-      <View style={styles.groupCard}>
-        {/* Header */}
-        <View style={styles.cardHeader}>
-          <Text style={styles.headerText}>Fixtures</Text>
+    <View style={layoutStyles.container}>
+      <View style={layoutStyles.groupCard}>
+        <View style={layoutStyles.cardHeader}>
+          <Text style={layoutStyles.headerText}>Fixtures</Text>
         </View>
 
-        {/* All matches in the group */}
-        <View style={styles.fixturesList}>
+        <View style={layoutStyles.fixturesList}>
           {fixtures.map((match, index) => (
             <FixtureInput
               key={match.id}
               match={match}
+              matchIndexInGroup={index}
               prediction={predictions[match.id]}
               onScoreChange={onScoreChange}
               disabled={disabled}
@@ -50,6 +112,8 @@ export function AntePostFixtures({ fixtures, predictions, onScoreChange, disable
 
 interface FixtureInputProps {
   match: Match;
+  /** 0-based order within the current group tab (for labelling if `match_number` is missing). */
+  matchIndexInGroup: number;
   prediction?: Prediction;
   onScoreChange: (matchId: string, homeScore: number | null, awayScore: number | null) => void;
   disabled?: boolean;
@@ -57,12 +121,201 @@ interface FixtureInputProps {
   isLast?: boolean;
 }
 
-function FixtureInput({ match, prediction, onScoreChange, disabled = false, scrollViewRef, isLast = false }: FixtureInputProps) {
-  const hasPrediction = 
-    prediction && 
-    prediction.home_score !== null && 
+function FixtureInput({
+  match,
+  matchIndexInGroup,
+  prediction,
+  onScoreChange,
+  disabled = false,
+  scrollViewRef,
+  isLast = false,
+}: FixtureInputProps) {
+  const theme = useTheme();
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        matchCell: {
+          width: '100%',
+          paddingHorizontal: theme.spacing.sm,
+          paddingTop: theme.spacing.md,
+        },
+        matchRowInner: {
+          borderRadius: theme.radius.sm,
+          paddingBottom: theme.spacing.sm,
+        },
+        matchRowFilled: {
+          backgroundColor: theme.colors.accentMuted,
+        },
+        matchHeaderText: {
+          width: '100%',
+          textAlign: 'center',
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          fontWeight: '800',
+          color: theme.colors.text,
+          marginBottom: theme.spacing.sm,
+        },
+        matchContentOuter: {
+          width: '100%',
+          alignItems: 'stretch',
+        },
+        /** Symmetric grid: home block | score | vs | score | away block — keeps inputs on one vertical line. */
+        matchContent: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          width: '100%',
+          minHeight: 56,
+        },
+        sideColumn: {
+          flex: 1,
+          minWidth: 0,
+          flexDirection: 'row',
+          alignItems: 'center',
+        },
+        homeSideColumn: {
+          justifyContent: 'flex-end',
+          paddingRight: 6,
+        },
+        awaySideColumn: {
+          justifyContent: 'flex-start',
+          paddingLeft: 6,
+        },
+        teamBlock: {
+          width: 124,
+          maxWidth: '100%',
+          flexShrink: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 4,
+        },
+        teamInfo: {
+          alignItems: 'center',
+          gap: 4,
+          width: '100%',
+        },
+        teamName: {
+          color: theme.colors.text,
+          fontSize: 12,
+          fontWeight: '600',
+          textAlign: 'center',
+          width: '100%',
+          lineHeight: 15,
+          fontFamily: theme.fontFamily.regular,
+        },
+        vsText: {
+          width: 22,
+          flexShrink: 0,
+          textAlign: 'center',
+          color: theme.colors.textMuted,
+          fontSize: 14,
+          fontWeight: '700',
+          fontFamily: theme.fontFamily.regular,
+        },
+        scoreInputShell: {
+          width: 48,
+          height: 40,
+          flexShrink: 0,
+          borderRadius: theme.radius.sm,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.background,
+          justifyContent: 'center',
+          overflow: 'hidden',
+        },
+        scoreInputShellFilled: {
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+        },
+        scoreInputField: {
+          flex: 1,
+          width: '100%',
+          height: 40,
+          margin: 0,
+          paddingHorizontal: 0,
+          paddingVertical: 0,
+          borderWidth: 0,
+          backgroundColor: 'transparent',
+          fontSize: 20,
+          fontWeight: '900',
+          color: theme.colors.text,
+          textAlign: 'center',
+          fontFamily: theme.fontFamily.regular,
+          ...(Platform.OS === 'ios' ? { paddingTop: 2 } : {}),
+          ...(Platform.OS === 'web' ? { lineHeight: 22 } : {}),
+        },
+        quickPickBlock: {
+          marginTop: theme.spacing.sm,
+          paddingTop: theme.spacing.sm,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.colors.border,
+          width: '100%',
+          alignItems: 'center',
+        },
+        quickPickLabel: {
+          width: '100%',
+          textAlign: 'center',
+          fontFamily: theme.fontFamily.light,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          marginBottom: 4,
+        },
+        quickPickHint: {
+          width: '100%',
+          textAlign: 'center',
+          fontFamily: theme.fontFamily.light,
+          fontSize: 10,
+          color: theme.colors.accent,
+          marginBottom: 8,
+          lineHeight: 14,
+        },
+        quickPickScrollContent: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          paddingHorizontal: 4,
+          flexGrow: 1,
+          minWidth: '100%',
+        },
+        quickPickChip: {
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          borderRadius: theme.radius.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.background,
+        },
+        quickPickChipActive: {
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+        },
+        quickPickChipText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          fontWeight: '600',
+          color: theme.colors.text,
+        },
+        quickPickChipTextActive: {
+          color: theme.colors.accent,
+        },
+        matchDivider: {
+          marginTop: theme.spacing.md,
+          height: 3,
+          width: '100%',
+          borderRadius: 2,
+          backgroundColor: theme.colors.accent,
+          opacity: 0.85,
+        },
+      }),
+    [theme]
+  );
+
+  const hasPrediction =
+    prediction &&
+    prediction.home_score !== null &&
     prediction.home_score !== undefined &&
-    prediction.away_score !== null && 
+    prediction.away_score !== null &&
     prediction.away_score !== undefined;
 
   const homeScore = prediction?.home_score?.toString() || '';
@@ -82,176 +335,135 @@ function FixtureInput({ match, prediction, onScoreChange, disabled = false, scro
     onScoreChange(match.id, homeScoreNum, score);
   };
 
-  // Get country codes for flags (using ISO codes from country names)
   const getCountryCode = (countryName: string): string => {
-    // This is a simplified mapping - you may need to expand this based on your data
-    // The CountryFlag component should handle the mapping, but we pass the name as a fallback
     return countryName.toUpperCase().slice(0, 2);
   };
 
+  const curHome = prediction?.home_score;
+  const curAway = prediction?.away_score;
+  const hasNumericPair =
+    typeof curHome === 'number' &&
+    typeof curAway === 'number' &&
+    curHome !== null &&
+    curAway !== null;
+
+  const groupLabel = match.group?.group_name ?? '—';
+  const matchNo = match.match_number ?? matchIndexInGroup + 1;
+
   return (
-    <View style={[
-      styles.matchRow, 
-      hasPrediction && styles.matchRowFilled,
-      isLast && styles.lastMatchRow
-    ]}>
-      {/* Content */}
-      <View style={styles.matchContent}>
-        {/* Home Team */}
-        <View style={styles.teamSection}>
-          <View style={styles.teamInfo}>
-            {match.home_team && (
-              <>
-                <CountryFlag
-                  countryCode={match.home_team.country_code || getCountryCode(match.home_team.country_name)}
-                  countryName={match.home_team.country_name}
-                  flagSize={26}
-                  showName={false}
-                  align="center"
-                />
-                <Text style={styles.teamName} numberOfLines={2} ellipsizeMode="tail">
-                  {match.home_team.country_name}
-                </Text>
-              </>
-            )}
+    <View style={styles.matchCell}>
+      <View style={[styles.matchRowInner, hasPrediction && styles.matchRowFilled]}>
+        <Text style={styles.matchHeaderText}>{`Group ${groupLabel} · Match ${matchNo}`}</Text>
+        <View style={styles.matchContentOuter}>
+          <View style={styles.matchContent}>
+            <View style={[styles.sideColumn, styles.homeSideColumn]}>
+              <View style={styles.teamBlock}>
+                <View style={styles.teamInfo}>
+                  {match.home_team && (
+                    <>
+                      <CountryFlag
+                        countryCode={match.home_team.country_code || getCountryCode(match.home_team.country_name)}
+                        countryName={match.home_team.country_name}
+                        flagSize={26}
+                        showName={false}
+                        align="center"
+                      />
+                      <Text style={styles.teamName} numberOfLines={2} ellipsizeMode="tail">
+                        {match.home_team.country_name}
+                      </Text>
+                    </>
+                  )}
+                </View>
+              </View>
+            </View>
+
+            <View style={[styles.scoreInputShell, hasPrediction && styles.scoreInputShellFilled]}>
+              <TextInput
+                style={[styles.scoreInputField, scoreFieldPlatformStyle]}
+                value={homeScore}
+                onChangeText={handleHomeScoreChange}
+                placeholder="0"
+                placeholderTextColor={theme.colors.textMuted}
+                keyboardType="number-pad"
+                maxLength={2}
+                textAlign="center"
+                editable={!disabled}
+                multiline={false}
+              />
+            </View>
+
+            <Text style={styles.vsText}>–</Text>
+
+            <View style={[styles.scoreInputShell, hasPrediction && styles.scoreInputShellFilled]}>
+              <TextInput
+                style={[styles.scoreInputField, scoreFieldPlatformStyle]}
+                value={awayScore}
+                onChangeText={handleAwayScoreChange}
+                placeholder="0"
+                placeholderTextColor={theme.colors.textMuted}
+                keyboardType="number-pad"
+                maxLength={2}
+                textAlign="center"
+                editable={!disabled}
+                multiline={false}
+              />
+            </View>
+
+            <View style={[styles.sideColumn, styles.awaySideColumn]}>
+              <View style={styles.teamBlock}>
+                <View style={styles.teamInfo}>
+                  {match.away_team && (
+                    <>
+                      <CountryFlag
+                        countryCode={match.away_team.country_code || getCountryCode(match.away_team.country_name)}
+                        countryName={match.away_team.country_name}
+                        flagSize={26}
+                        showName={false}
+                        align="center"
+                      />
+                      <Text style={styles.teamName} numberOfLines={2} ellipsizeMode="tail">
+                        {match.away_team.country_name}
+                      </Text>
+                    </>
+                  )}
+                </View>
+              </View>
+            </View>
           </View>
-          <TextInput
-            style={[styles.scoreInput, scoreInputPlatformStyle, hasPrediction && styles.scoreInputFilled]}
-            value={homeScore}
-            onChangeText={handleHomeScoreChange}
-            placeholder="0"
-            placeholderTextColor="rgba(170, 173, 173, 0.5)"
-            keyboardType="numeric"
-            maxLength={2}
-            textAlign="center"
-            editable={!disabled}
-          />
         </View>
 
-        {/* VS */}
-        <Text style={styles.vsText}> - </Text>
-
-        {/* Away Team */}
-        <View style={styles.teamSection}>
-          <TextInput
-            style={[styles.scoreInput, scoreInputPlatformStyle, hasPrediction && styles.scoreInputFilled]}
-            value={awayScore}
-            onChangeText={handleAwayScoreChange}
-            placeholder="0"
-            placeholderTextColor="rgba(170, 173, 173, 0.5)"
-            keyboardType="numeric"
-            maxLength={2}
-            textAlign="center"
-            editable={!disabled}
-          />
-          <View style={styles.teamInfo}>
-            {match.away_team && (
-              <>
-                <CountryFlag
-                  countryCode={match.away_team.country_code || getCountryCode(match.away_team.country_name)}
-                  countryName={match.away_team.country_name}
-                  flagSize={26}
-                  showName={false}
-                  align="center"
-                />
-                <Text style={styles.teamName} numberOfLines={2} ellipsizeMode="tail">
-                  {match.away_team.country_name}
-                </Text>
-              </>
-            )}
-          </View>
+      {!disabled && (
+        <View style={styles.quickPickBlock}>
+          <Text style={styles.quickPickLabel}>Quick scores for this match</Text>
+          <Text style={styles.quickPickHint}>
+            You can also tap the boxes above and type any score you want.
+          </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={{ width: '100%' }}
+            contentContainerStyle={styles.quickPickScrollContent}
+          >
+            {QUICK_SCORE_PRESETS.map((p) => {
+              const isActive = hasNumericPair && curHome === p.home && curAway === p.away;
+              return (
+                <TouchableOpacity
+                  key={`${p.home}-${p.away}`}
+                  style={[styles.quickPickChip, isActive && styles.quickPickChipActive]}
+                  onPress={() => onScoreChange(match.id, p.home, p.away)}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Set score ${p.label}`}
+                >
+                  <Text style={[styles.quickPickChipText, isActive && styles.quickPickChipTextActive]}>{p.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
+      )}
       </View>
+      {!isLast ? <View style={styles.matchDivider} /> : null}
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    gap: 10,
-  },
-  groupCard: {
-    backgroundColor: DesignColors.surface,
-    borderRadius: 10,
-    overflow: 'hidden',
-    borderWidth: 1.5,
-    borderColor: DesignColors.primary,
-  },
-  cardHeader: {
-    backgroundColor: DesignColors.text,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderBottomWidth: 1.5,
-    borderBottomColor: DesignColors.text,
-  },
-  headerText: {
-    color: DesignColors.textOnDark,
-    fontSize: 13,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  fixturesList: {
-    gap: 0,
-  },
-  matchRow: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(71, 74, 74, 0.1)',
-  },
-  matchRowFilled: {
-    backgroundColor: DesignColors.primary + '10',
-  },
-  lastMatchRow: {
-    borderBottomWidth: 0,
-  },
-  matchContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  teamSection: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  teamInfo: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  teamName: {
-    color: DesignColors.text,
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-    maxWidth: 92,
-    lineHeight: 15,
-  },
-  vsText: {
-    color: DesignColors.text,
-    fontSize: 14,
-    fontWeight: '700',
-    marginHorizontal: 4,
-    opacity: 0.5,
-  },
-  scoreInput: {
-    width: 44,
-    height: 32,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: DesignColors.text,
-    backgroundColor: DesignColors.surface,
-    fontSize: 16,
-    fontWeight: '700',
-    color: DesignColors.primary,
-    textAlign: 'center',
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-  },
-  scoreInputFilled: {
-    borderColor: DesignColors.primary,
-    backgroundColor: DesignColors.primary + '20',
-  },
-});

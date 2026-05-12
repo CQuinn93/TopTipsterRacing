@@ -1,18 +1,17 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  StyleSheet, 
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
   ScrollView,
-  ActivityIndicator
+  ActivityIndicator,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { IconSymbol } from '@/features/wc2026/components/IconSymbol';
-import { DesignColors } from '@/features/wc2026/constants/design-colors';
+import { useTheme } from '@/contexts/ThemeContext';
+import { WcKnockoutResultsHeader } from '@/features/wc2026/components/WcKnockoutResultsHeader';
 import { WC2026_STORAGE_PREFIX } from '@/features/wc2026/constants/storage-keys';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
 import { type KnockoutMatch } from '@/features/wc2026/services/knockout-bracket';
@@ -29,7 +28,7 @@ interface RouteParams {
 }
 
 export default function BronzeFinalResultsScreen() {
-  const insets = useSafeAreaInsets();
+  const theme = useTheme();
   const params = useLocalSearchParams() as RouteParams;
   const [sfBracket, setSfBracket] = useState<KnockoutMatch[]>([]);
   const [sfPredictions, setSfPredictions] = useState<Record<number, { home_score: number; away_score: number; predicted_winner_id: string | null }>>({});
@@ -89,6 +88,139 @@ export default function BronzeFinalResultsScreen() {
     loadData();
   }, []);
 
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        container: {
+          flex: 1,
+          backgroundColor: theme.colors.background,
+        },
+        loadingContainer: {
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: theme.spacing.sm,
+          padding: theme.spacing.lg,
+        },
+        loadingText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 16,
+          color: theme.colors.textSecondary,
+        },
+        scrollView: { flex: 1 },
+        scrollContent: {
+          padding: theme.spacing.md,
+          paddingBottom: theme.spacing.xl,
+          gap: theme.spacing.md,
+        },
+        headerSection: {
+          marginBottom: theme.spacing.sm,
+        },
+        description: {
+          fontFamily: theme.fontFamily.light,
+          color: theme.colors.textSecondary,
+          fontSize: 14,
+          lineHeight: 22,
+          textAlign: 'center',
+          marginBottom: theme.spacing.sm,
+        },
+        matchCard: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.lg,
+          padding: theme.spacing.lg,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        matchNumber: {
+          fontFamily: theme.fontFamily.regular,
+          color: theme.colors.accent,
+          fontSize: 12,
+          fontWeight: '600',
+          marginBottom: theme.spacing.sm,
+          textAlign: 'center',
+        },
+        matchContent: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: theme.spacing.sm,
+        },
+        teamSection: {
+          flex: 1,
+          alignItems: 'center',
+          gap: theme.spacing.sm,
+          padding: theme.spacing.sm,
+          borderRadius: theme.radius.md,
+        },
+        winnerTeam: {
+          backgroundColor: theme.colors.accentMuted,
+          borderWidth: 1,
+          borderColor: theme.colors.accent,
+        },
+        loserTeam: {
+          backgroundColor: `${theme.colors.error}14`,
+          opacity: 0.75,
+        },
+        teamName: {
+          fontFamily: theme.fontFamily.regular,
+          color: theme.colors.text,
+          fontSize: 14,
+          fontWeight: '600',
+          textAlign: 'center',
+          maxWidth: 120,
+        },
+        teamSource: {
+          fontFamily: theme.fontFamily.light,
+          color: theme.colors.textMuted,
+          fontSize: 11,
+          textAlign: 'center',
+          maxWidth: 120,
+        },
+        score: {
+          fontFamily: theme.fontFamily.regular,
+          color: theme.colors.text,
+          fontSize: 24,
+          fontWeight: '700',
+        },
+        vsText: {
+          fontFamily: theme.fontFamily.regular,
+          color: theme.colors.textMuted,
+          fontSize: 16,
+          fontWeight: '700',
+        },
+        advanceText: {
+          fontFamily: theme.fontFamily.regular,
+          color: theme.colors.accent,
+          fontSize: 10,
+          fontWeight: '600',
+          marginTop: 4,
+        },
+        bronzeText: {
+          fontFamily: theme.fontFamily.regular,
+          color: theme.colors.statusAccent,
+          fontSize: 10,
+          fontWeight: '600',
+          marginTop: 4,
+        },
+        continueButton: {
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.md,
+          paddingVertical: theme.spacing.md,
+          paddingHorizontal: theme.spacing.lg,
+          alignItems: 'center',
+          marginTop: theme.spacing.lg,
+          marginBottom: theme.spacing.lg,
+        },
+        continueButtonText: {
+          fontFamily: theme.fontFamily.regular,
+          color: theme.colors.white,
+          fontSize: 17,
+          fontWeight: '700',
+        },
+      }),
+    [theme]
+  );
+
   const handleContinue = () => {
     // Generate Bronze Final bracket and navigate to predictions
     const bronzeFinalBracket = generateBronzeFinalBracket(sfPredictions, sfBracket);
@@ -106,22 +238,9 @@ export default function BronzeFinalResultsScreen() {
   if (loading) {
     return (
       <View style={styles.container}>
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <IconSymbol name="chevron.left" size={24} color={DesignColors.text} />
-            <Text style={styles.backButtonText}>Back</Text>
-          </TouchableOpacity>
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.headerTitle}>Ante Post</Text>
-            <Text style={styles.headerSubtitle}>Semi Finals Results</Text>
-          </View>
-          <View style={styles.backButton} />
-        </View>
+        <WcKnockoutResultsHeader subtitle="Semi Finals results" onBack={() => router.back()} />
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={DesignColors.primary} />
+          <ActivityIndicator size="large" color={theme.colors.accent} />
           <Text style={styles.loadingText}>Loading results...</Text>
         </View>
       </View>
@@ -130,21 +249,7 @@ export default function BronzeFinalResultsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => router.back()}
-        >
-          <IconSymbol name="chevron.left" size={24} color={DesignColors.text} />
-          <Text style={styles.backButtonText}>Back</Text>
-        </TouchableOpacity>
-        <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>Ante Post</Text>
-          <Text style={styles.headerSubtitle}>Semi Finals Results</Text>
-        </View>
-        <View style={styles.backButton} />
-      </View>
+      <WcKnockoutResultsHeader subtitle="Semi Finals results" onBack={() => router.back()} />
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         <View style={styles.headerSection}>
@@ -241,170 +346,3 @@ export default function BronzeFinalResultsScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: DesignColors.surface,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  backButtonText: {
-    color: DesignColors.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  headerTitleContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    pointerEvents: 'none',
-  },
-  headerTitle: {
-    color: DesignColors.text,
-    fontSize: 18,
-    fontWeight: '700',
-    fontFamily: 'Ethnocentric',
-    textAlign: 'center',
-    marginTop: 50,
-  },
-  headerSubtitle: {
-    color: DesignColors.text,
-    fontSize: 14,
-    fontWeight: '400',
-    textAlign: 'center',
-    marginTop: 2,
-    opacity: 0.7,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 12,
-  },
-  loadingText: {
-    color: DesignColors.text,
-    fontSize: 16,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-    gap: 16,
-  },
-  headerSection: {
-    marginBottom: 8,
-  },
-  description: {
-    color: DesignColors.text,
-    fontSize: 14,
-    textAlign: 'center',
-    opacity: 0.7,
-    marginBottom: 8,
-  },
-  matchCard: {
-    backgroundColor: DesignColors.surface,
-    borderRadius: 18,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: DesignColors.surface,
-  },
-  matchNumber: {
-    color: DesignColors.primary,
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  matchContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  teamSection: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    borderRadius: 12,
-  },
-  winnerTeam: {
-    backgroundColor: 'rgba(60, 172, 59, 0.2)',
-    borderWidth: 1,
-    borderColor: DesignColors.primary,
-  },
-  loserTeam: {
-    backgroundColor: 'rgba(230, 29, 37, 0.1)',
-    opacity: 0.6,
-  },
-  teamName: {
-    color: DesignColors.text,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-    maxWidth: 120,
-  },
-  teamSource: {
-    color: DesignColors.text,
-    fontSize: 11,
-    fontWeight: '400',
-    textAlign: 'center',
-    opacity: 0.6,
-    maxWidth: 120,
-  },
-  score: {
-    color: DesignColors.text,
-    fontSize: 24,
-    fontWeight: '700',
-  },
-  vsText: {
-    color: DesignColors.text,
-    fontSize: 18,
-    fontWeight: '700',
-    opacity: 0.5,
-  },
-  advanceText: {
-    color: DesignColors.primary,
-    fontSize: 10,
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  bronzeText: {
-    color: '#E67E22',
-    fontSize: 10,
-    fontWeight: '600',
-    marginTop: 4,
-  },
-  continueButton: {
-    backgroundColor: DesignColors.primary,
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 24,
-  },
-  continueButtonText: {
-    color: DesignColors.textOnDark,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-});

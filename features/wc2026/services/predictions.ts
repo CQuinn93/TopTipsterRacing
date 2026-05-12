@@ -9,6 +9,11 @@ export interface Prediction {
   home_score: number | null;
   away_score: number | null;
   predicted_winner_id: string | null;
+  /** Match Day Tips: home win / draw / away win (90 minutes). */
+  live_outcome?: 'H' | 'D' | 'A' | null;
+  /** Total goals in 90 minutes (user prediction). */
+  live_total_goals?: number | null;
+  live_btts?: boolean | null;
   points_awarded: number | null;
   is_correct: boolean | null;
   created_at: string;
@@ -155,4 +160,49 @@ export const upsertPrediction = async (
     predictedWinnerId,
     matchId
   );
+};
+
+export type LiveMatchDayFields = {
+  outcome: 'H' | 'D' | 'A';
+  totalGoals: number;
+  btts: boolean;
+};
+
+/** Match Day Tips: 1X2, total goals in 90m, BTTS — stored as `prediction_type = live`. */
+export const upsertLiveMatchDayPrediction = async (
+  userId: string,
+  matchId: string,
+  matchNumber: number,
+  fields: LiveMatchDayFields
+): Promise<Prediction> => {
+  const predictionData = {
+    user_id: userId,
+    match_id: matchId,
+    match_number: matchNumber,
+    prediction_type: 'live' as const,
+    live_outcome: fields.outcome,
+    live_total_goals: fields.totalGoals,
+    live_btts: fields.btts,
+    home_score: null as number | null,
+    away_score: null as number | null,
+    predicted_winner_id: null as string | null,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await wcSupabase
+    .from('predictions')
+    .upsert(predictionData, {
+      onConflict: 'user_id,match_number,prediction_type',
+    })
+    .select(
+      `
+      *,
+      predicted_winner:teams!predictions_predicted_winner_id_fkey(id, country_code, country_name)
+    `
+    )
+    .single();
+
+  if (error) throw error;
+  if (!data) throw new Error('No data returned from upsert operation');
+  return data as Prediction;
 };

@@ -12,6 +12,19 @@ const BRONZE_FINAL_PREDICTIONS_KEY = `${WC2026_STORAGE_PREFIX}ante_post_bronze_f
 const FINAL_PREDICTIONS_KEY = `${WC2026_STORAGE_PREFIX}ante_post_final_predictions`;
 const IS_LOCKED_KEY = `${WC2026_STORAGE_PREFIX}ante_post_is_locked`;
 
+/** Brackets + bridge keys cleared when editing an earlier knockout round. */
+const R16_BRACKET_KEY = `${WC2026_STORAGE_PREFIX}round_of_16_bracket`;
+const R16_FOR_QF_KEY = `${WC2026_STORAGE_PREFIX}round_of_16_predictions_for_qf`;
+const QF_BRACKET_KEY = `${WC2026_STORAGE_PREFIX}quarter_finals_bracket`;
+const QF_FOR_SF_KEY = `${WC2026_STORAGE_PREFIX}quarter_finals_predictions_for_sf`;
+const SF_BRACKET_KEY = `${WC2026_STORAGE_PREFIX}semi_finals_bracket`;
+const SF_FOR_FINAL_KEY = `${WC2026_STORAGE_PREFIX}semi_finals_predictions_for_final`;
+const BRONZE_BRACKET_KEY = `${WC2026_STORAGE_PREFIX}bronze_final_bracket`;
+const FINAL_BRACKET_KEY = `${WC2026_STORAGE_PREFIX}final_bracket`;
+const R32_FOR_R16_KEY = `${WC2026_STORAGE_PREFIX}round_of_32_predictions_for_r16`;
+
+export type KnockoutDownstreamAnchor = 'r32' | 'r16' | 'qf' | 'sf' | 'bronze';
+
 export interface LocalGroupPrediction {
   match_id: string;
   home_score: number;
@@ -147,3 +160,105 @@ export const updateAntePostLockedStatus = async (userId: string): Promise<boolea
   await setAntePostLockedStatus(isLocked);
   return isLocked;
 };
+
+const nonEmptyPred = (rec: Record<number, LocalKnockoutPrediction>) => Object.keys(rec).length > 0;
+
+/** True if any saved knockout predictions exist for rounds after `anchor`. */
+export async function hasDownstreamKnockoutPredictions(anchor: KnockoutDownstreamAnchor): Promise<boolean> {
+  const [r16, qf, sf, bronze, final] = await Promise.all([
+    getR16Predictions(),
+    getQFPredictions(),
+    getSFPredictions(),
+    getBronzeFinalPredictions(),
+    getFinalPredictions(),
+  ]);
+  switch (anchor) {
+    case 'r32':
+      return nonEmptyPred(r16) || nonEmptyPred(qf) || nonEmptyPred(sf) || nonEmptyPred(bronze) || nonEmptyPred(final);
+    case 'r16':
+      return nonEmptyPred(qf) || nonEmptyPred(sf) || nonEmptyPred(bronze) || nonEmptyPred(final);
+    case 'qf':
+      return nonEmptyPred(sf) || nonEmptyPred(bronze) || nonEmptyPred(final);
+    case 'sf':
+      return nonEmptyPred(bronze) || nonEmptyPred(final);
+    case 'bronze':
+      return nonEmptyPred(final);
+    default:
+      return false;
+  }
+}
+
+const KEYS_AFTER_R32: string[] = [
+  R16_PREDICTIONS_KEY,
+  R16_BRACKET_KEY,
+  R16_FOR_QF_KEY,
+  QF_PREDICTIONS_KEY,
+  QF_BRACKET_KEY,
+  QF_FOR_SF_KEY,
+  SF_PREDICTIONS_KEY,
+  SF_BRACKET_KEY,
+  SF_FOR_FINAL_KEY,
+  BRONZE_FINAL_PREDICTIONS_KEY,
+  BRONZE_BRACKET_KEY,
+  FINAL_PREDICTIONS_KEY,
+  FINAL_BRACKET_KEY,
+  R32_FOR_R16_KEY,
+];
+
+const KEYS_AFTER_R16: string[] = [
+  QF_PREDICTIONS_KEY,
+  QF_BRACKET_KEY,
+  QF_FOR_SF_KEY,
+  SF_PREDICTIONS_KEY,
+  SF_BRACKET_KEY,
+  SF_FOR_FINAL_KEY,
+  BRONZE_FINAL_PREDICTIONS_KEY,
+  BRONZE_BRACKET_KEY,
+  FINAL_PREDICTIONS_KEY,
+  FINAL_BRACKET_KEY,
+];
+
+const KEYS_AFTER_QF: string[] = [
+  SF_PREDICTIONS_KEY,
+  SF_BRACKET_KEY,
+  SF_FOR_FINAL_KEY,
+  BRONZE_FINAL_PREDICTIONS_KEY,
+  BRONZE_BRACKET_KEY,
+  FINAL_PREDICTIONS_KEY,
+  FINAL_BRACKET_KEY,
+];
+
+const KEYS_AFTER_SF: string[] = [
+  BRONZE_FINAL_PREDICTIONS_KEY,
+  BRONZE_BRACKET_KEY,
+  FINAL_PREDICTIONS_KEY,
+  FINAL_BRACKET_KEY,
+];
+
+const KEYS_AFTER_BRONZE: string[] = [FINAL_PREDICTIONS_KEY, FINAL_BRACKET_KEY];
+
+/** Remove local knockout picks and brackets from the round after `anchor` through Final. */
+export async function clearDownstreamAntePostKnockoutData(anchor: KnockoutDownstreamAnchor): Promise<void> {
+  let keys: string[];
+  switch (anchor) {
+    case 'r32':
+      keys = KEYS_AFTER_R32;
+      break;
+    case 'r16':
+      keys = KEYS_AFTER_R16;
+      break;
+    case 'qf':
+      keys = KEYS_AFTER_QF;
+      break;
+    case 'sf':
+      keys = KEYS_AFTER_SF;
+      break;
+    case 'bronze':
+      keys = KEYS_AFTER_BRONZE;
+      break;
+    default:
+      keys = [];
+  }
+  if (keys.length === 0) return;
+  await AsyncStorage.multiRemove(keys);
+}

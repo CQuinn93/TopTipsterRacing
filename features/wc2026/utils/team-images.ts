@@ -12,6 +12,7 @@ function normalizeCountryCode(raw: string): string {
     UKR: 'UA',
     XKX: 'XK',
     RKS: 'XK',
+    CUR: 'CW',
   };
   return aliases[u] ?? u;
 }
@@ -61,6 +62,8 @@ const imageMap: Record<string, ImageSource> = {
   HT: require('@/assets/wc2026/images/Haiti.svg'),
   PA: require('@/assets/wc2026/images/Panama.svg'),
   CW: require('@/assets/wc2026/images/Curacao.svg'),
+  /** FIFA code (same flag as CW). */
+  CUW: require('@/assets/wc2026/images/Curacao.svg'),
   UY: require('@/assets/wc2026/images/Uruguay.svg'),
   CL: require('@/assets/wc2026/images/USA.svg'),
   CO: require('@/assets/wc2026/images/Colombia.svg'),
@@ -99,7 +102,13 @@ const defaultImage: ImageSource = require('@/assets/wc2026/images/USA.svg');
  * Resolve bundled circular flag artwork for a team country code.
  * Falls back to USA artwork when unknown (same behaviour as the WC app).
  */
-export function getTeamImage(countryCode: string): ImageSource {
-  const key = normalizeCountryCode(countryCode);
+export function getTeamImage(countryCode: string, countryName?: string): ImageSource {
+  let key = normalizeCountryCode(countryCode);
+  if (!imageMap[key] && countryName) {
+    const n = countryName.toLowerCase();
+    if (n.includes('curaçao') || n.includes('curacao')) {
+      key = 'CW';
+    }
+  }
   return imageMap[key] ?? defaultImage;
 }

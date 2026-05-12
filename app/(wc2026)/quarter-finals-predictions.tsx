@@ -1,25 +1,28 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { router, useLocalSearchParams } from 'expo-router';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  StyleSheet, 
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import {
+  View,
+  Text,
+  TouchableOpacity,
   ScrollView,
   TextInput,
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { IconSymbol } from '@/features/wc2026/components/IconSymbol';
-import { DesignColors } from '@/features/wc2026/constants/design-colors';
+import { useTheme } from '@/contexts/ThemeContext';
+import { WcKnockoutResultsHeader } from '@/features/wc2026/components/WcKnockoutResultsHeader';
+import { useKnockoutPredictionsScreenStyles } from '@/features/wc2026/components/useKnockoutPredictionsScreenStyles';
 import { WC2026_STORAGE_PREFIX } from '@/features/wc2026/constants/storage-keys';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
+import { KnockoutMatchScorePresets } from '@/features/wc2026/components/KnockoutMatchScorePresets';
+import { applyKnockoutScorePreset } from '@/features/wc2026/utils/knockout-preset-score';
+import { requestKnockoutEditWithDownstreamClear } from '@/features/wc2026/utils/knockoutDownstreamEditGuard';
+import { hasDownstreamKnockoutPredictions } from '@/features/wc2026/services/async-predictions';
 import { type KnockoutMatch } from '@/features/wc2026/services/knockout-bracket';
 import { supabase } from '@/lib/supabase';
 import { wcHref, wcHrefWithParams } from '@/features/wc2026/utils/href';
@@ -38,10 +41,9 @@ interface KnockoutPrediction {
   predictedWinnerId?: string | null;
 }
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const IS_SMALL_SCREEN = SCREEN_WIDTH < 375;
-
 export default function QuarterFinalsPredictionsScreen() {
+  const theme = useTheme();
+  const styles = useKnockoutPredictionsScreenStyles();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams() as RouteParams;
   const [bracket, setBracket] = useState<KnockoutMatch[]>([]);
@@ -50,6 +52,8 @@ export default function QuarterFinalsPredictionsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
+  const [hasDownstreamPredictions, setHasDownstreamPredictions] = useState(false);
+  const downstreamClearConfirmedRef = useRef(false);
   const [userId, setUserId] = useState<string | null>(null);
   const predictionsLoadedRef = useRef(false);
   const initializedRef = useRef(false);
@@ -93,6 +97,22 @@ export default function QuarterFinalsPredictionsScreen() {
       predictionsLoadedRef.current = false; // Reset on error so we can retry
     }
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      void (async () => {
+        const h = await hasDownstreamKnockoutPredictions('qf');
+        if (!cancelled) {
+          downstreamClearConfirmedRef.current = false;
+          setHasDownstreamPredictions(h);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [])
+  );
 
   useEffect(() => {
     // Prevent multiple initializations
@@ -180,51 +200,67 @@ export default function QuarterFinalsPredictionsScreen() {
   }, [params.bracket, loadExistingPredictions]);
 
   const handleScoreChange = (matchNumber: number, team: 'home' | 'away', value: string, homeTeamId: string, awayTeamId: string) => {
-    if (isLocked) return; // Prevent changes when locked
-    setPredictions((prev) => {
-      const current = prev[matchNumber] || { matchNumber, homeScore: '', awayScore: '', predictedWinnerId: null };
-      const newHomeScore = team === 'home' ? value : current.homeScore;
-      const newAwayScore = team === 'away' ? value : current.awayScore;
-      
-      // Auto-determine winner if scores are different
-      let predictedWinnerId = current.predictedWinnerId;
-      if (newHomeScore.trim() && newAwayScore.trim()) {
-        const homeScore = parseInt(newHomeScore, 10);
-        const awayScore = parseInt(newAwayScore, 10);
-        if (!isNaN(homeScore) && !isNaN(awayScore)) {
-          if (homeScore > awayScore) {
-            predictedWinnerId = homeTeamId;
-          } else if (awayScore > homeScore) {
-            predictedWinnerId = awayTeamId;
-          } else {
-            // Draw - clear winner selection (user must choose)
-            predictedWinnerId = null;
+    if (isLocked) return;
+    const applyEdit = () => {
+      setPredictions((prev) => {
+        const current = prev[matchNumber] || { matchNumber, homeScore: '', awayScore: '', predictedWinnerId: null };
+        const newHomeScore = team === 'home' ? value : current.homeScore;
+        const newAwayScore = team === 'away' ? value : current.awayScore;
+
+        let predictedWinnerId = current.predictedWinnerId;
+        if (newHomeScore.trim() && newAwayScore.trim()) {
+          const homeScore = parseInt(newHomeScore, 10);
+          const awayScore = parseInt(newAwayScore, 10);
+          if (!isNaN(homeScore) && !isNaN(awayScore)) {
+            if (homeScore > awayScore) {
+              predictedWinnerId = homeTeamId;
+            } else if (awayScore > homeScore) {
+              predictedWinnerId = awayTeamId;
+            } else {
+              predictedWinnerId = null;
+            }
           }
         }
-      }
-      
-      return {
-        ...prev,
-        [matchNumber]: {
-          ...current,
-          [team === 'home' ? 'homeScore' : 'awayScore']: value,
-          predictedWinnerId,
-        },
-      };
+
+        return {
+          ...prev,
+          [matchNumber]: {
+            ...current,
+            [team === 'home' ? 'homeScore' : 'awayScore']: value,
+            predictedWinnerId,
+          },
+        };
+      });
+    };
+    requestKnockoutEditWithDownstreamClear('qf', {
+      selectionsGloballyLocked: isLocked,
+      downstreamClearConfirmedRef,
+      hasDownstreamPredictions,
+      onDownstreamCleared: () => setHasDownstreamPredictions(false),
+      applyEdit,
     });
   };
 
   const handleWinnerSelection = (matchNumber: number, winnerId: string) => {
-    if (isLocked) return; // Prevent changes when locked
-    setPredictions((prev) => {
-      const current = prev[matchNumber] || { matchNumber, homeScore: '', awayScore: '', predictedWinnerId: null };
-      return {
-        ...prev,
-        [matchNumber]: {
-          ...current,
-          predictedWinnerId: winnerId,
-        },
-      };
+    if (isLocked) return;
+    const applyEdit = () => {
+      setPredictions((prev) => {
+        const current = prev[matchNumber] || { matchNumber, homeScore: '', awayScore: '', predictedWinnerId: null };
+        return {
+          ...prev,
+          [matchNumber]: {
+            ...current,
+            predictedWinnerId: winnerId,
+          },
+        };
+      });
+    };
+    requestKnockoutEditWithDownstreamClear('qf', {
+      selectionsGloballyLocked: isLocked,
+      downstreamClearConfirmedRef,
+      hasDownstreamPredictions,
+      onDownstreamCleared: () => setHasDownstreamPredictions(false),
+      applyEdit,
     });
   };
 
@@ -422,22 +458,23 @@ export default function QuarterFinalsPredictionsScreen() {
     }
   };
 
+  const completedCount = useMemo(
+    () =>
+      bracket.filter((match) => {
+        const pred = predictions[match.matchNumber];
+        return pred && pred.homeScore.trim() !== '' && pred.awayScore.trim() !== '';
+      }).length,
+    [bracket, predictions]
+  );
+  const progressLine =
+    bracket.length > 0 ? `${completedCount} of ${bracket.length} matches completed` : undefined;
+
   if (loading) {
     return (
       <View style={styles.container}>
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={handleBackPress}
-          >
-            <IconSymbol name="chevron.left" size={24} color={DesignColors.text} />
-            <Text style={styles.backButtonText}>Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Quarter Finals</Text>
-          <View style={styles.backButton} />
-        </View>
+        <WcKnockoutResultsHeader subtitle="Quarter Finals" onBack={handleBackPress} />
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={DesignColors.primary} />
+          <ActivityIndicator size="large" color={theme.colors.accent} />
           <Text style={styles.loadingText}>Loading Quarter Finals fixtures...</Text>
         </View>
       </View>
@@ -446,32 +483,11 @@ export default function QuarterFinalsPredictionsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={handleBackPress}
-        >
-          <IconSymbol name="chevron.left" size={24} color={DesignColors.text} />
-          <Text style={styles.backButtonText}>Back</Text>
-        </TouchableOpacity>
-        <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>Ante Post</Text>
-          <Text style={styles.headerSubtitle}>Quarter Finals</Text>
-          {(() => {
-            const completedCount = bracket.filter((match) => {
-              const pred = predictions[match.matchNumber];
-              return pred && pred.homeScore.trim() !== '' && pred.awayScore.trim() !== '';
-            }).length;
-            return (
-              <Text style={styles.progressText}>
-                {completedCount} of {bracket.length} matches completed
-              </Text>
-            );
-          })()}
-        </View>
-        <View style={styles.backButton} />
-      </View>
+      <WcKnockoutResultsHeader
+        subtitle="Quarter Finals · Enter scores"
+        progressText={progressLine}
+        onBack={handleBackPress}
+      />
       
       {/* Teams Advancing to Semi Finals Header */}
       <View style={styles.winnersHeader}>
@@ -514,7 +530,7 @@ export default function QuarterFinalsPredictionsScreen() {
                   showName={false}
                   align="center"
                 />
-                <Text style={styles.winnerName} numberOfLines={1} ellipsizeMode="tail">
+                <Text style={styles.winnersStripText} numberOfLines={1} ellipsizeMode="tail">
                   {item.team.name}
                 </Text>
               </View>
@@ -570,7 +586,7 @@ export default function QuarterFinalsPredictionsScreen() {
                       <CountryFlag
                         countryCode={match.homeTeam.code}
                         countryName={match.homeTeam.name}
-                        flagSize={50}
+                        flagSize={40}
                         showName={false}
                         align="center"
                       />
@@ -586,7 +602,7 @@ export default function QuarterFinalsPredictionsScreen() {
                       value={pred.homeScore}
                       onChangeText={(text) => handleScoreChange(match.matchNumber, 'home', text, match.homeTeam.id, match.awayTeam.id)}
                       placeholder="0"
-                      placeholderTextColor="rgba(71, 74, 74, 0.5)"
+                      placeholderTextColor={theme.colors.textMuted}
                       keyboardType="numeric"
                       editable={!isLocked}
                       maxLength={2}
@@ -604,7 +620,7 @@ export default function QuarterFinalsPredictionsScreen() {
                       value={pred.awayScore}
                       onChangeText={(text) => handleScoreChange(match.matchNumber, 'away', text, match.homeTeam.id, match.awayTeam.id)}
                       placeholder="0"
-                      placeholderTextColor="rgba(71, 74, 74, 0.5)"
+                      placeholderTextColor={theme.colors.textMuted}
                       keyboardType="numeric"
                       editable={!isLocked}
                       maxLength={2}
@@ -614,7 +630,7 @@ export default function QuarterFinalsPredictionsScreen() {
                       <CountryFlag
                         countryCode={match.awayTeam.code}
                         countryName={match.awayTeam.name}
-                        flagSize={50}
+                        flagSize={40}
                         showName={false}
                         align="center"
                       />
@@ -627,6 +643,34 @@ export default function QuarterFinalsPredictionsScreen() {
                     </View>
                   </View>
                 </View>
+
+                <KnockoutMatchScorePresets
+                  disabled={isLocked}
+                  homeScoreStr={pred.homeScore}
+                  awayScoreStr={pred.awayScore}
+                  onSelect={(h, a) => {
+                    if (isLocked) return;
+                    const applyEdit = () => {
+                      setPredictions((prev) =>
+                        applyKnockoutScorePreset(
+                          prev,
+                          match.matchNumber,
+                          h,
+                          a,
+                          match.homeTeam.id,
+                          match.awayTeam.id
+                        )
+                      );
+                    };
+                    requestKnockoutEditWithDownstreamClear('qf', {
+                      selectionsGloballyLocked: isLocked,
+                      downstreamClearConfirmedRef,
+                      hasDownstreamPredictions,
+                      onDownstreamCleared: () => setHasDownstreamPredictions(false),
+                      applyEdit,
+                    });
+                  }}
+                />
 
                 {/* Team to Advance Selection (required for draws) */}
                 {isDraw && (
@@ -645,7 +689,7 @@ export default function QuarterFinalsPredictionsScreen() {
                         <CountryFlag
                           countryCode={match.homeTeam.code}
                           countryName={match.homeTeam.name}
-                          flagSize={30}
+                          flagSize={26}
                           showName={false}
                           align="center"
                         />
@@ -666,7 +710,7 @@ export default function QuarterFinalsPredictionsScreen() {
                         <CountryFlag
                           countryCode={match.awayTeam.code}
                           countryName={match.awayTeam.name}
-                          flagSize={30}
+                          flagSize={26}
                           showName={false}
                           align="center"
                         />
@@ -701,7 +745,7 @@ export default function QuarterFinalsPredictionsScreen() {
             disabled={saving || isLocked}
           >
             {saving ? (
-              <ActivityIndicator color={DesignColors.textOnDark} />
+              <ActivityIndicator color={theme.colors.accent} />
             ) : (
               <Text style={styles.saveButtonText}>Save Predictions</Text>
             )}
@@ -736,7 +780,7 @@ export default function QuarterFinalsPredictionsScreen() {
                 disabled={!allHavePredictions || saving || isLocked}
               >
                 {saving ? (
-                  <ActivityIndicator color={DesignColors.textOnDark} />
+                  <ActivityIndicator color={theme.colors.white} />
                 ) : (
                   <Text style={styles.continueButtonText}>Continue to Semi Finals</Text>
                 )}
@@ -749,312 +793,3 @@ export default function QuarterFinalsPredictionsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: IS_SMALL_SCREEN ? 14 : 20,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: DesignColors.surface,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-    minWidth: 80,
-  },
-  backButtonText: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 14 : 16,
-    fontWeight: '600',
-  },
-  headerTitleContainer: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    pointerEvents: 'none',
-    paddingHorizontal: IS_SMALL_SCREEN ? 60 : 80, // Ensure text doesn't overlap with back buttons
-  },
-  headerTitle: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 16 : 18,
-    fontWeight: '700',
-    fontFamily: 'Ethnocentric',
-    textAlign: 'center',
-    marginTop: IS_SMALL_SCREEN ? 40 : 50,
-  },
-  headerSubtitle: {
-    color: DesignColors.text,
-    fontSize: 14,
-    fontWeight: '400',
-    textAlign: 'center',
-    marginTop: 2,
-    opacity: 0.7,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 16,
-  },
-  loadingText: {
-    color: DesignColors.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  keyboardAvoidingView: {
-    flex: 1,
-    margin: 0,
-    padding: 0,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: IS_SMALL_SCREEN ? 14 : 20,
-    paddingBottom: IS_SMALL_SCREEN ? 30 : 40,
-  },
-  headerSection: {
-    marginBottom: 24,
-  },
-  description: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 13 : 14,
-    marginBottom: 8,
-    opacity: 0.7,
-    textAlign: 'center',
-    lineHeight: IS_SMALL_SCREEN ? 18 : 20,
-  },
-  progressText: {
-    color: DesignColors.primary,
-    fontSize: 11,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginTop: 4,
-    paddingHorizontal: 8,
-  },
-  matchCard: {
-    backgroundColor: DesignColors.surface,
-    borderRadius: 12,
-    padding: IS_SMALL_SCREEN ? 12 : 16,
-    marginBottom: IS_SMALL_SCREEN ? 12 : 16,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
-  matchCardFilled: {
-    borderColor: DesignColors.primary,
-  },
-  matchNumber: {
-    color: DesignColors.primary,
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  matchContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: IS_SMALL_SCREEN ? 8 : 12,
-  },
-  teamSection: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: IS_SMALL_SCREEN ? 8 : 12,
-  },
-  teamInfo: {
-    flex: 1,
-    alignItems: 'center',
-    gap: IS_SMALL_SCREEN ? 6 : 8,
-  },
-  teamName: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 12 : 14,
-    fontWeight: '600',
-    textAlign: 'center',
-    maxWidth: IS_SMALL_SCREEN ? 90 : 100,
-  },
-  teamSource: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 10 : 11,
-    fontWeight: '400',
-    textAlign: 'center',
-    opacity: 0.6,
-    maxWidth: IS_SMALL_SCREEN ? 90 : 100,
-  },
-  vsText: {
-    color: DesignColors.text,
-    fontSize: IS_SMALL_SCREEN ? 14 : 18,
-    fontWeight: '700',
-    marginHorizontal: IS_SMALL_SCREEN ? 6 : 12,
-    opacity: 0.5,
-  },
-  scoreInput: {
-    width: IS_SMALL_SCREEN ? 50 : 60,
-    height: IS_SMALL_SCREEN ? 44 : 50,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: DesignColors.surface,
-    backgroundColor: '#FFFFFF',
-    fontSize: IS_SMALL_SCREEN ? 20 : 24,
-    fontWeight: '700',
-    color: DesignColors.text,
-  },
-  scoreInputFilled: {
-    borderColor: DesignColors.primary,
-    backgroundColor: DesignColors.primary + '20',
-  },
-  advanceSection: {
-    marginTop: 16,
-    marginBottom: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: DesignColors.surface,
-  },
-  advanceTitle: {
-    color: DesignColors.text,
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  advanceButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'space-around',
-  },
-  advanceButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: DesignColors.surface,
-    backgroundColor: '#FFFFFF',
-  },
-  advanceButtonSelected: {
-    borderColor: DesignColors.primary,
-    backgroundColor: DesignColors.primary + '20',
-  },
-  advanceButtonText: {
-    color: DesignColors.text,
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  advanceButtonTextSelected: {
-    color: DesignColors.primary,
-    fontWeight: '700',
-  },
-  winnerSection: {
-    marginTop: 8,
-    marginBottom: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: DesignColors.primary + '15',
-  },
-  winnerText: {
-    color: DesignColors.primary,
-    fontSize: 13,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  winnersHeader: {
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: DesignColors.surface,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-  },
-  winnersHeaderTitle: {
-    color: DesignColors.text,
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 8,
-    opacity: 0.7,
-  },
-  winnersContainer: {
-    gap: 8,
-    paddingHorizontal: 4,
-  },
-  winnerBadge: {
-    alignItems: 'center',
-    marginHorizontal: 4,
-    minWidth: 60,
-    maxWidth: 80,
-  },
-  winnerName: {
-    color: DesignColors.text,
-    fontSize: 10,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginTop: 4,
-    maxWidth: 80,
-  },
-  saveButton: {
-    backgroundColor: DesignColors.actionButton,
-    borderRadius: 12,
-    paddingVertical: IS_SMALL_SCREEN ? 14 : 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  saveButtonDisabled: {
-    opacity: 0.1,
-  },
-  lockedMessage: {
-    backgroundColor: DesignColors.surface,
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    marginHorizontal: 20,
-    borderLeftWidth: 4,
-    borderLeftColor: DesignColors.primary,
-  },
-  lockedMessageText: {
-    color: DesignColors.text,
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  advanceButtonDisabled: {
-    opacity: 0.5,
-  },
-  saveButtonText: {
-    color: DesignColors.textOnDark,
-    fontSize: IS_SMALL_SCREEN ? 16 : 18,
-    fontWeight: '700',
-  },
-  continueButton: {
-    backgroundColor: DesignColors.primary,
-    borderRadius: 12,
-    paddingVertical: IS_SMALL_SCREEN ? 14 : 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    marginTop: 12,
-    marginBottom: 24,
-  },
-  continueButtonDisabled: {
-    opacity: 0.3,
-  },
-  continueButtonText: {
-    color: DesignColors.textOnDark,
-    fontSize: IS_SMALL_SCREEN ? 16 : 18,
-    fontWeight: '700',
-  },
-});
