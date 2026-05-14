@@ -83,6 +83,79 @@ export default function AntePostSelectionsScreen() {
     }
   }, [allFixtures]);
 
+  /** One merge per user + fixtures load: fills gaps from Supabase (device may have partial AsyncStorage). */
+  const mergeGroupStageFromDatabase = useCallback(async () => {
+    const uid = userId;
+    const fixtures = allFixtures;
+    if (!uid || fixtures.length === 0 || dbPredictionsLoadedRef.current) return;
+    dbPredictionsLoadedRef.current = true;
+    try {
+      const { getUserPredictions } = await import('@/features/wc2026/services/predictions');
+      const dbPredictions = await getUserPredictions(uid);
+
+      const matchNumberToId = new Map<number, string>();
+      for (const f of fixtures) {
+        if (f.group?.group_name != null && f.match_number != null) {
+          matchNumberToId.set(f.match_number, f.id);
+        }
+      }
+
+      const resolvedRows: Array<{ matchId: string; pred: Prediction }> = [];
+      for (const p of dbPredictions) {
+        if (p.prediction_type !== 'ante_post') continue;
+        const resolvedId = p.match_id ?? (p.match_number != null ? matchNumberToId.get(p.match_number) ?? null : null);
+        if (!resolvedId) continue;
+        const fx = fixtures.find((x) => x.id === resolvedId);
+        if (!fx?.group?.group_name) continue;
+        resolvedRows.push({ matchId: resolvedId, pred: { ...p, match_id: resolvedId } });
+      }
+
+      setLocalPredictions((prev) => {
+        const next = { ...prev };
+        for (const { matchId, pred } of resolvedRows) {
+          const hs = pred.home_score;
+          const as = pred.away_score;
+          const dbComplete =
+            hs !== null && as !== null && typeof hs === 'number' && typeof as === 'number';
+          if (!dbComplete) continue;
+          const cur = next[matchId];
+          const curComplete =
+            cur &&
+            cur.home_score !== null &&
+            cur.away_score !== null &&
+            typeof cur.home_score === 'number' &&
+            typeof cur.away_score === 'number';
+          if (!curComplete) {
+            next[matchId] = { home_score: hs, away_score: as };
+          }
+        }
+        return next;
+      });
+
+      setPredictions((prev) => {
+        const next = { ...prev };
+        for (const { matchId, pred } of resolvedRows) {
+          if (!next[matchId]) {
+            next[matchId] = pred;
+          }
+        }
+        return next;
+      });
+    } catch (dbError) {
+      console.error('Error merging group predictions from database:', dbError);
+      dbPredictionsLoadedRef.current = false;
+    }
+  }, [userId, allFixtures]);
+
+  useEffect(() => {
+    if (!userId) {
+      dbPredictionsLoadedRef.current = false;
+      return;
+    }
+    if (allFixtures.length === 0) return;
+    void mergeGroupStageFromDatabase();
+  }, [userId, allFixtures, mergeGroupStageFromDatabase]);
+
   useEffect(() => {
     // Load group data when fixtures are available AND when group changes
     if (allFixtures.length > 0) {
@@ -128,51 +201,16 @@ export default function AntePostSelectionsScreen() {
     }
   };
 
-  // Load predictions from AsyncStorage (not database)
+  // Load predictions from AsyncStorage. Supabase group-stage rows are merged separately
+  // (see mergeGroupStageFromDatabase) so partial local data does not hide server picks.
   const loadGroupPredictionsFromStorage = async () => {
     try {
       const asyncPredictions = await getGroupPredictions();
 
-      // If there are no local predictions (e.g. after final submission cleared AsyncStorage),
-      // try to load them from the database so locked users can still view their picks.
       if (Object.keys(asyncPredictions).length === 0) {
-        // Only hit the database once per mount
-        if (userId && !dbPredictionsLoadedRef.current) {
-          try {
-            const { getUserPredictions } = await import('@/features/wc2026/services/predictions');
-            const dbPredictions = await getUserPredictions(userId);
-
-            // Filter to group-stage ante_post predictions that have a match_id
-            const groupAntePostPreds = dbPredictions.filter(
-              (p) => p.prediction_type === 'ante_post' && p.match_id !== null
-            );
-
-            const localMap: Record<string, { home_score: number | null; away_score: number | null }> = {};
-            const dbMap: Record<string, Prediction> = {};
-
-            groupAntePostPreds.forEach((p) => {
-              const matchId = p.match_id as string;
-              dbMap[matchId] = p;
-              localMap[matchId] = {
-                home_score: p.home_score,
-                away_score: p.away_score,
-              };
-            });
-
-            setPredictions((prev) => ({ ...dbMap, ...prev }));
-            setLocalPredictions((prev) => ({ ...localMap, ...prev }));
-            dbPredictionsLoadedRef.current = true;
-          } catch (dbError) {
-            console.error('Error loading group predictions from database:', dbError);
-          }
-        }
-
-        // Either we just loaded from DB or there's nothing to show yet;
-        // in both cases, don't overwrite any existing state.
         return;
       }
 
-      // Convert AsyncStorage format to local predictions format
       const localMap: Record<string, { home_score: number | null; away_score: number | null }> = {};
 
       Object.entries(asyncPredictions).forEach(([matchId, pred]) => {

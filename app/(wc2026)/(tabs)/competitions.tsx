@@ -20,7 +20,24 @@ import {
   wcFootballListMyCompetitions,
   type WcFootballCompetition,
 } from '@/features/wc2026/services/football-competitions';
+import { wcFootballLeaderboard, type WcFootballLeaderboardRow } from '@/features/wc2026/services/football-leaderboard';
 import { wcHrefWithParams } from '@/features/wc2026/utils/href';
+
+function combinedRankForUser(rows: WcFootballLeaderboardRow[], uid: string): number | null {
+  if (rows.length === 0) return null;
+  const sorted = [...rows].sort((a, b) => b.total_points - a.total_points || a.user_id.localeCompare(b.user_id));
+  const ranks: number[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    let r = 1;
+    if (i > 0) {
+      if (sorted[i].total_points < sorted[i - 1].total_points) r = i + 1;
+      else r = ranks[i - 1];
+    }
+    ranks.push(r);
+  }
+  const idx = sorted.findIndex((x) => x.user_id === uid);
+  return idx >= 0 ? ranks[idx] : null;
+}
 
 function joinAlert(title: string, message?: string) {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -39,6 +56,8 @@ export default function WorldCupCompetitionsTab() {
   const [list, setList] = useState<WcFootballCompetition[]>([]);
   const [code, setCode] = useState('');
   const [joinBusy, setJoinBusy] = useState(false);
+  const [yourRankByLeague, setYourRankByLeague] = useState<Record<string, number | null>>({});
+  const [ranksLoading, setRanksLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!userId) {
@@ -48,6 +67,38 @@ export default function WorldCupCompetitionsTab() {
     const mine = await wcFootballListMyCompetitions();
     setList(mine);
   }, [userId]);
+
+  useEffect(() => {
+    if (!userId || list.length === 0) {
+      setYourRankByLeague({});
+      setRanksLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setRanksLoading(true);
+      const out: Record<string, number | null> = {};
+      await Promise.all(
+        list.map(async (c) => {
+          try {
+            const rows = await wcFootballLeaderboard(c.id);
+            if (!cancelled) {
+              out[c.id] = combinedRankForUser(rows, userId);
+            }
+          } catch {
+            if (!cancelled) out[c.id] = null;
+          }
+        })
+      );
+      if (!cancelled) {
+        setYourRankByLeague(out);
+        setRanksLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, list]);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,9 +208,25 @@ export default function WorldCupCompetitionsTab() {
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 12,
+          gap: 8,
         },
-        compName: { fontFamily: theme.fontFamily.regular, fontWeight: '700', color: theme.colors.text, flex: 1 },
+        compName: { fontFamily: theme.fontFamily.regular, fontWeight: '700', color: theme.colors.text, flex: 1, minWidth: 0 },
+        rankColumn: {
+          width: 44,
+          alignItems: 'flex-end',
+          justifyContent: 'center',
+        },
+        yourRank: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          fontWeight: '800',
+          color: theme.colors.accent,
+        },
+        rankPlaceholder: {
+          fontFamily: theme.fontFamily.light,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+        },
         lbBtn: {
           paddingVertical: 8,
           paddingHorizontal: 12,
@@ -186,7 +253,7 @@ export default function WorldCupCompetitionsTab() {
           <Text style={styles.title}>Mini-leagues</Text>
           <Text style={styles.body}>
             Join with an access code from your organiser. Your World Cup picks are the same in every league; each
-            mini-league has its own leaderboard based on points from those picks.
+            mini-league has its own leaderboard; tap a player to open their picks in a drawer (ante post and match day tabs).
           </Text>
           <TextInput
             style={styles.input}
@@ -216,6 +283,15 @@ export default function WorldCupCompetitionsTab() {
                 <Text style={styles.compName} numberOfLines={2}>
                   {c.name}
                 </Text>
+                <View style={styles.rankColumn}>
+                  {ranksLoading ? (
+                    <ActivityIndicator size="small" color={theme.colors.accent} />
+                  ) : yourRankByLeague[c.id] != null ? (
+                    <Text style={styles.yourRank}>#{yourRankByLeague[c.id]}</Text>
+                  ) : (
+                    <Text style={styles.rankPlaceholder}>—</Text>
+                  )}
+                </View>
                 <TouchableOpacity style={styles.lbBtn} onPress={() => openLeaderboard(c)}>
                   <Text style={styles.lbBtnText}>Leaderboard</Text>
                 </TouchableOpacity>

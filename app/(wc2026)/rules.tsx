@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text } from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { router } from 'expo-router';
 
 import { useTheme } from '@/contexts/ThemeContext';
+import { wcHref } from '@/features/wc2026/utils/href';
 
 export default function WorldCupRulesScreen() {
   const theme = useTheme();
@@ -24,6 +26,14 @@ export default function WorldCupRulesScreen() {
           lineHeight: 24,
           marginBottom: theme.spacing.md,
         },
+        link: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          fontWeight: '700',
+          color: theme.colors.accent,
+          marginBottom: theme.spacing.md,
+          textDecorationLine: 'underline',
+        },
       }),
     [theme]
   );
@@ -42,6 +52,12 @@ export default function WorldCupRulesScreen() {
       <Text style={styles.rule}>
         Once you submit your final ante post selections, they are locked and cannot be edited. You can still view your picks and results.
       </Text>
+      <Text style={styles.rule}>
+        Scoring for ante post and match day picks (including per-player drawers on mini-league leaderboards) is described on the Points System screen.
+      </Text>
+      <TouchableOpacity onPress={() => router.push(wcHref('/(wc2026)/points') as any)} activeOpacity={0.7}>
+        <Text style={styles.link}>Open Points System</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 }

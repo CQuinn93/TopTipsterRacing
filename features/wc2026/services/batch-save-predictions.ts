@@ -1,4 +1,4 @@
-// Batch save all ante post predictions to database
+// Batch save ante post predictions to wc2026.predictions (group by match_id, knockouts by match_number).
 // Called only when user submits final ante post selections
 
 import { upsertPrediction, upsertPredictionByMatchNumber } from './predictions';
@@ -10,12 +10,19 @@ export interface BatchSaveResult {
   error?: string;
 }
 
+export type BatchSaveAntePostOptions = {
+  /** When true (default), clears AsyncStorage ante keys after a fully successful save — use false between knockout rounds. */
+  clearLocal?: boolean;
+};
+
 /**
- * Save all ante post predictions to database in one batch operation
- * @param userId User ID
- * @returns Result with success status and count of saved predictions
+ * Save all ante post predictions to database in one batch operation (group + every knockout round from AsyncStorage).
  */
-export const batchSaveAllAntePostPredictions = async (userId: string): Promise<BatchSaveResult> => {
+export const batchSaveAllAntePostPredictions = async (
+  userId: string,
+  opts?: BatchSaveAntePostOptions
+): Promise<BatchSaveResult> => {
+  const clearLocal = opts?.clearLocal !== false;
   try {
     // Get all predictions from AsyncStorage
     const allPredictions = await getAllAntePostPredictions();
@@ -171,13 +178,12 @@ export const batchSaveAllAntePostPredictions = async (userId: string): Promise<B
       console.warn(`Some predictions failed to save: ${errors.join(', ')}`);
     }
 
-    // Clear AsyncStorage only if all saves succeeded
-    if (errors.length === 0) {
+    if (errors.length === 0 && clearLocal) {
       await clearAllAntePostPredictions();
     }
 
     return {
-      success: true,
+      success: errors.length === 0,
       savedCount,
       error: errors.length > 0 ? `Some predictions failed: ${errors.length} errors` : undefined,
     };

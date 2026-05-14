@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -15,14 +15,20 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { supabase } from '@/lib/supabase';
+import { wcSupabase } from '@/features/wc2026/lib/supabase';
 import { wcHref } from '@/features/wc2026/utils/href';
 import { WC_STAGE_SLICES } from '@/features/wc2026/utils/match-number-stage';
+import { getFixtures, type Match, type Team } from '@/features/wc2026/services/fixtures';
+import { WcLeaderboardPickRow } from '@/features/wc2026/components/WcLeaderboardPredictionRow';
 import {
   wcFootballLeaderboard,
-  wcFootballCompetitionPredictions,
+  wcFootballUserCompetitionPredictions,
   type WcFootballLeaderboardRow,
   type WcLeaderboardPredictionRow,
 } from '@/features/wc2026/services/football-leaderboard';
+import { buildKnockoutTeamsByMatchNumber } from '@/features/wc2026/services/knockout-teams-from-predictions';
+
+type LeaderTab = 'ante_post' | 'live';
 
 function firstParam(v: string | string[] | undefined): string {
   if (v == null) return '';
@@ -30,32 +36,180 @@ function firstParam(v: string | string[] | undefined): string {
   return typeof raw === 'string' ? raw : '';
 }
 
-function stageLabelForMatchNumber(matchNumber: number | null): string {
-  if (matchNumber == null) return '—';
-  const s = WC_STAGE_SLICES.find((x) => matchNumber >= x.min && matchNumber <= x.max);
-  return s?.label ?? 'Match';
+function formatPoints(n: number): string {
+  if (!Number.isFinite(n)) return '0';
+  const rounded = Math.round(n * 100) / 100;
+  if (Math.abs(rounded - Math.round(rounded)) < 1e-6) return String(Math.round(rounded));
+  return rounded.toFixed(1);
 }
 
-function formatLiveOutcome(o: 'H' | 'D' | 'A' | null | undefined): string {
-  if (o === 'H') return 'Home';
-  if (o === 'D') return 'Draw';
-  if (o === 'A') return 'Away';
-  return '—';
+function sortPredictions(list: WcLeaderboardPredictionRow[]): WcLeaderboardPredictionRow[] {
+  return [...list].sort((a, b) => {
+    const an = a.match_number != null ? Number(a.match_number) : 9999;
+    const bn = b.match_number != null ? Number(b.match_number) : 9999;
+    if (an !== bn) return an - bn;
+    if (a.prediction_type !== b.prediction_type) return a.prediction_type.localeCompare(b.prediction_type);
+    return a.id.localeCompare(b.id);
+  });
 }
 
-function formatPredictionLine(p: WcLeaderboardPredictionRow): string {
-  const mn = p.match_number != null ? `Match ${p.match_number}` : 'Pick';
-  const stage = stageLabelForMatchNumber(p.match_number);
-  const pts = p.points_awarded ?? 0;
-  if (p.prediction_type === 'ante_post') {
-    const hs = p.home_score != null ? String(p.home_score) : '—';
-    const as = p.away_score != null ? String(p.away_score) : '—';
-    return `${mn} · ${stage} — ${hs}–${as} — ${pts} pts`;
+function buildMatchIndex(fixtures: Match[]) {
+  const byId = new Map<string, Match>();
+  const byNum = new Map<number, Match>();
+  for (const m of fixtures) {
+    byId.set(m.id, m);
+    const raw = m.match_number as unknown;
+    const n = typeof raw === 'number' && Number.isFinite(raw) ? raw : Number(raw);
+    if (Number.isFinite(n)) byNum.set(n, m);
   }
-  const tip = formatLiveOutcome(p.live_outcome ?? null);
-  const goals = p.live_total_goals != null ? String(p.live_total_goals) : '—';
-  const btts = p.live_btts === true ? 'Yes' : p.live_btts === false ? 'No' : '—';
-  return `${mn} · ${stage} — 1X2: ${tip} · goals ${goals} · BTTS ${btts} — ${pts} pts`;
+  return { byId, byNum };
+}
+
+function matchForPrediction(p: WcLeaderboardPredictionRow, ix: ReturnType<typeof buildMatchIndex>): Match | null {
+  if (p.match_id && ix.byId.has(p.match_id)) return ix.byId.get(p.match_id)!;
+  if (p.match_number != null) {
+    const n = Number(p.match_number);
+    if (Number.isFinite(n) && ix.byNum.has(n)) return ix.byNum.get(n)!;
+  }
+  return null;
+}
+
+/** DB has no knockout rows — merge synthetic teams from bracket rebuild (see `buildKnockoutTeamsByMatchNumber`). */
+function resolveDisplayMatch(
+  p: WcLeaderboardPredictionRow,
+  ix: ReturnType<typeof buildMatchIndex>,
+  koMap: Map<number, { home_team: Team; away_team: Team }> | undefined
+): Match | null {
+  const m = matchForPrediction(p, ix);
+  const mn = p.match_number != null ? Number(p.match_number) : null;
+  const ko = mn != null && Number.isFinite(mn) ? koMap?.get(mn) : undefined;
+
+  if (m && ko) {
+    return {
+      ...m,
+      home_team: m.home_team ?? ko.home_team,
+      away_team: m.away_team ?? ko.away_team,
+    };
+  }
+  if (m) return m;
+
+  if (ko && mn != null && mn >= 73) {
+    return {
+      id: p.match_id ?? `knockout-${mn}`,
+      match_number: mn,
+      tournament_stage_id: '',
+      group_id: null,
+      home_team_id: ko.home_team.id,
+      away_team_id: ko.away_team.id,
+      venue_id: '',
+      match_date: '',
+      home_score: null,
+      away_score: null,
+      status: 'scheduled',
+      is_knockout: true,
+      created_at: '',
+      updated_at: '',
+      home_team: ko.home_team,
+      away_team: ko.away_team,
+    };
+  }
+
+  return m;
+}
+
+/** Same letter order as group-stage picks elsewhere in the app. */
+const WC_GROUP_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
+
+type StageSubgroup = { key: string; label: string; rows: WcLeaderboardPredictionRow[] };
+
+type StageBucket = {
+  stageId: string;
+  label: string;
+  order: number;
+  rows: WcLeaderboardPredictionRow[];
+  subgroups?: StageSubgroup[];
+};
+
+function groupLetterSortKey(letter: string): number {
+  const u = letter.trim().toUpperCase();
+  const i = WC_GROUP_LETTERS.indexOf(u);
+  return i >= 0 ? i : 1000;
+}
+
+function compareGroupSubgroupKeys(a: string, b: string): number {
+  return groupLetterSortKey(a) - groupLetterSortKey(b) || a.localeCompare(b);
+}
+
+function subgroupLabelForGroup(key: string): string {
+  if (key === '_' || key.length === 0) return 'Other';
+  return `Group ${key}`;
+}
+
+function stageRowCount(bucket: StageBucket): number {
+  if (bucket.subgroups?.length) return bucket.subgroups.reduce((acc, sg) => acc + sg.rows.length, 0);
+  return bucket.rows.length;
+}
+
+function groupPredictionsByStage(rows: WcLeaderboardPredictionRow[], fixtures: Match[]): StageBucket[] {
+  const ix = buildMatchIndex(fixtures);
+  const map = new Map<string, StageBucket>();
+  for (const s of WC_STAGE_SLICES) {
+    map.set(s.id, { stageId: s.id, label: s.label, order: s.min, rows: [] });
+  }
+  const other: StageBucket = { stageId: '_other', label: 'Other', order: 10000, rows: [] };
+  const groupSubMap = new Map<string, WcLeaderboardPredictionRow[]>();
+
+  for (const p of rows) {
+    const mn = p.match_number != null && Number.isFinite(Number(p.match_number)) ? Number(p.match_number) : null;
+    const slice = mn != null ? WC_STAGE_SLICES.find((x) => mn >= x.min && mn <= x.max) : null;
+    if (slice) {
+      if (slice.id === 'group') {
+        const fx = matchForPrediction(p, ix);
+        const raw = fx?.group?.group_name?.trim() ?? '';
+        const gkey = raw.length > 0 ? raw.toUpperCase() : '_';
+        const arr = groupSubMap.get(gkey) ?? [];
+        arr.push(p);
+        groupSubMap.set(gkey, arr);
+      } else {
+        map.get(slice.id)!.rows.push(p);
+      }
+    } else {
+      other.rows.push(p);
+    }
+  }
+
+  const groupBucket = map.get('group')!;
+  if (groupSubMap.size > 0) {
+    groupBucket.subgroups = [...groupSubMap.entries()]
+      .sort(([ka], [kb]) => compareGroupSubgroupKeys(ka, kb))
+      .map(([key, rws]) => ({
+        key,
+        label: subgroupLabelForGroup(key),
+        rows: rws.sort((a, c) => {
+          const an = a.match_number != null ? Number(a.match_number) : 0;
+          const cn = c.match_number != null ? Number(c.match_number) : 0;
+          return an - cn || a.id.localeCompare(c.id);
+        }),
+      }));
+    groupBucket.rows = [];
+  }
+
+  const out: StageBucket[] = [...map.values()].filter((b) => (b.subgroups?.length ?? 0) > 0 || b.rows.length > 0);
+  if (other.rows.length > 0) out.push(other);
+  out.sort((a, b) => a.order - b.order);
+  for (const b of out) {
+    if (b.subgroups?.length) continue;
+    b.rows.sort((a, c) => {
+      const an = a.match_number != null ? Number(a.match_number) : 0;
+      const cn = c.match_number != null ? Number(c.match_number) : 0;
+      return an - cn || a.id.localeCompare(c.id);
+    });
+  }
+  return out;
+}
+
+function stageOpenKey(userId: string, stageId: string) {
+  return `${userId}::${stageId}`;
 }
 
 export default function WcFootballLeaderboardScreen() {
@@ -78,26 +232,79 @@ export default function WcFootballLeaderboardScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [lbRows, setLbRows] = useState<WcFootballLeaderboardRow[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
-  const [predictions, setPredictions] = useState<WcLeaderboardPredictionRow[]>([]);
+  /** Per-user predictions for this competition; key present = loaded (possibly empty). */
+  const [predCache, setPredCache] = useState<Record<string, WcLeaderboardPredictionRow[]>>({});
+  const [drawerLoadingUserId, setDrawerLoadingUserId] = useState<string | null>(null);
+  const [fixtures, setFixtures] = useState<Match[]>([]);
+  const [teamsById, setTeamsById] = useState<Record<string, Team>>({});
+  /** Per-user synthetic knockout sides (match_number ≥ 73) — DB fixtures only cover the group stage. */
+  const [koTeamMaps, setKoTeamMaps] = useState<Record<string, Map<number, { home_team: Team; away_team: Team }>>>(
+    {}
+  );
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [drawerTab, setDrawerTab] = useState<LeaderTab>('ante_post');
+  const [openStages, setOpenStages] = useState<Record<string, boolean>>({});
+  /** Deduplicate overlapping fetches for the same user (e.g. prefetch + drawer). */
+  const fetchInflightRef = useRef<Map<string, Promise<void>>>(new Map());
+
+  const ensureUserPredictions = useCallback(
+    async (targetId: string) => {
+      if (!competitionId) return;
+      if (Object.prototype.hasOwnProperty.call(predCache, targetId)) return;
+      const existing = fetchInflightRef.current.get(targetId);
+      if (existing) {
+        await existing;
+        return;
+      }
+      const p = (async () => {
+        setDrawerLoadingUserId(targetId);
+        try {
+          const rows = await wcFootballUserCompetitionPredictions(competitionId, targetId);
+          setPredCache((prev) => ({ ...prev, [targetId]: sortPredictions(rows) }));
+        } catch {
+          setPredCache((prev) => ({ ...prev, [targetId]: [] }));
+        } finally {
+          setDrawerLoadingUserId((cur) => (cur === targetId ? null : cur));
+          fetchInflightRef.current.delete(targetId);
+        }
+      })();
+      fetchInflightRef.current.set(targetId, p);
+      await p;
+    },
+    [competitionId, predCache]
+  );
 
   const load = useCallback(async () => {
     if (!competitionId) {
       setLbRows([]);
-      setPredictions([]);
+      setPredCache({});
+      setFixtures([]);
+      setTeamsById({});
+      setKoTeamMaps({});
       setLoadError(null);
       setLoading(false);
       return;
     }
     setLoading(true);
     setLoadError(null);
+    fetchInflightRef.current.clear();
+    setPredCache({});
+    setKoTeamMaps({});
     try {
-      const [rows, preds] = await Promise.all([
+      const [rows, fx, teamsRes] = await Promise.all([
         wcFootballLeaderboard(competitionId),
-        wcFootballCompetitionPredictions(competitionId),
+        getFixtures().catch(() => [] as Match[]),
+        wcSupabase.from('teams').select('id, country_code, country_name, confederation, fifa_ranking'),
       ]);
       setLbRows(rows);
-      setPredictions(preds);
+      setFixtures(fx);
+      const tm: Record<string, Team> = {};
+      if (!teamsRes.error && teamsRes.data) {
+        for (const t of teamsRes.data as Team[]) {
+          tm[t.id] = t;
+        }
+      }
+      setTeamsById(tm);
       const ids = [...new Set(rows.map((r) => r.user_id))];
       if (ids.length) {
         const { data: profiles, error: profErr } = await supabase.from('profiles').select('id, username').in('id', ids);
@@ -116,7 +323,10 @@ export default function WcFootballLeaderboardScreen() {
       const msg = e instanceof Error ? e.message : 'Could not load leaderboard.';
       setLoadError(msg);
       setLbRows([]);
-      setPredictions([]);
+      setPredCache({});
+      setFixtures([]);
+      setTeamsById({});
+      setKoTeamMaps({});
       setNames({});
     } finally {
       setLoading(false);
@@ -127,24 +337,59 @@ export default function WcFootballLeaderboardScreen() {
     void load();
   }, [load]);
 
-  const predsByUser = useMemo(() => {
-    const m = new Map<string, WcLeaderboardPredictionRow[]>();
-    for (const p of predictions) {
-      const list = m.get(p.user_id) ?? [];
-      list.push(p);
-      m.set(p.user_id, list);
+  useEffect(() => {
+    if (!expandedUserId) return;
+    void ensureUserPredictions(expandedUserId);
+  }, [expandedUserId, ensureUserPredictions]);
+
+  useEffect(() => {
+    if (!userId || !competitionId || lbRows.length === 0) return;
+    void ensureUserPredictions(userId);
+  }, [userId, competitionId, lbRows.length, ensureUserPredictions]);
+
+  useEffect(() => {
+    setOpenStages({});
+    if (expandedUserId) setDrawerTab('ante_post');
+  }, [expandedUserId]);
+
+  useEffect(() => {
+    if (!expandedUserId) return;
+    if (!Object.prototype.hasOwnProperty.call(predCache, expandedUserId)) return;
+    const rows = predCache[expandedUserId] ?? [];
+    let cancelled = false;
+    void (async () => {
+      try {
+        const map = await buildKnockoutTeamsByMatchNumber(fixtures, rows);
+        if (!cancelled) {
+          setKoTeamMaps((prev) => ({ ...prev, [expandedUserId]: map }));
+        }
+      } catch {
+        if (!cancelled) {
+          setKoTeamMaps((prev) => ({ ...prev, [expandedUserId]: new Map() }));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedUserId, predCache, fixtures]);
+
+  const matchIndex = useMemo(() => buildMatchIndex(fixtures), [fixtures]);
+
+  const rankedCombined = useMemo(() => {
+    if (lbRows.length === 0) return [];
+    const sorted = [...lbRows].sort((a, b) => b.total_points - a.total_points || a.user_id.localeCompare(b.user_id));
+    const out: { row: WcFootballLeaderboardRow; rank: number }[] = [];
+    for (let i = 0; i < sorted.length; i++) {
+      let rank = 1;
+      if (i > 0) {
+        if (sorted[i].total_points < sorted[i - 1].total_points) rank = i + 1;
+        else rank = out[i - 1].rank;
+      }
+      out.push({ row: sorted[i], rank });
     }
-    for (const [, list] of m) {
-      list.sort((a, b) => {
-        const an = a.match_number ?? 9999;
-        const bn = b.match_number ?? 9999;
-        if (an !== bn) return an - bn;
-        if (a.prediction_type !== b.prediction_type) return a.prediction_type.localeCompare(b.prediction_type);
-        return a.id.localeCompare(b.id);
-      });
-    }
-    return m;
-  }, [predictions]);
+    return out;
+  }, [lbRows]);
 
   const styles = useMemo(
     () =>
@@ -170,7 +415,7 @@ export default function WcFootballLeaderboardScreen() {
           color: theme.colors.text,
         },
         scroll: { flex: 1 },
-        content: { padding: theme.spacing.md, paddingBottom: 40 },
+        content: { padding: theme.spacing.md, paddingBottom: insets.bottom + 40 },
         intro: {
           fontFamily: theme.fontFamily.light,
           fontSize: 13,
@@ -228,35 +473,95 @@ export default function WcFootballLeaderboardScreen() {
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: theme.colors.border,
           backgroundColor: theme.colors.surfaceElevated,
-          paddingHorizontal: theme.spacing.md,
-          paddingBottom: theme.spacing.md,
+          paddingHorizontal: theme.spacing.sm,
+          paddingBottom: theme.spacing.sm,
         },
-        sectionTitle: {
+        drawerTabRow: {
+          flexDirection: 'row',
+          gap: theme.spacing.xs,
+          marginTop: theme.spacing.sm,
+          marginBottom: theme.spacing.sm,
+        },
+        drawerTabPill: {
+          flex: 1,
+          paddingVertical: 8,
+          paddingHorizontal: theme.spacing.xs,
+          borderRadius: theme.radius.sm,
+          backgroundColor: theme.colors.surface,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        drawerTabPillActive: {
+          backgroundColor: theme.colors.accent,
+          borderColor: theme.colors.accent,
+        },
+        drawerTabText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textSecondary,
+          textAlign: 'center',
+        },
+        drawerTabTextActive: {
+          color: theme.colors.white,
+          fontWeight: '700',
+        },
+        stageBlock: {
+          marginBottom: 4,
+          borderRadius: theme.radius.sm,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          overflow: 'hidden',
+          backgroundColor: theme.colors.surface,
+        },
+        stageHeader: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingVertical: 8,
+          paddingHorizontal: theme.spacing.sm,
+          backgroundColor: theme.colors.background,
+        },
+        stageTitle: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 12,
           fontWeight: '700',
-          color: theme.colors.accent,
-          marginTop: theme.spacing.md,
-          marginBottom: 6,
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-        },
-        line: {
-          fontFamily: theme.fontFamily.light,
-          fontSize: 12,
           color: theme.colors.text,
-          lineHeight: 17,
-          marginBottom: 6,
+          flex: 1,
+        },
+        stageMeta: {
+          fontFamily: theme.fontFamily.light,
+          fontSize: 10,
+          color: theme.colors.textMuted,
+          marginRight: 4,
+        },
+        subgroupTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          fontWeight: '700',
+          color: theme.colors.textSecondary,
+          paddingHorizontal: theme.spacing.sm,
+          paddingTop: 8,
+          paddingBottom: 4,
+          backgroundColor: theme.colors.surfaceElevated,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
         },
         emptyBreak: {
           fontFamily: theme.fontFamily.light,
           fontSize: 12,
           color: theme.colors.textMuted,
           fontStyle: 'italic',
-          marginBottom: 4,
+          paddingVertical: theme.spacing.sm,
+          paddingHorizontal: theme.spacing.xs,
+        },
+        drawerLoading: {
+          paddingVertical: theme.spacing.md,
+          alignItems: 'center',
         },
       }),
-    [theme, insets.top]
+    [theme, insets.top, insets.bottom]
   );
 
   const goBack = () => {
@@ -268,16 +573,9 @@ export default function WcFootballLeaderboardScreen() {
     setExpandedUserId((prev) => (prev === uid ? null : uid));
   };
 
-  const userSubTotals = (uid: string) => {
-    const list = predsByUser.get(uid) ?? [];
-    let ante = 0;
-    let live = 0;
-    for (const p of list) {
-      const pts = p.points_awarded ?? 0;
-      if (p.prediction_type === 'ante_post') ante += pts;
-      else live += pts;
-    }
-    return { ante, live };
+  const toggleStage = (userId: string, stageId: string) => {
+    const k = stageOpenKey(userId, stageId);
+    setOpenStages((prev) => ({ ...prev, [k]: !prev[k] }));
   };
 
   if (!competitionId) {
@@ -309,76 +607,134 @@ export default function WcFootballLeaderboardScreen() {
       ) : (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <Text style={styles.intro}>
-            Tap any player to expand ante post and match day points, match by match. Totals match the mini-league
-            leaderboard (same picks count in every league you join).
+            Rankings use combined points. Tap a player to load their picks once (cached for this competition until you
+            leave). Inside the drawer, switch between ante post and match day; expand each stage to see flags, result, your
+            prediction, and Win or Loss when the match is finished and points are in.
           </Text>
           {loadError ? (
             <Text style={[styles.intro, { color: theme.colors.error }]}>
               {loadError}
               {'\n\n'}
-              If this persists, confirm the database migration for `wc_football_competition_predictions` has been applied.
+              If picks never load, apply migration 049 (per-user predictions + split totals on the leaderboard RPC).
             </Text>
           ) : null}
           {!loadError && lbRows.length === 0 ? (
             <Text style={styles.intro}>No leaderboard data yet — join this league or check back later.</Text>
           ) : null}
-          {!loadError && lbRows.length > 0 ? (
-            lbRows.map((row, index) => {
-              const uid = row.user_id;
-              const isYou = userId != null && uid === userId;
-              const expanded = expandedUserId === uid;
-              const list = predsByUser.get(uid) ?? [];
-              const anteRows = list.filter((p) => p.prediction_type === 'ante_post');
-              const liveRows = list.filter((p) => p.prediction_type === 'live');
-              const { ante, live } = userSubTotals(uid);
-              return (
-                <View key={uid} style={styles.row}>
-                  <TouchableOpacity
-                    style={[styles.rowHeader, isYou && styles.rowHeaderYou]}
-                    onPress={() => toggleUser(uid)}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={styles.rank}>{index + 1}</Text>
-                    <View style={styles.userCol}>
-                      <Text style={styles.userName} numberOfLines={1}>
-                        {names[uid] ?? (isYou ? 'You' : 'Player')}
-                        {isYou ? ' (you)' : ''}
-                      </Text>
-                      <Text style={styles.subTotals}>
-                        Ante post {ante} pts · Match day {live} pts
-                      </Text>
-                    </View>
-                    <Text style={styles.pts}>{row.total_points}</Text>
-                    <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.textMuted} />
-                  </TouchableOpacity>
-                  {expanded ? (
-                    <View style={styles.breakdown}>
-                      <Text style={styles.sectionTitle}>Ante post selections</Text>
-                      {anteRows.length === 0 ? (
-                        <Text style={styles.emptyBreak}>No ante post rows yet.</Text>
-                      ) : (
-                        anteRows.map((p) => (
-                          <Text key={p.id} style={styles.line}>
-                            {formatPredictionLine(p)}
+          {!loadError && lbRows.length > 0
+            ? rankedCombined.map(({ row, rank }) => {
+                const uid = row.user_id;
+                const koMap = koTeamMaps[uid];
+                const isYou = userId != null && uid === userId;
+                const expanded = expandedUserId === uid;
+                const cacheLoaded = Object.prototype.hasOwnProperty.call(predCache, uid);
+                const list = predCache[uid] ?? [];
+                const breakdownRows =
+                  drawerTab === 'ante_post' ? list.filter((p) => p.prediction_type === 'ante_post') : list.filter((p) => p.prediction_type === 'live');
+                const stageBuckets = groupPredictionsByStage(breakdownRows, fixtures);
+                const drawerBusy = drawerLoadingUserId === uid;
+                return (
+                  <View key={uid} style={styles.row}>
+                    <TouchableOpacity
+                      style={[styles.rowHeader, isYou && styles.rowHeaderYou]}
+                      onPress={() => toggleUser(uid)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={styles.rank}>{rank}</Text>
+                      <View style={styles.userCol}>
+                        <Text style={styles.userName} numberOfLines={1}>
+                          {names[uid] ?? (isYou ? 'You' : 'Player')}
+                          {isYou ? ' (you)' : ''}
+                        </Text>
+                        <Text style={styles.subTotals}>
+                          Ante post {formatPoints(row.ante_points)} pts · Match day {formatPoints(row.live_points)} pts
+                        </Text>
+                      </View>
+                      <Text style={styles.pts}>{formatPoints(row.total_points)}</Text>
+                      <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.textMuted} />
+                    </TouchableOpacity>
+                    {expanded ? (
+                      <View style={styles.breakdown}>
+                        <View style={styles.drawerTabRow}>
+                          <TouchableOpacity
+                            style={[styles.drawerTabPill, drawerTab === 'ante_post' && styles.drawerTabPillActive]}
+                            onPress={() => setDrawerTab('ante_post')}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={[styles.drawerTabText, drawerTab === 'ante_post' && styles.drawerTabTextActive]}>Ante post</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.drawerTabPill, drawerTab === 'live' && styles.drawerTabPillActive]}
+                            onPress={() => setDrawerTab('live')}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={[styles.drawerTabText, drawerTab === 'live' && styles.drawerTabTextActive]}>Match day picks</Text>
+                          </TouchableOpacity>
+                        </View>
+                        {drawerBusy && !cacheLoaded ? (
+                          <View style={styles.drawerLoading}>
+                            <ActivityIndicator color={theme.colors.accent} />
+                          </View>
+                        ) : null}
+                        {cacheLoaded && breakdownRows.length === 0 ? (
+                          <Text style={styles.emptyBreak}>
+                            {drawerTab === 'ante_post' ? 'No ante post rows yet.' : 'No match day tips saved yet.'}
                           </Text>
-                        ))
-                      )}
-                      <Text style={styles.sectionTitle}>Match day picks</Text>
-                      {liveRows.length === 0 ? (
-                        <Text style={styles.emptyBreak}>No match day tips saved yet.</Text>
-                      ) : (
-                        liveRows.map((p) => (
-                          <Text key={p.id} style={styles.line}>
-                            {formatPredictionLine(p)}
-                          </Text>
-                        ))
-                      )}
-                    </View>
-                  ) : null}
-                </View>
-              );
-            })
-          ) : null}
+                        ) : null}
+                        {cacheLoaded && breakdownRows.length > 0
+                          ? stageBuckets.map((bucket) => {
+                              const sk = stageOpenKey(uid, bucket.stageId);
+                              const isOpen = openStages[sk] === true;
+                              const matchCount = stageRowCount(bucket);
+                              return (
+                                <View key={bucket.stageId} style={styles.stageBlock}>
+                                  <TouchableOpacity
+                                    style={styles.stageHeader}
+                                    onPress={() => toggleStage(uid, bucket.stageId)}
+                                    activeOpacity={0.75}
+                                  >
+                                    <Text style={styles.stageTitle} numberOfLines={1}>
+                                      {bucket.label}
+                                    </Text>
+                                    <Text style={styles.stageMeta}>
+                                      {matchCount} match{matchCount === 1 ? '' : 'es'}
+                                    </Text>
+                                    <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.textMuted} />
+                                  </TouchableOpacity>
+                                  {isOpen
+                                    ? bucket.subgroups && bucket.subgroups.length > 0
+                                      ? bucket.subgroups.map((sg) => (
+                                          <View key={`${bucket.stageId}::${sg.key}`}>
+                                            <Text style={styles.subgroupTitle}>{sg.label}</Text>
+                                            {sg.rows.map((p) => (
+                                              <WcLeaderboardPickRow
+                                                key={p.id}
+                                                prediction={p}
+                                                match={resolveDisplayMatch(p, matchIndex, koMap)}
+                                                teamsById={teamsById}
+                                              />
+                                            ))}
+                                          </View>
+                                        ))
+                                      : bucket.rows.map((p) => (
+                                          <WcLeaderboardPickRow
+                                            key={p.id}
+                                            prediction={p}
+                                            match={resolveDisplayMatch(p, matchIndex, koMap)}
+                                            teamsById={teamsById}
+                                          />
+                                        ))
+                                    : null}
+                                </View>
+                              );
+                            })
+                          : null}
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })
+            : null}
         </ScrollView>
       )}
     </View>

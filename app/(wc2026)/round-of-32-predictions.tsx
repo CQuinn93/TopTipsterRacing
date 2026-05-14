@@ -392,7 +392,20 @@ export default function RoundOf32PredictionsScreen() {
 
       // Save to AsyncStorage
       await saveR32Predictions(r32Predictions);
-      
+
+      // Persist all ante picks to Supabase (keep AsyncStorage until final submit clears it)
+      if (userId) {
+        const { batchSaveAllAntePostPredictions } = await import('@/features/wc2026/services/batch-save-predictions');
+        const sync = await batchSaveAllAntePostPredictions(userId, { clearLocal: false });
+        if (!sync.success) {
+          Alert.alert(
+            'Could not save to your account',
+            sync.error ?? 'Check your connection and try again. Your picks are stored on this device until they sync.'
+          );
+          return;
+        }
+      }
+
       // Store bracket and predictions for Round of 16 results
       await AsyncStorage.setItem(ROUND_OF_32_BRACKET_KEY, JSON.stringify(bracket));
       await AsyncStorage.setItem(`${WC2026_STORAGE_PREFIX}round_of_32_predictions_for_r16`, JSON.stringify(r32Predictions));

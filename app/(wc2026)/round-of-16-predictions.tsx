@@ -386,7 +386,19 @@ export default function RoundOf16PredictionsScreen() {
 
       // Save to AsyncStorage
       await saveR16Predictions(r16Predictions);
-      
+
+      if (userId) {
+        const { batchSaveAllAntePostPredictions } = await import('@/features/wc2026/services/batch-save-predictions');
+        const sync = await batchSaveAllAntePostPredictions(userId, { clearLocal: false });
+        if (!sync.success) {
+          Alert.alert(
+            'Could not save to your account',
+            sync.error ?? 'Check your connection and try again. Your picks are stored on this device until they sync.'
+          );
+          return;
+        }
+      }
+
       // Store bracket and predictions for Quarter Finals results
       await AsyncStorage.setItem(ROUND_OF_16_BRACKET_KEY, JSON.stringify(bracket));
       await AsyncStorage.setItem(ROUND_OF_16_PREDICTIONS_FOR_QF_KEY, JSON.stringify(r16Predictions));

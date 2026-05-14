@@ -386,7 +386,19 @@ export default function QuarterFinalsPredictionsScreen() {
 
       // Save to AsyncStorage
       await saveQFPredictions(qfPredictions);
-      
+
+      if (userId) {
+        const { batchSaveAllAntePostPredictions } = await import('@/features/wc2026/services/batch-save-predictions');
+        const sync = await batchSaveAllAntePostPredictions(userId, { clearLocal: false });
+        if (!sync.success) {
+          Alert.alert(
+            'Could not save to your account',
+            sync.error ?? 'Check your connection and try again. Your picks are stored on this device until they sync.'
+          );
+          return;
+        }
+      }
+
       // Store bracket and predictions for Semi Finals results
       await AsyncStorage.setItem(QUARTER_FINALS_BRACKET_KEY, JSON.stringify(bracket));
       await AsyncStorage.setItem(QUARTER_FINALS_PREDICTIONS_FOR_SF_KEY, JSON.stringify(qfPredictions));

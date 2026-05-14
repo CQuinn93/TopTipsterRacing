@@ -386,7 +386,19 @@ export default function SemiFinalsPredictionsScreen() {
 
       // Save to AsyncStorage
       await saveSFPredictions(sfPredictions);
-      
+
+      if (userId) {
+        const { batchSaveAllAntePostPredictions } = await import('@/features/wc2026/services/batch-save-predictions');
+        const sync = await batchSaveAllAntePostPredictions(userId, { clearLocal: false });
+        if (!sync.success) {
+          Alert.alert(
+            'Could not save to your account',
+            sync.error ?? 'Check your connection and try again. Your picks are stored on this device until they sync.'
+          );
+          return;
+        }
+      }
+
       // Store bracket for future stages
       await AsyncStorage.setItem(SEMI_FINALS_BRACKET_KEY, JSON.stringify(bracket));
       

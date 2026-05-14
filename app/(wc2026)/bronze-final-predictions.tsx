@@ -387,7 +387,19 @@ export default function BronzeFinalPredictionsScreen() {
 
       // Save to AsyncStorage
       await saveBronzeFinalPredictions(bronzeFinalPredictions);
-      
+
+      if (userId) {
+        const { batchSaveAllAntePostPredictions } = await import('@/features/wc2026/services/batch-save-predictions');
+        const sync = await batchSaveAllAntePostPredictions(userId, { clearLocal: false });
+        if (!sync.success) {
+          Alert.alert(
+            'Could not save to your account',
+            sync.error ?? 'Check your connection and try again. Your picks are stored on this device until they sync.'
+          );
+          return;
+        }
+      }
+
       // Store bracket for future stages
       await AsyncStorage.setItem(BRONZE_FINAL_BRACKET_KEY, JSON.stringify(bracket));
       

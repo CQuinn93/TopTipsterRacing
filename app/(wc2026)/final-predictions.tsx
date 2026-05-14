@@ -348,7 +348,7 @@ export default function FinalPredictionsScreen() {
               await saveFinalPredictions(finalPredictions);
               
               // Now batch save all ante post predictions
-              const result = await batchSaveAllAntePostPredictions(userId);
+              const result = await batchSaveAllAntePostPredictions(userId, { clearLocal: true });
               
               if (result.success) {
                 // Set locked status after successful submission
