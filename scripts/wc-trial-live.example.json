@@ -1,0 +1,31 @@
+{
+  "_comment": "Copy to wc-trial-live.json and fill in. Run: npx tsx scripts/score-wc-trial-live.ts",
+  "matches": [
+    {
+      "match_number": 9001,
+      "home_team_code": "ENG",
+      "away_team_code": "FRA",
+      "home_score": 2,
+      "away_score": 1,
+      "match_date": "2026-06-15T19:00:00.000Z",
+      "is_knockout": true
+    }
+  ],
+  "live_picks": [
+    {
+      "user_id": "YOUR_USER_UUID",
+      "match_number": 9001,
+      "outcome": "H",
+      "total_goals": 3,
+      "btts": true
+    }
+  ],
+  "ante_post_picks": [
+    {
+      "user_id": "YOUR_USER_UUID",
+      "match_number": 9001,
+      "home_score": 2,
+      "away_score": 1
+    }
+  ]
+}

@@ -21,7 +21,8 @@ import { WC2026_STORAGE_PREFIX } from '@/features/wc2026/constants/storage-keys'
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
 import { KnockoutMatchScorePresets } from '@/features/wc2026/components/KnockoutMatchScorePresets';
 import { applyKnockoutScorePreset } from '@/features/wc2026/utils/knockout-preset-score';
-import { requestKnockoutEditWithDownstreamClear } from '@/features/wc2026/utils/knockoutDownstreamEditGuard';
+import { hydrateKnockoutBracketsFromStoredPicks } from '@/features/wc2026/services/knockout-bracket-hydration';
+import { runKnockoutPresetEdit, runKnockoutScoreEdit, runKnockoutWinnerPick } from '@/features/wc2026/utils/knockout-edit';
 import { hasDownstreamKnockoutPredictions } from '@/features/wc2026/services/async-predictions';
 import { type KnockoutMatch } from '@/features/wc2026/services/knockout-bracket';
 import { supabase } from '@/lib/supabase';
@@ -103,10 +104,14 @@ export default function RoundOf16PredictionsScreen() {
     useCallback(() => {
       let cancelled = false;
       void (async () => {
-        const h = await hasDownstreamKnockoutPredictions('r16');
+        const [h, locked] = await Promise.all([
+          hasDownstreamKnockoutPredictions('r16'),
+          import('@/features/wc2026/services/async-predictions').then((m) => m.getAntePostLockedStatus()),
+        ]);
         if (!cancelled) {
           downstreamClearConfirmedRef.current = false;
           setHasDownstreamPredictions(h);
+          setIsLocked(locked);
         }
       })();
       return () => {
@@ -143,6 +148,9 @@ export default function RoundOf16PredictionsScreen() {
           const storedBracket = await AsyncStorage.getItem(ROUND_OF_16_BRACKET_KEY);
           if (storedBracket) {
             bracketData = storedBracket;
+          } else {
+            await hydrateKnockoutBracketsFromStoredPicks();
+            bracketData = (await AsyncStorage.getItem(ROUND_OF_16_BRACKET_KEY)) ?? undefined;
           }
         }
         
@@ -202,66 +210,40 @@ export default function RoundOf16PredictionsScreen() {
 
   const handleScoreChange = (matchNumber: number, team: 'home' | 'away', value: string, homeTeamId: string, awayTeamId: string) => {
     if (isLocked) return;
-    const applyEdit = () => {
-      setPredictions((prev) => {
-        const current = prev[matchNumber] || { matchNumber, homeScore: '', awayScore: '', predictedWinnerId: null };
-        const newHomeScore = team === 'home' ? value : current.homeScore;
-        const newAwayScore = team === 'away' ? value : current.awayScore;
-
-        let predictedWinnerId = current.predictedWinnerId;
-        if (newHomeScore.trim() && newAwayScore.trim()) {
-          const homeScore = parseInt(newHomeScore, 10);
-          const awayScore = parseInt(newAwayScore, 10);
-          if (!isNaN(homeScore) && !isNaN(awayScore)) {
-            if (homeScore > awayScore) {
-              predictedWinnerId = homeTeamId;
-            } else if (awayScore > homeScore) {
-              predictedWinnerId = awayTeamId;
-            } else {
-              predictedWinnerId = null;
-            }
-          }
-        }
-
-        return {
-          ...prev,
-          [matchNumber]: {
-            ...current,
-            [team === 'home' ? 'homeScore' : 'awayScore']: value,
-            predictedWinnerId,
-          },
-        };
-      });
-    };
-    requestKnockoutEditWithDownstreamClear('r16', {
+    const match = bracket.find((m) => m.matchNumber === matchNumber);
+    if (!match) return;
+    runKnockoutScoreEdit({
+      anchor: 'r16',
+      match,
+      matchNumber,
+      team,
+      value,
+      homeTeamId,
+      awayTeamId,
+      predictions,
+      savedPredictions,
       selectionsGloballyLocked: isLocked,
-      downstreamClearConfirmedRef,
-      hasDownstreamPredictions,
+      userId,
       onDownstreamCleared: () => setHasDownstreamPredictions(false),
-      applyEdit,
+      applyEdit: (next) => setPredictions((prev) => ({ ...prev, [matchNumber]: next })),
     });
   };
 
   const handleWinnerSelection = (matchNumber: number, winnerId: string) => {
     if (isLocked) return;
-    const applyEdit = () => {
-      setPredictions((prev) => {
-        const current = prev[matchNumber] || { matchNumber, homeScore: '', awayScore: '', predictedWinnerId: null };
-        return {
-          ...prev,
-          [matchNumber]: {
-            ...current,
-            predictedWinnerId: winnerId,
-          },
-        };
-      });
-    };
-    requestKnockoutEditWithDownstreamClear('r16', {
+    const match = bracket.find((m) => m.matchNumber === matchNumber);
+    if (!match) return;
+    runKnockoutWinnerPick({
+      anchor: 'r16',
+      match,
+      matchNumber,
+      winnerId,
+      predictions,
+      savedPredictions,
       selectionsGloballyLocked: isLocked,
-      downstreamClearConfirmedRef,
-      hasDownstreamPredictions,
+      userId,
       onDownstreamCleared: () => setHasDownstreamPredictions(false),
-      applyEdit,
+      applyEdit: (next) => setPredictions((prev) => ({ ...prev, [matchNumber]: next })),
     });
   };
 
@@ -663,24 +645,20 @@ export default function RoundOf16PredictionsScreen() {
                   awayScoreStr={pred.awayScore}
                   onSelect={(h, a) => {
                     if (isLocked) return;
-                    const applyEdit = () => {
-                      setPredictions((prev) =>
-                        applyKnockoutScorePreset(
-                          prev,
-                          match.matchNumber,
-                          h,
-                          a,
-                          match.homeTeam.id,
-                          match.awayTeam.id
-                        )
-                      );
-                    };
-                    requestKnockoutEditWithDownstreamClear('r16', {
+                    runKnockoutPresetEdit({
+                      anchor: 'r16',
+                      match,
+                      matchNumber: match.matchNumber,
+                      homeScore: h,
+                      awayScore: a,
+                      homeTeamId: match.homeTeam.id,
+                      awayTeamId: match.awayTeam.id,
+                      predictions,
+                      savedPredictions,
                       selectionsGloballyLocked: isLocked,
-                      downstreamClearConfirmedRef,
-                      hasDownstreamPredictions,
+                      userId,
                       onDownstreamCleared: () => setHasDownstreamPredictions(false),
-                      applyEdit,
+                      applyEdit: (next) => setPredictions((prev) => ({ ...prev, [match.matchNumber]: next })),
                     });
                   }}
                 />

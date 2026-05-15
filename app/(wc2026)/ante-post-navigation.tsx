@@ -26,6 +26,8 @@ import {
   getAntePostLockedStatus,
 } from '@/features/wc2026/services/async-predictions';
 import { getFixtures } from '@/features/wc2026/services/fixtures';
+import { hydrateKnockoutBracketsFromStoredPicks } from '@/features/wc2026/services/knockout-bracket-hydration';
+import { countCompleteAntePostKnockoutPicks } from '@/features/wc2026/services/predictions';
 import { getKnockoutAnteEnabled } from '@/features/wc2026/services/tournament-gates';
 import { wcHref } from '@/features/wc2026/utils/href';
 import { goBackFromAntePostHub } from '@/features/wc2026/utils/ante-post-nav';
@@ -46,6 +48,23 @@ interface StageStatus {
   total?: number;
 }
 
+async function stageKnockoutComplete(
+  userId: string | null,
+  localCompleted: number,
+  expectedTotal: number,
+  minMatch: number,
+  maxMatch: number
+): Promise<boolean> {
+  if (expectedTotal > 0 && localCompleted >= expectedTotal) return true;
+  if (!userId) return false;
+  try {
+    const serverCount = await countCompleteAntePostKnockoutPicks(userId, minMatch, maxMatch);
+    return serverCount >= expectedTotal;
+  } catch {
+    return false;
+  }
+}
+
 export default function AntePostNavigationScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -62,7 +81,17 @@ export default function AntePostNavigationScreen() {
     try {
       setLoading(true);
 
+      await hydrateKnockoutBracketsFromStoredPicks().catch(() => false);
+
       const isGloballyLocked = await getAntePostLockedStatus().catch(() => false);
+
+      let userId: string | null = null;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        userId = session?.user?.id ?? null;
+      } catch {
+        userId = null;
+      }
 
       const [
         groupPredictions,
@@ -108,26 +137,26 @@ export default function AntePostNavigationScreen() {
       const r32Bracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}round_of_32_bracket`);
       const r32BracketData = r32Bracket ? JSON.parse(r32Bracket) : [];
       const r32Completed = Object.keys(r32Predictions).length;
-      const r32Total = r32BracketData.length;
-      const r32IsComplete = r32Completed === r32Total && r32Total > 0;
+      const r32Total = r32BracketData.length > 0 ? r32BracketData.length : 16;
+      const r32IsComplete = await stageKnockoutComplete(userId, r32Completed, r32Total, 73, 88);
 
       const r16Bracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}round_of_16_bracket`);
       const r16BracketData = r16Bracket ? JSON.parse(r16Bracket) : [];
       const r16Completed = Object.keys(r16Predictions).length;
-      const r16Total = r16BracketData.length;
-      const r16IsComplete = r16Completed === r16Total && r16Total > 0;
+      const r16Total = r16BracketData.length > 0 ? r16BracketData.length : 8;
+      const r16IsComplete = await stageKnockoutComplete(userId, r16Completed, r16Total, 89, 96);
 
       const qfBracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}quarter_finals_bracket`);
       const qfBracketData = qfBracket ? JSON.parse(qfBracket) : [];
       const qfCompleted = Object.keys(qfPredictions).length;
-      const qfTotal = qfBracketData.length;
-      const qfIsComplete = qfCompleted === qfTotal && qfTotal > 0;
+      const qfTotal = qfBracketData.length > 0 ? qfBracketData.length : 4;
+      const qfIsComplete = await stageKnockoutComplete(userId, qfCompleted, qfTotal, 97, 100);
 
       const sfBracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}semi_finals_bracket`);
       const sfBracketData = sfBracket ? JSON.parse(sfBracket) : [];
       const sfCompleted = Object.keys(sfPredictions).length;
-      const sfTotal = sfBracketData.length;
-      const sfIsComplete = sfCompleted === sfTotal && sfTotal > 0;
+      const sfTotal = sfBracketData.length > 0 ? sfBracketData.length : 2;
+      const sfIsComplete = await stageKnockoutComplete(userId, sfCompleted, sfTotal, 101, 102);
 
       const bronzeBracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}bronze_final_bracket`);
       const bronzeBracketData = bronzeBracket ? JSON.parse(bronzeBracket) : [];
@@ -162,8 +191,8 @@ export default function AntePostNavigationScreen() {
       const finalBracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}final_bracket`);
       const finalBracketData = finalBracket ? JSON.parse(finalBracket) : [];
       const finalCompleted = Object.keys(finalPredictions).length;
-      const finalTotal = finalBracketData.length;
-      const finalIsComplete = finalCompleted === finalTotal && finalTotal > 0;
+      const finalTotal = finalBracketData.length > 0 ? finalBracketData.length : 1;
+      const finalIsComplete = await stageKnockoutComplete(userId, finalCompleted, finalTotal, 104, 104);
 
       const r32IsWaiting = !groupIsComplete || !knockoutAnteServer;
       const r16IsWaiting = !r32IsComplete || !knockoutAnteServer;
@@ -433,7 +462,7 @@ export default function AntePostNavigationScreen() {
           <Text style={styles.description}>
             {stages.length > 0 && stages.some((s) => s.userCommittedLocked)
               ? 'Your ante post picks are locked in. Open a stage to review them (scores cannot be changed).'
-              : 'Open each stage in order. Your scores are saved as you go and stay editable until you submit from the Final screen—then you can compare with others who have locked in too.'}
+              : 'Open each stage in order. Changing who advances in a round clears later rounds so your bracket stays consistent.'}
           </Text>
 
           {stages.map((stage) => (

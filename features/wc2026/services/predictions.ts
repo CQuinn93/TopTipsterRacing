@@ -83,6 +83,46 @@ export const getUserPredictionsByMatchNumber = async (
   return data || [];
 };
 
+export async function deleteAntePostPredictionsForMatchNumbers(
+  userId: string,
+  matchNumbers: number[]
+): Promise<void> {
+  if (matchNumbers.length === 0) return;
+  const { error } = await wcSupabase
+    .from('predictions')
+    .delete()
+    .eq('user_id', userId)
+    .eq('prediction_type', 'ante_post')
+    .in('match_number', matchNumbers);
+  if (error) throw error;
+}
+
+export async function countCompleteAntePostKnockoutPicks(
+  userId: string,
+  minMatchNumber: number,
+  maxMatchNumber: number
+): Promise<number> {
+  const { data, error } = await wcSupabase
+    .from('predictions')
+    .select('match_number, home_score, away_score, predicted_winner_id')
+    .eq('user_id', userId)
+    .eq('prediction_type', 'ante_post')
+    .gte('match_number', minMatchNumber)
+    .lte('match_number', maxMatchNumber);
+
+  if (error) return 0;
+  return (data ?? []).filter((row) => {
+    const r = row as {
+      home_score: number | null;
+      away_score: number | null;
+      predicted_winner_id: string | null;
+    };
+    if (r.home_score == null || r.away_score == null) return false;
+    if (r.home_score !== r.away_score) return true;
+    return r.predicted_winner_id != null;
+  }).length;
+}
+
 export const hasRoundOf32Predictions = async (userId: string): Promise<boolean> => {
   const { data, error } = await wcSupabase
     .from('predictions')
