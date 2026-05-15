@@ -112,6 +112,96 @@ export const getAggregateHeadToHead = (
   };
 };
 
+/** Result of the direct fixture between two teams (single group match). */
+export type DirectHeadToHeadOutcome = 'team_a' | 'team_b' | 'draw' | 'no_match' | 'incomplete';
+
+export function getDirectHeadToHeadOutcome(
+  teamAId: string,
+  teamBId: string,
+  fixtures: Match[],
+  predictions: Record<string, Prediction>
+): DirectHeadToHeadOutcome {
+  for (const match of fixtures) {
+    if (!match.home_team || !match.away_team) continue;
+    const homeId = match.home_team.id;
+    const awayId = match.away_team.id;
+    const isPair =
+      (homeId === teamAId && awayId === teamBId) || (homeId === teamBId && awayId === teamAId);
+    if (!isPair) continue;
+
+    const pred = predictions[match.id];
+    if (!pred || pred.home_score == null || pred.away_score == null) {
+      return 'incomplete';
+    }
+    const hs = pred.home_score;
+    const as = pred.away_score;
+    if (hs === as) return 'draw';
+    if (homeId === teamAId) {
+      return hs > as ? 'team_a' : 'team_b';
+    }
+    return as > hs ? 'team_a' : 'team_b';
+  }
+  return 'no_match';
+}
+
+export function teamsDrewHeadToHead(
+  teamAId: string,
+  teamBId: string,
+  fixtures: Match[],
+  predictions: Record<string, Prediction>
+): boolean {
+  return getDirectHeadToHeadOutcome(teamAId, teamBId, fixtures, predictions) === 'draw';
+}
+
+/**
+ * Resolve teams tied on points: (1) overall GD, (2) head-to-head, (3) leave order for user if still tied.
+ * Does not use FIFA ranking — user decides when GD and H2H cannot separate.
+ */
+export function resolveTeamsTiedOnPoints(
+  tiedTeams: TeamStanding[],
+  allFixtures: Match[],
+  predictions: Record<string, Prediction>
+): TeamStanding[] {
+  if (tiedTeams.length <= 1) return tiedTeams;
+
+  const sortedByGd = [...tiedTeams].sort((a, b) => b.goalDifference - a.goalDifference);
+  const gdGroups: TeamStanding[][] = [];
+  let current: TeamStanding[] = [sortedByGd[0]];
+  for (let i = 1; i < sortedByGd.length; i++) {
+    if (sortedByGd[i].goalDifference === sortedByGd[i - 1].goalDifference) {
+      current.push(sortedByGd[i]);
+    } else {
+      gdGroups.push(current);
+      current = [sortedByGd[i]];
+    }
+  }
+  gdGroups.push(current);
+
+  const result: TeamStanding[] = [];
+  for (const gdGroup of gdGroups) {
+    result.push(...resolveGdGroupByHeadToHead(gdGroup, allFixtures, predictions));
+  }
+  return result;
+}
+
+function resolveGdGroupByHeadToHead(
+  teams: TeamStanding[],
+  fixtures: Match[],
+  predictions: Record<string, Prediction>
+): TeamStanding[] {
+  if (teams.length <= 1) return teams;
+
+  if (teams.length === 2) {
+    const [a, b] = teams;
+    const outcome = getDirectHeadToHeadOutcome(a.teamId, b.teamId, fixtures, predictions);
+    if (outcome === 'team_a') return [a, b];
+    if (outcome === 'team_b') return [b, a];
+    return [a, b];
+  }
+
+  return applyTiebreakers(teams, fixtures, predictions);
+}
+
 // Apply tiebreakers to a group of tied teams
 export const applyTiebreakers = (
   tiedTeams: TeamStanding[],
@@ -185,9 +275,8 @@ export const applyTiebreakers = (
       // Resolved
       result.push(group[0]);
     } else if (allStillTied || group.length === tiedTeams.length) {
-      // If no progress was made (all teams still tied) or this is the entire original group,
-      // move to final tiebreakers to prevent infinite recursion
-      const finalSorted = applyFinalTiebreakers(group);
+      // GD and H2H could not separate — keep stable order (user may reorder drawn H2H pairs)
+      const finalSorted = applyStableOrderWithoutFifa(group);
       result.push(...finalSorted);
     } else {
       // Subset is still tied - recursively apply tiebreakers to this subset
@@ -200,24 +289,30 @@ export const applyTiebreakers = (
   return result;
 };
 
-// Final tiebreaker sort (after head-to-head is exhausted)
+/** Goals-for only; if still tied, preserve input order (user tiebreak). */
+function applyStableOrderWithoutFifa(teams: TeamStanding[]): TeamStanding[] {
+  return [...teams]
+    .map((team, index) => ({ team, index }))
+    .sort((a, b) => {
+      if (b.team.goalsFor !== a.team.goalsFor) {
+        return b.team.goalsFor - a.team.goalsFor;
+      }
+      return a.index - b.index;
+    })
+    .map(({ team }) => team);
+}
+
+// Final tiebreaker sort (overall GD / GF — used outside points-tie resolution)
 export const applyFinalTiebreakers = (
   teams: TeamStanding[]
 ): TeamStanding[] => {
   return [...teams].sort((a, b) => {
-    // Step 4: Overall goal difference
     if (b.goalDifference !== a.goalDifference) {
       return b.goalDifference - a.goalDifference;
     }
-    
-    // Step 5: Overall goals for
     if (b.goalsFor !== a.goalsFor) {
       return b.goalsFor - a.goalsFor;
     }
-    
-    // Step 6: Fair play (skipped - we don't track cards)
-    
-    // Step 7: FIFA ranking (lower number = better ranking)
     const aRank = a.fifaRanking ?? 999;
     const bRank = b.fifaRanking ?? 999;
     return aRank - bRank;

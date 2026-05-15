@@ -13,6 +13,8 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { type Match } from '@/features/wc2026/services/fixtures';
 import { type Prediction } from '@/features/wc2026/services/predictions';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
+import { coerceScore } from '@/features/wc2026/utils/scores';
+import { showAntePostFilledHighlight } from '@/features/wc2026/utils/knockout-ui';
 
 /** Inner field only — border lives on `scoreInputShell` for consistent layout. */
 const scoreFieldPlatformStyle = Platform.select<TextStyle | undefined>({
@@ -323,15 +325,15 @@ function FixtureInput({
 
   const handleHomeScoreChange = (text: string) => {
     const cleaned = text.replace(/[^0-9]/g, '');
-    const score = cleaned === '' ? null : parseInt(cleaned, 10);
-    const awayScoreNum = awayScore === '' ? null : parseInt(awayScore, 10);
+    const score = cleaned === '' ? null : coerceScore(cleaned);
+    const awayScoreNum = awayScore === '' ? null : coerceScore(awayScore);
     onScoreChange(match.id, score, awayScoreNum);
   };
 
   const handleAwayScoreChange = (text: string) => {
     const cleaned = text.replace(/[^0-9]/g, '');
-    const score = cleaned === '' ? null : parseInt(cleaned, 10);
-    const homeScoreNum = homeScore === '' ? null : parseInt(homeScore, 10);
+    const score = cleaned === '' ? null : coerceScore(cleaned);
+    const homeScoreNum = homeScore === '' ? null : coerceScore(homeScore);
     onScoreChange(match.id, homeScoreNum, score);
   };
 
@@ -349,10 +351,11 @@ function FixtureInput({
 
   const groupLabel = match.group?.group_name ?? '—';
   const matchNo = match.match_number ?? matchIndexInGroup + 1;
+  const highlightFilled = showAntePostFilledHighlight(!!hasPrediction, disabled);
 
   return (
     <View style={styles.matchCell}>
-      <View style={[styles.matchRowInner, hasPrediction && styles.matchRowFilled]}>
+      <View style={[styles.matchRowInner, highlightFilled && styles.matchRowFilled]}>
         <Text style={styles.matchHeaderText}>{`Group ${groupLabel} · Match ${matchNo}`}</Text>
         <View style={styles.matchContentOuter}>
           <View style={styles.matchContent}>
@@ -377,7 +380,7 @@ function FixtureInput({
               </View>
             </View>
 
-            <View style={[styles.scoreInputShell, hasPrediction && styles.scoreInputShellFilled]}>
+            <View style={[styles.scoreInputShell, highlightFilled && styles.scoreInputShellFilled]}>
               <TextInput
                 style={[styles.scoreInputField, scoreFieldPlatformStyle]}
                 value={homeScore}
@@ -394,7 +397,7 @@ function FixtureInput({
 
             <Text style={styles.vsText}>–</Text>
 
-            <View style={[styles.scoreInputShell, hasPrediction && styles.scoreInputShellFilled]}>
+            <View style={[styles.scoreInputShell, highlightFilled && styles.scoreInputShellFilled]}>
               <TextInput
                 style={[styles.scoreInputField, scoreFieldPlatformStyle]}
                 value={awayScore}
@@ -445,7 +448,8 @@ function FixtureInput({
             contentContainerStyle={styles.quickPickScrollContent}
           >
             {QUICK_SCORE_PRESETS.map((p) => {
-              const isActive = hasNumericPair && curHome === p.home && curAway === p.away;
+              const isActive =
+                highlightFilled && hasNumericPair && curHome === p.home && curAway === p.away;
               return (
                 <TouchableOpacity
                   key={`${p.home}-${p.away}`}

@@ -186,6 +186,19 @@ export default function AdminWcFootballScreen() {
         <Text style={styles.title}>WC Football admin</Text>
       </View>
       <ScrollView contentContainerStyle={styles.body}>
+        <TouchableOpacity
+          style={[styles.card, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}
+          onPress={() => router.push('/(auth)/admin-wc-football-entries')}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="clipboard-outline" size={22} color={theme.colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle}>Ante-post entries</Text>
+            <Text style={styles.muted}>Reopen locked picks or override a match for a participant.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+        </TouchableOpacity>
+
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Tournament gates</Text>
           <Text style={styles.muted}>Control when knockout ante-post and Match Day Tips open for all users.</Text>

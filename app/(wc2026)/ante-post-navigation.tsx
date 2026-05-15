@@ -28,6 +28,8 @@ import {
 import { getFixtures } from '@/features/wc2026/services/fixtures';
 import { getKnockoutAnteEnabled } from '@/features/wc2026/services/tournament-gates';
 import { wcHref } from '@/features/wc2026/utils/href';
+import { goBackFromAntePostHub } from '@/features/wc2026/utils/ante-post-nav';
+import { supabase } from '@/lib/supabase';
 
 interface StageStatus {
   id: string;
@@ -129,9 +131,33 @@ export default function AntePostNavigationScreen() {
 
       const bronzeBracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}bronze_final_bracket`);
       const bronzeBracketData = bronzeBracket ? JSON.parse(bronzeBracket) : [];
-      const bronzeCompleted = Object.keys(bronzeFinalPredictions).length;
-      const bronzeTotal = bronzeBracketData.length;
-      const bronzeIsComplete = bronzeCompleted === bronzeTotal && bronzeTotal > 0;
+      let bronzeCompleted = Object.keys(bronzeFinalPredictions).length;
+      let bronzeTotal = bronzeBracketData.length;
+      if (bronzeTotal === 0) {
+        bronzeTotal = 1;
+      }
+      if (bronzeCompleted === 0) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const uid = session?.user?.id;
+          if (uid) {
+            const { getUserPredictionsByMatchNumber } = await import('@/features/wc2026/services/predictions');
+            const rows = await getUserPredictionsByMatchNumber(uid, 103);
+            const ante = rows.find((p) => p.prediction_type === 'ante_post');
+            if (
+              ante &&
+              ante.home_score != null &&
+              ante.away_score != null &&
+              (ante.home_score !== ante.away_score || ante.predicted_winner_id)
+            ) {
+              bronzeCompleted = 1;
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+      const bronzeIsComplete = bronzeCompleted >= bronzeTotal && bronzeTotal > 0;
 
       const finalBracket = await AsyncStorage.getItem(`${WC2026_STORAGE_PREFIX}final_bracket`);
       const finalBracketData = finalBracket ? JSON.parse(finalBracket) : [];
@@ -378,7 +404,7 @@ export default function AntePostNavigationScreen() {
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity style={styles.back} onPress={() => router.replace(wcHref('/(wc2026)/(tabs)/selections'))}>
+        <TouchableOpacity style={styles.back} onPress={goBackFromAntePostHub}>
           <Ionicons name="chevron-back" size={22} color={theme.colors.accent} />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
@@ -416,7 +442,7 @@ export default function AntePostNavigationScreen() {
               style={[
                 styles.stageCard,
                 stage.userCommittedLocked && !stage.isComplete && styles.stageCardLocked,
-                stage.isComplete && styles.stageCardComplete,
+                stage.isComplete && !stage.userCommittedLocked && styles.stageCardComplete,
               ]}
               onPress={() => handleStagePress(stage)}
               activeOpacity={0.85}

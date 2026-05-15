@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { StyleSheet, Text, View, Dimensions } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, Dimensions } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
@@ -28,6 +29,12 @@ interface AntePostGroupTableProps {
   }>;
   advancingTeams?: Set<string>;
   knockedOutTeams?: Set<string>;
+  /** Let user swap teams level on points (e.g. head-to-head draw). */
+  allowManualReorder?: boolean;
+  onMoveTeam?: (teamId: string, direction: 'up' | 'down') => void;
+  canMoveUp?: (teamId: string) => boolean;
+  canMoveDown?: (teamId: string) => boolean;
+  showTieHint?: boolean;
 }
 
 interface TeamStanding {
@@ -50,7 +57,12 @@ export function AntePostGroupTable({
   predictions,
   standings: providedStandings,
   advancingTeams,
-  knockedOutTeams
+  knockedOutTeams,
+  allowManualReorder = false,
+  onMoveTeam,
+  canMoveUp,
+  canMoveDown,
+  showTieHint = false,
 }: AntePostGroupTableProps) {
   const theme = useTheme();
 
@@ -150,6 +162,32 @@ export function AntePostGroupTable({
           fontWeight: '700',
           color: theme.colors.accent,
           fontFamily: theme.fontFamily.regular,
+        },
+        reorderCell: {
+          width: 36,
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 2,
+        },
+        reorderBtn: {
+          padding: 2,
+          borderRadius: 4,
+        },
+        reorderBtnDisabled: {
+          opacity: 0.25,
+        },
+        tieHint: {
+          paddingHorizontal: 10,
+          paddingVertical: 8,
+          backgroundColor: theme.colors.surfaceElevated,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+        },
+        tieHintText: {
+          fontFamily: theme.fontFamily.light,
+          fontSize: 11,
+          color: theme.colors.textSecondary,
+          lineHeight: 15,
         },
       }),
     [theme]
@@ -278,8 +316,16 @@ export function AntePostGroupTable({
 
   return (
     <View style={styles.tableContainer}>
+      {showTieHint && allowManualReorder ? (
+        <View style={styles.tieHint}>
+          <Text style={styles.tieHintText}>
+            Same points and goal difference, and they drew head-to-head? Use the arrows to pick who finishes above whom.
+          </Text>
+        </View>
+      ) : null}
       {/* Table Header */}
       <View style={styles.tableHeader}>
+        {allowManualReorder ? <View style={styles.reorderCell} /> : null}
         <Text style={[styles.headerCell, styles.positionCell]}>Pos</Text>
         <Text style={[styles.headerCell, IS_SMALL_SCREEN ? styles.teamCellSmall : styles.teamCell]}>Team</Text>
         {!IS_VERY_SMALL_SCREEN && <Text style={[styles.headerCell, styles.statsCell]}>P</Text>}
@@ -295,9 +341,33 @@ export function AntePostGroupTable({
         const isAdvancing = advancingTeams?.has(team.teamId) ?? false;
         const isKnockedOut = knockedOutTeams?.has(team.teamId) ?? false;
         const position = providedStandings?.[index]?.position ?? (index + 1);
-        
+        const moveUp = allowManualReorder && (canMoveUp?.(team.teamId) ?? false);
+        const moveDown = allowManualReorder && (canMoveDown?.(team.teamId) ?? false);
+
         return (
         <View key={team.teamId} style={[styles.tableRow, (isAdvancing || isKnockedOut) && styles.tableRowWithOverlay]}>
+          {allowManualReorder ? (
+            <View style={styles.reorderCell}>
+              <TouchableOpacity
+                style={[styles.reorderBtn, !moveUp && styles.reorderBtnDisabled]}
+                disabled={!moveUp}
+                onPress={() => onMoveTeam?.(team.teamId, 'up')}
+                hitSlop={8}
+                accessibilityLabel={`Move ${team.teamName} up`}
+              >
+                <Ionicons name="chevron-up" size={16} color={theme.colors.accent} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.reorderBtn, !moveDown && styles.reorderBtnDisabled]}
+                disabled={!moveDown}
+                onPress={() => onMoveTeam?.(team.teamId, 'down')}
+                hitSlop={8}
+                accessibilityLabel={`Move ${team.teamName} down`}
+              >
+                <Ionicons name="chevron-down" size={16} color={theme.colors.accent} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
           {/* Overlay */}
           {(isAdvancing || isKnockedOut) && (
             <View 

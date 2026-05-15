@@ -4,6 +4,7 @@
 import { type Match } from './fixtures';
 import { type Prediction } from './predictions';
 import { calculateAllGroupStandings } from './group-standings';
+import { applyManualOrderToAllGroups, type GroupManualOrder } from './group-manual-order';
 import { selectBestThirdPlaceTeams } from './third-place-ranking';
 import { generateRoundOf32Bracket, type KnockoutMatch } from './knockout-bracket';
 
@@ -21,10 +22,14 @@ export interface RoundOf32Result {
  */
 export const generateRoundOf32 = async (
   allFixtures: Match[],
-  predictions: Record<string, Prediction>
+  predictions: Record<string, Prediction>,
+  manualOrder?: GroupManualOrder
 ): Promise<RoundOf32Result> => {
   // Step 1: Calculate final standings for all groups with tiebreakers
-  const groupStandings = await calculateAllGroupStandings(allFixtures, predictions);
+  let groupStandings = calculateAllGroupStandings(allFixtures, predictions);
+  if (manualOrder && Object.keys(manualOrder).length > 0) {
+    groupStandings = applyManualOrderToAllGroups(groupStandings, manualOrder, allFixtures, predictions);
+  }
   
   // Step 2: Select best 8 third-place teams
   const bestThirdPlace = selectBestThirdPlaceTeams(groupStandings);

@@ -192,6 +192,12 @@ export function useKnockoutPredictionsScreenStyles() {
           fontWeight: '700',
           textAlign: 'center',
         },
+        winnerSectionLocked: {
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        winnerTextLocked: {
+          color: theme.colors.text,
+        },
         winnersHeader: {
           backgroundColor: theme.colors.surface,
           borderBottomWidth: StyleSheet.hairlineWidth,

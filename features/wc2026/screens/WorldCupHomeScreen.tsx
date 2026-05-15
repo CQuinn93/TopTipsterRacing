@@ -20,11 +20,15 @@ import { useWcShell } from '@/contexts/WcShellContext';
 import { getUpcomingFixtures, type Match } from '@/features/wc2026/services/fixtures';
 import { getSharedProfile } from '@/features/wc2026/services/profile';
 import { wcHref } from '@/features/wc2026/utils/href';
+import { openAntePostHubFromHome } from '@/features/wc2026/utils/ante-post-nav';
 import { getAntePostLockedStatus } from '@/features/wc2026/services/async-predictions';
 import { getMatchDayTipsUnlocked } from '@/features/wc2026/services/tournament-gates';
 import { getUserPredictions, type Prediction } from '@/features/wc2026/services/predictions';
-import { WC_STAGE_SLICES, sumPointsInRange } from '@/features/wc2026/utils/match-number-stage';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
+import {
+  summarizeAntePostPredictions,
+  formatWcPoints,
+} from '@/features/wc2026/utils/prediction-points-summary';
 
 function countryCodeFromTeam(countryCode: string | undefined, countryName: string): string {
   if (countryCode && countryCode.length >= 2) return countryCode;
@@ -47,8 +51,7 @@ export function WorldCupHomeScreen() {
   const [matchDayTipsUnlocked, setMatchDayTipsUnlocked] = useState(false);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [selectionKind, setSelectionKind] = useState<'ante_post' | 'match_day'>('ante_post');
-  const [expandAnteStats, setExpandAnteStats] = useState(false);
-  const [expandMatchDayStats, setExpandMatchDayStats] = useState(false);
+  const [pointsKind, setPointsKind] = useState<'ante_post' | 'match_day'>('ante_post');
 
   useEffect(() => {
     let cancelled = false;
@@ -106,32 +109,12 @@ export function WorldCupHomeScreen() {
     [livePreds]
   );
 
-  const anteStageLines = useMemo(() => {
-    return WC_STAGE_SLICES.map((st) => {
-      const { rows, points } = sumPointsInRange(antePreds, 'ante_post', st.min, st.max);
-      return { ...st, rows, points };
-    }).filter((x) => x.rows > 0 || x.points > 0);
-  }, [antePreds]);
+  const anteTierSummary = useMemo(() => summarizeAntePostPredictions(antePreds), [antePreds]);
 
-  const matchDayStageLines = useMemo(() => {
-    return WC_STAGE_SLICES.filter((st) => st.min >= 73).map((st) => {
-      const { rows, points } = sumPointsInRange(livePreds, 'live', st.min, st.max, { liveMustHaveTip: true });
-      return { ...st, rows, points };
-    });
-  }, [livePreds]);
-
-  const anteSummaryText = useMemo(() => {
-    if (!userId || predsLoading) return '';
-    const parts = anteStageLines.map((l) => `${l.label}: ${l.rows}`);
-    return parts.length ? parts.join(' · ') : 'No ante post picks saved to the database yet.';
-  }, [userId, predsLoading, anteStageLines]);
-
-  const matchDaySummaryText = useMemo(() => {
-    if (!userId || predsLoading) return '';
-    const withTips = matchDayStageLines.filter((l) => l.rows > 0);
-    if (!withTips.length) return 'No Match Day tips saved yet.';
-    return withTips.map((l) => `${l.label}: ${l.rows}`).join(' · ');
-  }, [userId, predsLoading, matchDayStageLines]);
+  const matchDayScoredCount = useMemo(
+    () => livePreds.filter((p) => (p.points_awarded ?? 0) > 0).length,
+    [livePreds]
+  );
 
   const styles = useMemo(() => {
     const isLight = String(theme.colors.background) === String(lightTheme.colors.background);
@@ -452,56 +435,82 @@ export function WorldCupHomeScreen() {
         overflow: 'hidden',
         ...webCard,
       },
-      statsTitle: {
-        fontFamily: theme.fontFamily.regular,
-        fontSize: compact ? 11 : 12,
-        fontWeight: '600',
-        color: theme.colors.textMuted,
+      pointsCard: {
+        backgroundColor: theme.colors.surface,
+        borderRadius: isWeb ? 14 : theme.radius.lg,
+        padding: compact ? theme.spacing.sm : theme.spacing.md,
         marginBottom: theme.spacing.sm,
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
+        borderWidth: cardBorderWidth,
+        borderColor: cardBorder,
+        ...webCard,
       },
-      statExpandHeader: {
+      tierBoxesRow: {
         flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingVertical: 12,
-        paddingHorizontal: 10,
+        gap: theme.spacing.sm,
+      },
+      tierBox: {
+        flex: 1,
         borderRadius: theme.radius.md,
+        paddingVertical: theme.spacing.sm,
+        paddingHorizontal: 4,
+        alignItems: 'center',
         borderWidth: 1,
         borderColor: theme.colors.border,
         backgroundColor: theme.colors.surfaceElevated,
-        marginBottom: theme.spacing.xs,
       },
-      statExpandTitle: {
-        fontFamily: theme.fontFamily.regular,
-        fontSize: 14,
-        fontWeight: '700',
-        color: theme.colors.text,
+      tierBoxResult: {
+        borderColor: 'rgba(59, 130, 246, 0.35)',
+        backgroundColor: 'rgba(59, 130, 246, 0.1)',
       },
-      statExpandSub: {
-        fontFamily: theme.fontFamily.regular,
-        fontSize: 12,
-        color: theme.colors.textSecondary,
-        marginTop: 2,
+      tierBoxClose: {
+        borderColor: 'rgba(234, 179, 8, 0.4)',
+        backgroundColor: 'rgba(234, 179, 8, 0.12)',
       },
-      statExpandPoints: {
+      tierBoxExact: {
+        borderColor: theme.colors.accent,
+        backgroundColor: theme.colors.accentMuted,
+      },
+      tierBoxTotal: {
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.background,
+      },
+      tierCount: {
         fontFamily: theme.fontFamily.regular,
-        fontSize: 18,
+        fontSize: compact ? 20 : 22,
         fontWeight: '800',
-        color: theme.colors.accent,
-        marginRight: 4,
+        textAlign: 'center',
       },
-      statBreakRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        paddingVertical: 8,
-        paddingHorizontal: 12,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: theme.colors.border,
+      tierCountResult: { color: '#3b82f6' },
+      tierCountClose: { color: theme.colors.statusAccent },
+      tierCountExact: { color: theme.colors.accent },
+      tierCountTotal: { color: theme.colors.text },
+      tierLabel: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: 10,
+        fontWeight: '700',
+        color: theme.colors.textMuted,
+        marginTop: 4,
+        textAlign: 'center',
       },
-      statBreakLabel: { fontFamily: theme.fontFamily.regular, fontSize: 13, color: theme.colors.text },
-      statBreakVal: { fontFamily: theme.fontFamily.regular, fontSize: 13, fontWeight: '600', color: theme.colors.accent },
+      tierSub: {
+        fontFamily: theme.fontFamily.light,
+        fontSize: 9,
+        color: theme.colors.textMuted,
+        marginTop: 2,
+        textAlign: 'center',
+      },
+      pointsFootnote: {
+        fontFamily: theme.fontFamily.light,
+        fontSize: 11,
+        color: theme.colors.textMuted,
+        marginTop: theme.spacing.sm,
+        textAlign: 'center',
+        lineHeight: 16,
+      },
+      pointsLoading: {
+        paddingVertical: theme.spacing.lg,
+        alignItems: 'center',
+      },
       quickLinksRow: {
         flexDirection: 'row',
         gap: theme.spacing.sm,
@@ -684,30 +693,22 @@ export function WorldCupHomeScreen() {
         <View style={styles.compDropdownTrigger}>
           <View>
             <Text style={styles.compMeetingNameAbove} numberOfLines={2}>
-              FIFA World Cup 2026
+              World Cup 2026
             </Text>
-            <Text style={styles.compMetaAbove}>Multi-stage event · 11 Jun – 19 Jul 2026</Text>
+            <Text style={styles.compMetaAbove}>11 Jun – 19 Jul 2026</Text>
           </View>
-          {predsLoading ? (
-            <ActivityIndicator style={{ marginTop: 8 }} color={theme.colors.accent} />
-          ) : (
-            <Text style={styles.muted}>{selectionKind === 'ante_post' ? anteSummaryText : matchDaySummaryText}</Text>
-          )}
           <View style={styles.modeDivider}>
             {selectionKind === 'ante_post' ? (
               <TouchableOpacity
                 style={styles.modeRow}
                 activeOpacity={0.8}
-                onPress={() => router.push(wcHref('/(wc2026)/ante-post-navigation'))}
+                onPress={openAntePostHubFromHome}
               >
                 <View style={styles.modeLeft}>
                   <Ionicons name="create-outline" size={18} color={theme.colors.accent} />
                   <View style={styles.modeText}>
                     <Text style={styles.modeTitle} numberOfLines={1}>
                       Ante post selections
-                    </Text>
-                    <Text style={styles.modeDesc} numberOfLines={2}>
-                      Group stage through final — saved picks sync to your account
                     </Text>
                   </View>
                 </View>
@@ -727,9 +728,6 @@ export function WorldCupHomeScreen() {
                     <Text style={styles.modeTitle} numberOfLines={1}>
                       Match Day picks
                     </Text>
-                    <Text style={styles.modeDesc} numberOfLines={2}>
-                      1X2, total goals in 90 minutes, and BTTS (round of 32 through final)
-                    </Text>
                   </View>
                 </View>
                 <View style={styles.statusPill}>
@@ -744,9 +742,6 @@ export function WorldCupHomeScreen() {
                     <Text style={styles.modeTitle} numberOfLines={1}>
                       Match Day picks
                     </Text>
-                    <Text style={styles.modeDesc} numberOfLines={2}>
-                      Opens when organisers enable Match Day Tips after the group stage.
-                    </Text>
                   </View>
                 </View>
                 <View style={styles.statusPill}>
@@ -757,64 +752,76 @@ export function WorldCupHomeScreen() {
           </View>
         </View>
 
-        <View style={styles.competitionsCard}>
-          <Text style={styles.statsTitle}>Points</Text>
-
+        <Text style={styles.sectionTitle}>Points</Text>
+        <View style={styles.selTabsRow}>
           <TouchableOpacity
-            style={styles.statExpandHeader}
-            onPress={() => setExpandAnteStats((e) => !e)}
-            activeOpacity={0.85}
+            style={[styles.selTab, pointsKind === 'ante_post' && styles.selTabActive]}
+            onPress={() => setPointsKind('ante_post')}
+            activeOpacity={0.8}
           >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.statExpandTitle}>Ante post</Text>
-              <Text style={styles.statExpandSub}>Total from saved tournament picks</Text>
-            </View>
-            <Text style={styles.statExpandPoints}>{anteTotalPoints}</Text>
-            <Ionicons name={expandAnteStats ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.textMuted} />
+            <Text style={[styles.selTabText, pointsKind === 'ante_post' && styles.selTabTextActive]}>Ante post</Text>
           </TouchableOpacity>
-          {expandAnteStats ? (
-            <View style={{ marginBottom: theme.spacing.sm }}>
-              {WC_STAGE_SLICES.map((st) => {
-                const { rows, points } = sumPointsInRange(antePreds, 'ante_post', st.min, st.max);
-                return (
-                  <View key={st.id} style={styles.statBreakRow}>
-                    <Text style={styles.statBreakLabel}>{st.label}</Text>
-                    <Text style={styles.statBreakVal}>
-                      {points} pts{rows ? ` · ${rows} saved` : ''}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-          ) : null}
-
           <TouchableOpacity
-            style={styles.statExpandHeader}
-            onPress={() => setExpandMatchDayStats((e) => !e)}
-            activeOpacity={0.85}
+            style={[styles.selTab, pointsKind === 'match_day' && styles.selTabActive]}
+            onPress={() => setPointsKind('match_day')}
+            activeOpacity={0.8}
           >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.statExpandTitle}>Match Day picks</Text>
-              <Text style={styles.statExpandSub}>Knockout tips (when entered)</Text>
-            </View>
-            <Text style={styles.statExpandPoints}>{matchDayTotalPoints}</Text>
-            <Ionicons name={expandMatchDayStats ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.textMuted} />
+            <Text style={[styles.selTabText, pointsKind === 'match_day' && styles.selTabTextActive]}>
+              Match Day picks
+            </Text>
           </TouchableOpacity>
-          {expandMatchDayStats ? (
-            <View>
-              {WC_STAGE_SLICES.filter((st) => st.min >= 73).map((st) => {
-                const { rows, points } = sumPointsInRange(livePreds, 'live', st.min, st.max, { liveMustHaveTip: true });
-                return (
-                  <View key={st.id} style={styles.statBreakRow}>
-                    <Text style={styles.statBreakLabel}>{st.label}</Text>
-                    <Text style={styles.statBreakVal}>
-                      {points} pts{rows ? ` · ${rows} tips` : ''}
-                    </Text>
-                  </View>
-                );
-              })}
+        </View>
+
+        <View style={styles.pointsCard}>
+          {predsLoading ? (
+            <View style={styles.pointsLoading}>
+              <ActivityIndicator color={theme.colors.accent} />
             </View>
-          ) : null}
+          ) : pointsKind === 'ante_post' ? (
+            <>
+              <View style={styles.tierBoxesRow}>
+                <View style={[styles.tierBox, styles.tierBoxResult]}>
+                  <Text style={[styles.tierCount, styles.tierCountResult]}>{anteTierSummary.result}</Text>
+                  <Text style={styles.tierLabel}>Result</Text>
+                  <Text style={styles.tierSub}>matches</Text>
+                </View>
+                <View style={[styles.tierBox, styles.tierBoxClose]}>
+                  <Text style={[styles.tierCount, styles.tierCountClose]}>{anteTierSummary.close}</Text>
+                  <Text style={styles.tierLabel}>Close</Text>
+                  <Text style={styles.tierSub}>matches</Text>
+                </View>
+                <View style={[styles.tierBox, styles.tierBoxExact]}>
+                  <Text style={[styles.tierCount, styles.tierCountExact]}>{anteTierSummary.exact}</Text>
+                  <Text style={styles.tierLabel}>Exact</Text>
+                  <Text style={styles.tierSub}>matches</Text>
+                </View>
+                <View style={[styles.tierBox, styles.tierBoxTotal]}>
+                  <Text style={[styles.tierCount, styles.tierCountTotal]}>
+                    {formatWcPoints(anteTierSummary.totalPoints)}
+                  </Text>
+                  <Text style={styles.tierLabel}>Total</Text>
+                  <Text style={styles.tierSub}>pts</Text>
+                </View>
+              </View>
+              <Text style={styles.pointsFootnote}>Full breakdown on the leaderboard.</Text>
+            </>
+          ) : (
+            <>
+              <View style={styles.tierBoxesRow}>
+                <View style={[styles.tierBox, styles.tierBoxResult, { flex: 1 }]}>
+                  <Text style={[styles.tierCount, styles.tierCountResult]}>{matchDayScoredCount}</Text>
+                  <Text style={styles.tierLabel}>Scored</Text>
+                  <Text style={styles.tierSub}>matches</Text>
+                </View>
+                <View style={[styles.tierBox, styles.tierBoxTotal, { flex: 1 }]}>
+                  <Text style={[styles.tierCount, styles.tierCountTotal]}>{formatWcPoints(matchDayTotalPoints)}</Text>
+                  <Text style={styles.tierLabel}>Total</Text>
+                  <Text style={styles.tierSub}>pts</Text>
+                </View>
+              </View>
+              <Text style={styles.pointsFootnote}>Full breakdown on the leaderboard.</Text>
+            </>
+          )}
         </View>
 
         {(!isWeb || isNarrowWeb) && (

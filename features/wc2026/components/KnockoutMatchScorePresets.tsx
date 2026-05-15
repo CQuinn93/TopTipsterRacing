@@ -101,7 +101,7 @@ export function KnockoutMatchScorePresets({
         {PRESETS.map((col, ci) => (
           <View key={ci} style={styles.col}>
             {col.map(([h, a]) => {
-              const active = hasPair && curH === h && curA === a;
+              const active = !disabled && hasPair && curH === h && curA === a;
               return (
                 <TouchableOpacity
                   key={`${h}-${a}`}

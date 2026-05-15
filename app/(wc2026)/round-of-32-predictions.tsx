@@ -26,6 +26,7 @@ import { hasDownstreamKnockoutPredictions } from '@/features/wc2026/services/asy
 import { type KnockoutMatch } from '@/features/wc2026/services/knockout-bracket';
 import { supabase } from '@/lib/supabase';
 import { wcHref, wcHrefWithParams } from '@/features/wc2026/utils/href';
+import { showAntePostFilledHighlight } from '@/features/wc2026/utils/knockout-ui';
 
 const ROUND_OF_32_BRACKET_KEY = `${WC2026_STORAGE_PREFIX}round_of_32_bracket`;
 const ROUND_OF_32_STANDINGS_KEY = `${WC2026_STORAGE_PREFIX}round_of_32_standings`;
@@ -595,7 +596,7 @@ export default function RoundOf32PredictionsScreen() {
             const awaySelected = pred.predictedWinnerId === match.awayTeam.id;
 
             return (
-              <View key={match.matchNumber} style={[styles.matchCard, hasPrediction && styles.matchCardFilled]}>
+              <View key={match.matchNumber} style={[styles.matchCard, showAntePostFilledHighlight(hasPrediction, isLocked) && styles.matchCardFilled]}>
                 <Text style={styles.matchNumber}>Game #{match.matchNumber}</Text>
                 
                 <View style={styles.matchContent}>
@@ -617,7 +618,7 @@ export default function RoundOf32PredictionsScreen() {
                       </Text>
                     </View>
                     <TextInput
-                      style={[styles.scoreInput, hasPrediction && styles.scoreInputFilled]}
+                      style={[styles.scoreInput, showAntePostFilledHighlight(hasPrediction, isLocked) && styles.scoreInputFilled]}
                       value={pred.homeScore}
                       onChangeText={(text) => handleScoreChange(match.matchNumber, 'home', text, match.homeTeam.id, match.awayTeam.id)}
                       placeholder="0"
@@ -635,7 +636,7 @@ export default function RoundOf32PredictionsScreen() {
                   {/* Away Team */}
                   <View style={styles.teamSection}>
                     <TextInput
-                      style={[styles.scoreInput, hasPrediction && styles.scoreInputFilled]}
+                      style={[styles.scoreInput, showAntePostFilledHighlight(hasPrediction, isLocked) && styles.scoreInputFilled]}
                       value={pred.awayScore}
                       onChangeText={(text) => handleScoreChange(match.matchNumber, 'away', text, match.homeTeam.id, match.awayTeam.id)}
                       placeholder="0"
@@ -699,7 +700,7 @@ export default function RoundOf32PredictionsScreen() {
                       <TouchableOpacity
                         style={[
                           styles.advanceButton,
-                          homeSelected && styles.advanceButtonSelected,
+                          showAntePostFilledHighlight(homeSelected, isLocked) && styles.advanceButtonSelected,
                           isLocked && styles.advanceButtonDisabled
                         ]}
                         onPress={() => handleWinnerSelection(match.matchNumber, match.homeTeam.id)}
@@ -714,7 +715,7 @@ export default function RoundOf32PredictionsScreen() {
                         />
                         <Text style={[
                           styles.advanceButtonText,
-                          homeSelected && styles.advanceButtonTextSelected
+                          showAntePostFilledHighlight(homeSelected, isLocked) && styles.advanceButtonTextSelected
                         ]}>
                           {match.homeTeam.name}
                         </Text>
@@ -722,7 +723,7 @@ export default function RoundOf32PredictionsScreen() {
                       <TouchableOpacity
                         style={[
                           styles.advanceButton,
-                          awaySelected && styles.advanceButtonSelected,
+                          showAntePostFilledHighlight(awaySelected, isLocked) && styles.advanceButtonSelected,
                           isLocked && styles.advanceButtonDisabled
                         ]}
                         onPress={() => handleWinnerSelection(match.matchNumber, match.awayTeam.id)}
@@ -737,7 +738,7 @@ export default function RoundOf32PredictionsScreen() {
                         />
                         <Text style={[
                           styles.advanceButtonText,
-                          awaySelected && styles.advanceButtonTextSelected
+                          showAntePostFilledHighlight(awaySelected, isLocked) && styles.advanceButtonTextSelected
                         ]}>
                           {match.awayTeam.name}
                         </Text>
@@ -748,8 +749,8 @@ export default function RoundOf32PredictionsScreen() {
 
                 {/* Show winner if not a draw */}
                 {hasPrediction && !isDraw && pred.predictedWinnerId && (
-                  <View style={styles.winnerSection}>
-                    <Text style={styles.winnerText}>
+                  <View style={[styles.winnerSection, isLocked && styles.winnerSectionLocked]}>
+                    <Text style={[styles.winnerText, isLocked && styles.winnerTextLocked]}>
                       Winner: {pred.predictedWinnerId === match.homeTeam.id ? match.homeTeam.name : match.awayTeam.name}
                     </Text>
                   </View>

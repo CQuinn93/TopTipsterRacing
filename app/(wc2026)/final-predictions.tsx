@@ -28,6 +28,7 @@ import { type KnockoutMatch } from '@/features/wc2026/services/knockout-bracket'
 import { supabase } from '@/lib/supabase';
 import { batchSaveAllAntePostPredictions } from '@/features/wc2026/services/batch-save-predictions';
 import { wcHref } from '@/features/wc2026/utils/href';
+import { showAntePostFilledHighlight } from '@/features/wc2026/utils/knockout-ui';
 
 const FINAL_BRACKET_KEY = `${WC2026_STORAGE_PREFIX}final_bracket`;
 
@@ -352,8 +353,8 @@ export default function FinalPredictionsScreen() {
               
               if (result.success) {
                 // Set locked status after successful submission
-                const { setAntePostLockedStatus } = await import('@/features/wc2026/services/async-predictions');
-                await setAntePostLockedStatus(true);
+                const { syncAntePostSubmittedLock } = await import('@/features/wc2026/services/async-predictions');
+                await syncAntePostSubmittedLock();
                 setIsLocked(true);
                 
                 Alert.alert(
@@ -476,7 +477,13 @@ export default function FinalPredictionsScreen() {
             return (
               <View key={match.matchNumber} style={fin.matchCardWrapper}>
                 <Text style={fin.finaleText}>Finale</Text>
-                <View style={[s.matchCard, hasPrediction && s.matchCardFilled, fin.matchCardGold]}>
+                <View
+                  style={[
+                    s.matchCard,
+                    showAntePostFilledHighlight(hasPrediction, isLocked) && s.matchCardFilled,
+                    !isLocked && fin.matchCardGold,
+                  ]}
+                >
                   <Text style={s.matchNumber}>Game #{match.matchNumber}</Text>
                   
                   <View style={s.matchContent}>
@@ -498,7 +505,7 @@ export default function FinalPredictionsScreen() {
                         </Text>
                       </View>
                       <TextInput
-                        style={[s.scoreInput, hasPrediction && s.scoreInputFilled]}
+                        style={[s.scoreInput, showAntePostFilledHighlight(hasPrediction, isLocked) && s.scoreInputFilled]}
                         value={pred.homeScore}
                         onChangeText={(text) => handleScoreChange(match.matchNumber, 'home', text, match.homeTeam.id, match.awayTeam.id)}
                         placeholder="0"
@@ -516,7 +523,7 @@ export default function FinalPredictionsScreen() {
                     {/* Away Team */}
                     <View style={s.teamSection}>
                       <TextInput
-                        style={[s.scoreInput, hasPrediction && s.scoreInputFilled]}
+                        style={[s.scoreInput, showAntePostFilledHighlight(hasPrediction, isLocked) && s.scoreInputFilled]}
                         value={pred.awayScore}
                         onChangeText={(text) => handleScoreChange(match.matchNumber, 'away', text, match.homeTeam.id, match.awayTeam.id)}
                         placeholder="0"
@@ -571,7 +578,7 @@ export default function FinalPredictionsScreen() {
                         <TouchableOpacity
                           style={[
                             s.advanceButton,
-                            homeSelected && s.advanceButtonSelected
+                            showAntePostFilledHighlight(homeSelected, isLocked) && s.advanceButtonSelected
                           ]}
                           onPress={() => handleWinnerSelection(match.matchNumber, match.homeTeam.id)}
                         >
@@ -584,7 +591,7 @@ export default function FinalPredictionsScreen() {
                           />
                           <Text style={[
                             s.advanceButtonText,
-                            homeSelected && s.advanceButtonTextSelected
+                            showAntePostFilledHighlight(homeSelected, isLocked) && s.advanceButtonTextSelected
                           ]}>
                             {match.homeTeam.name}
                           </Text>
@@ -592,7 +599,7 @@ export default function FinalPredictionsScreen() {
                         <TouchableOpacity
                           style={[
                             s.advanceButton,
-                            awaySelected && s.advanceButtonSelected
+                            showAntePostFilledHighlight(awaySelected, isLocked) && s.advanceButtonSelected
                           ]}
                           onPress={() => handleWinnerSelection(match.matchNumber, match.awayTeam.id)}
                         >
@@ -605,7 +612,7 @@ export default function FinalPredictionsScreen() {
                           />
                           <Text style={[
                             s.advanceButtonText,
-                            awaySelected && s.advanceButtonTextSelected
+                            showAntePostFilledHighlight(awaySelected, isLocked) && s.advanceButtonTextSelected
                           ]}>
                             {match.awayTeam.name}
                           </Text>
@@ -616,7 +623,13 @@ export default function FinalPredictionsScreen() {
 
                   {/* Show Winner with Trophy */}
                   {winner && (
-                    <View style={[s.winnerSection, fin.championSection]}>
+                    <View
+                      style={[
+                        s.winnerSection,
+                        fin.championSection,
+                        isLocked && s.winnerSectionLocked,
+                      ]}
+                    >
                       <View style={fin.winnerChampionBlock}>
                         <Ionicons name="trophy" size={40} color={theme.colors.statusAccent} />
                         <CountryFlag

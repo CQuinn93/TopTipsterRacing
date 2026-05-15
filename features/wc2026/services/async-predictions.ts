@@ -1,7 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { WC2026_STORAGE_PREFIX } from '@/features/wc2026/constants/storage-keys';
+import { fetchAntePostLockStatusFromServer, markAntePostSubmittedOnServer } from '@/features/wc2026/services/ante-post-admin';
 import { wcSupabase } from '@/features/wc2026/lib/supabase';
+import { supabase } from '@/lib/supabase';
+
+/** Official final match number — submitting here locks ante post for the account. */
+const ANTE_POST_FINAL_MATCH_NUMBER = 104;
 
 const GROUP_PREDICTIONS_KEY = `${WC2026_STORAGE_PREFIX}ante_post_group_predictions`;
 const R32_PREDICTIONS_KEY = `${WC2026_STORAGE_PREFIX}ante_post_r32_predictions`;
@@ -134,21 +139,78 @@ export const clearAllAntePostPredictions = async () => {
   ]);
 };
 
-export const checkAntePostLockedStatus = async (userId: string): Promise<boolean> => {
+/** True when the user has submitted ante post (final match saved on server). */
+export const checkAntePostSubmittedOnServer = async (userId: string): Promise<boolean> => {
   const { data, error } = await wcSupabase
     .from('predictions')
     .select('id')
     .eq('user_id', userId)
     .eq('prediction_type', 'ante_post')
-    .limit(10);
+    .eq('match_number', ANTE_POST_FINAL_MATCH_NUMBER)
+    .not('home_score', 'is', null)
+    .not('away_score', 'is', null)
+    .limit(1);
 
   if (error) return false;
-  return (data?.length ?? 0) >= 10;
+  return (data?.length ?? 0) > 0;
 };
 
-export const getAntePostLockedStatus = async (): Promise<boolean> => {
-  const data = await AsyncStorage.getItem(IS_LOCKED_KEY);
-  return data === 'true';
+/** @deprecated Prefer checkAntePostSubmittedOnServer — kept for legacy callers. */
+export const checkAntePostLockedStatus = async (userId: string): Promise<boolean> => {
+  return checkAntePostSubmittedOnServer(userId);
+};
+
+/**
+ * Whether ante post picks are locked in (read-only).
+ * Server is authoritative when logged in (includes admin reopen).
+ * Falls back to device flag when offline / no session.
+ */
+export const getAntePostLockedStatus = async (userId?: string | null): Promise<boolean> => {
+  let uid = userId ?? null;
+  if (!uid) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      uid = session?.user?.id ?? null;
+    } catch {
+      uid = null;
+    }
+  }
+
+  if (uid) {
+    const status = await fetchAntePostLockStatusFromServer(uid);
+    if (status.adminReopened) {
+      await setAntePostLockedStatus(false);
+      return false;
+    }
+    if (status.locked) {
+      await setAntePostLockedStatus(true);
+      return true;
+    }
+    if (status.submitted) {
+      await setAntePostLockedStatus(true);
+      return true;
+    }
+    const legacySubmitted = await checkAntePostSubmittedOnServer(uid);
+    if (legacySubmitted) {
+      await setAntePostLockedStatus(true);
+      return true;
+    }
+    await setAntePostLockedStatus(false);
+    return false;
+  }
+
+  const local = await AsyncStorage.getItem(IS_LOCKED_KEY);
+  return local === 'true';
+};
+
+/** Call after successful final submit so all devices respect lock via server. */
+export const syncAntePostSubmittedLock = async (): Promise<void> => {
+  try {
+    await markAntePostSubmittedOnServer();
+  } catch {
+    /* migration may not be applied yet; local lock still applies */
+  }
+  await setAntePostLockedStatus(true);
 };
 
 export const setAntePostLockedStatus = async (isLocked: boolean) => {

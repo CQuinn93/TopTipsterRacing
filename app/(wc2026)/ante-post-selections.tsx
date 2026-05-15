@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { router } from 'expo-router';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -23,8 +22,24 @@ import { supabase } from '@/lib/supabase';
 import { AntePostGroupTable } from '@/features/wc2026/components/ante-post-group-table';
 import { AntePostFixtures } from '@/features/wc2026/components/ante-post-fixtures';
 import { getGroupPredictions, saveGroupPredictions, getAntePostLockedStatus } from '@/features/wc2026/services/async-predictions';
+import { calculateGroupStandings } from '@/features/wc2026/services/group-standings';
+import {
+  type GroupManualOrder,
+  loadGroupManualOrder,
+  saveGroupManualOrder,
+  applyManualOrderToStandings,
+  swapAdjacentInGroupOrder,
+  canSwapWithNeighbor,
+  buildGroupReorderContext,
+  groupHasUserResolvableTie,
+  isValidManualOrderForStandings,
+} from '@/features/wc2026/services/group-manual-order';
 import { generateRoundOf32 } from '@/features/wc2026/services/round-of-32-generator';
-import { wcHref, wcHrefWithParams } from '@/features/wc2026/utils/href';
+import { wcHref } from '@/features/wc2026/utils/href';
+import { confirmDialog, showAlert } from '@/features/wc2026/utils/dialog';
+import { goBackFromAntePostStage } from '@/features/wc2026/utils/ante-post-nav';
+import { coerceScore, isCompleteScorePair } from '@/features/wc2026/utils/scores';
+import type { LocalGroupPrediction } from '@/features/wc2026/services/async-predictions';
 
 const ROUND_OF_32_BRACKET_KEY = `${WC2026_STORAGE_PREFIX}round_of_32_bracket`;
 const ROUND_OF_32_STANDINGS_KEY = `${WC2026_STORAGE_PREFIX}round_of_32_standings`;
@@ -50,8 +65,11 @@ export default function AntePostSelectionsScreen() {
   /** Set true after the first getFixtures() attempt finishes (success or error). */
   const fixturesFetchCompletedRef = useRef(false);
   const [fixturesError, setFixturesError] = useState<string | null>(null);
+  const [continuingToR32, setContinuingToR32] = useState(false);
+  const [groupManualOrder, setGroupManualOrder] = useState<GroupManualOrder>({});
 
   const localPredictionsRef = useRef(localPredictions);
+  const predictionsRef = useRef(predictions);
   const userIdRef = useRef(userId);
   const activeGroupRef = useRef(activeGroup);
   const isLockedRef = useRef(isLocked);
@@ -59,6 +77,7 @@ export default function AntePostSelectionsScreen() {
 
   useEffect(() => {
     localPredictionsRef.current = localPredictions;
+    predictionsRef.current = predictions;
     userIdRef.current = userId;
     activeGroupRef.current = activeGroup;
     isLockedRef.current = isLocked;
@@ -67,13 +86,17 @@ export default function AntePostSelectionsScreen() {
   useEffect(() => {
     const init = async () => {
       await getCurrentUser();
-      // Load fixtures regardless of user status (they're public)
       await loadAllFixtures();
-      // Check locked status
-      const locked = await getAntePostLockedStatus();
-      setIsLocked(locked);
     };
     init();
+  }, []);
+
+  useEffect(() => {
+    void getAntePostLockedStatus(userId ?? undefined).then(setIsLocked);
+  }, [userId]);
+
+  useEffect(() => {
+    void loadGroupManualOrder().then(setGroupManualOrder);
   }, []);
 
   useEffect(() => {
@@ -113,19 +136,11 @@ export default function AntePostSelectionsScreen() {
       setLocalPredictions((prev) => {
         const next = { ...prev };
         for (const { matchId, pred } of resolvedRows) {
-          const hs = pred.home_score;
-          const as = pred.away_score;
-          const dbComplete =
-            hs !== null && as !== null && typeof hs === 'number' && typeof as === 'number';
-          if (!dbComplete) continue;
+          const hs = coerceScore(pred.home_score);
+          const as = coerceScore(pred.away_score);
+          if (hs === null || as === null) continue;
           const cur = next[matchId];
-          const curComplete =
-            cur &&
-            cur.home_score !== null &&
-            cur.away_score !== null &&
-            typeof cur.home_score === 'number' &&
-            typeof cur.away_score === 'number';
-          if (!curComplete) {
+          if (!isCompleteScorePair(cur?.home_score, cur?.away_score)) {
             next[matchId] = { home_score: hs, away_score: as };
           }
         }
@@ -214,10 +229,10 @@ export default function AntePostSelectionsScreen() {
       const localMap: Record<string, { home_score: number | null; away_score: number | null }> = {};
 
       Object.entries(asyncPredictions).forEach(([matchId, pred]) => {
-        localMap[matchId] = {
-          home_score: pred.home_score,
-          away_score: pred.away_score,
-        };
+        const hs = coerceScore(pred.home_score);
+        const as = coerceScore(pred.away_score);
+        if (hs === null || as === null) return;
+        localMap[matchId] = { home_score: hs, away_score: as };
       });
 
       setLocalPredictions((prev) => ({ ...localMap, ...prev }));
@@ -238,16 +253,10 @@ export default function AntePostSelectionsScreen() {
       const toSync: Array<{ match: Match; hs: number; as: number }> = [];
       for (const match of groupMatches) {
         const localPred = lp[match.id];
-        if (
-          !localPred ||
-          localPred.home_score === null ||
-          localPred.away_score === null ||
-          typeof localPred.home_score !== 'number' ||
-          typeof localPred.away_score !== 'number'
-        ) {
-          continue;
-        }
-        toSync.push({ match, hs: localPred.home_score, as: localPred.away_score });
+        const hs = coerceScore(localPred?.home_score);
+        const as = coerceScore(localPred?.away_score);
+        if (hs === null || as === null) continue;
+        toSync.push({ match, hs, as });
       }
 
       if (toSync.length === 0) return;
@@ -352,19 +361,15 @@ export default function AntePostSelectionsScreen() {
       const groupMatches = allFixtures.filter((f) => f.group?.group_name === group);
       
       // Check if all matches in this group have predictions with scores (0-0 is allowed)
-      const allHavePredictions = groupMatches.length > 0 && groupMatches.every((match) => {
-        const localPred = localPredictions[match.id];
-        const savedPred = predictions[match.id];
-        const pred = localPred || savedPred;
-        
-        if (!pred) return false;
-        
-        const homeScore = localPred?.home_score ?? savedPred?.home_score;
-        const awayScore = localPred?.away_score ?? savedPred?.away_score;
-        
-        return (homeScore !== null && homeScore !== undefined && typeof homeScore === 'number') &&
-               (awayScore !== null && awayScore !== undefined && typeof awayScore === 'number');
-      });
+      const allHavePredictions =
+        groupMatches.length > 0 &&
+        groupMatches.every((match) => {
+          const localPred = localPredictions[match.id];
+          const savedPred = predictions[match.id];
+          const homeScore = localPred?.home_score ?? savedPred?.home_score;
+          const awayScore = localPred?.away_score ?? savedPred?.away_score;
+          return isCompleteScorePair(homeScore, awayScore);
+        });
       
       if (allHavePredictions) {
         completed.add(group);
@@ -380,15 +385,11 @@ export default function AntePostSelectionsScreen() {
     }
   }, [localPredictions, predictions, allFixtures]);
 
-  // Merge local predictions with saved predictions for display
-  const getMergedPredictions = (): Record<string, Prediction> => {
+  const mergedPredictions = useMemo((): Record<string, Prediction> => {
     const merged: Record<string, Prediction> = { ...predictions };
-    
-    // Override with local predictions where they exist
     Object.keys(localPredictions).forEach((matchId) => {
       const localPred = localPredictions[matchId];
       const existingPred = predictions[matchId];
-      
       merged[matchId] = {
         ...(existingPred || {
           id: '',
@@ -407,174 +408,223 @@ export default function AntePostSelectionsScreen() {
         away_score: localPred.away_score,
       };
     });
-    
     return merged;
-  };
+  }, [predictions, localPredictions, userId]);
+
+  const getMergedPredictions = (): Record<string, Prediction> => mergedPredictions;
+
+  const activeGroupAutoStandings = useMemo(() => {
+    if (allFixtures.length === 0) return [];
+    const groupFixtures = allFixtures.filter((f) => f.group?.group_name === activeGroup);
+    if (groupFixtures.length === 0) return [];
+    return calculateGroupStandings(activeGroup, groupFixtures, mergedPredictions);
+  }, [activeGroup, allFixtures, mergedPredictions]);
+
+  const activeGroupDisplayStandings = useMemo(
+    () =>
+      applyManualOrderToStandings(
+        activeGroupAutoStandings,
+        groupManualOrder[activeGroup],
+        fixtures,
+        mergedPredictions
+      ),
+    [activeGroupAutoStandings, groupManualOrder, activeGroup, fixtures, mergedPredictions]
+  );
+
+  const activeGroupReorderCtx = useMemo(
+    () => buildGroupReorderContext(activeGroupAutoStandings, fixtures, mergedPredictions),
+    [activeGroupAutoStandings, fixtures, mergedPredictions]
+  );
+
+  useEffect(() => {
+    if (allFixtures.length === 0 || Object.keys(groupManualOrder).length === 0) return;
+    let dirty = false;
+    const next: GroupManualOrder = { ...groupManualOrder };
+    for (const groupName of Object.keys(next)) {
+      const groupFixtures = allFixtures.filter((f) => f.group?.group_name === groupName);
+      if (groupFixtures.length === 0) continue;
+      const auto = calculateGroupStandings(groupName, groupFixtures, mergedPredictions);
+      if (!isValidManualOrderForStandings(next[groupName], auto, groupFixtures, mergedPredictions)) {
+        delete next[groupName];
+        dirty = true;
+      }
+    }
+    if (dirty) {
+      setGroupManualOrder(next);
+      void saveGroupManualOrder(next);
+    }
+  }, [allFixtures, mergedPredictions, groupManualOrder]);
+
+  const handleMoveTeamInGroup = useCallback(
+    (teamId: string, direction: 'up' | 'down') => {
+      if (isLocked) return;
+      const currentOrder =
+        groupManualOrder[activeGroup] ?? activeGroupAutoStandings.map((s) => s.teamId);
+      const swapped = swapAdjacentInGroupOrder(currentOrder, teamId, direction, activeGroupReorderCtx);
+      if (!swapped) return;
+      const updated = { ...groupManualOrder, [activeGroup]: swapped };
+      setGroupManualOrder(updated);
+      void saveGroupManualOrder(updated);
+    },
+    [isLocked, activeGroup, groupManualOrder, activeGroupAutoStandings, activeGroupReorderCtx]
+  );
+
+  const canMoveTeamUp = useCallback(
+    (teamId: string) => {
+      const order = groupManualOrder[activeGroup] ?? activeGroupAutoStandings.map((s) => s.teamId);
+      return canSwapWithNeighbor(teamId, 'up', order, activeGroupReorderCtx);
+    },
+    [activeGroup, groupManualOrder, activeGroupAutoStandings, activeGroupReorderCtx]
+  );
+
+  const canMoveTeamDown = useCallback(
+    (teamId: string) => {
+      const order = groupManualOrder[activeGroup] ?? activeGroupAutoStandings.map((s) => s.teamId);
+      return canSwapWithNeighbor(teamId, 'down', order, activeGroupReorderCtx);
+    },
+    [activeGroup, groupManualOrder, activeGroupAutoStandings, activeGroupReorderCtx]
+  );
 
   // Handle score changes locally (updates table in real-time)
   const handleScoreChange = (matchId: string, homeScore: number | null, awayScore: number | null) => {
-    if (isLocked) return; // Prevent changes when locked
+    if (isLocked) return;
     setLocalPredictions((prev) => ({
       ...prev,
-      [matchId]: { home_score: homeScore, away_score: awayScore },
+      [matchId]: { home_score: coerceScore(homeScore), away_score: coerceScore(awayScore) },
     }));
   };
 
-  // Handle confirmation to move to knockout stages
-  const handleConfirmAllGroups = async () => {
-    if (isLocked) return; // Prevent navigation when locked
-    const { getGroupPredictions } = await import('@/features/wc2026/services/async-predictions');
-
-    if (!isLocked) {
-      await Promise.all(GROUPS.map((g) => persistOutgoingGroupScores(g)));
+  /** Merged group scores from in-memory state (source of truth before AsyncStorage). */
+  const buildMergedGroupScoreMap = useCallback((): Record<string, LocalGroupPrediction> => {
+    const lp = localPredictionsRef.current;
+    const preds = predictionsRef.current;
+    const out: Record<string, LocalGroupPrediction> = {};
+    for (const match of allFixtures) {
+      if (!match.group?.group_name) continue;
+      const localPred = lp[match.id];
+      const savedPred = preds[match.id];
+      const hs = coerceScore(localPred?.home_score ?? savedPred?.home_score);
+      const as = coerceScore(localPred?.away_score ?? savedPred?.away_score);
+      if (hs === null || as === null) continue;
+      out[match.id] = { match_id: match.id, home_score: hs, away_score: as };
     }
+    return out;
+  }, [allFixtures]);
 
-    const asyncPredictions = await getGroupPredictions();
-    
-    // Check if all groups have saved predictions (0-0 is allowed)
-    const allGroupsHaveSavedPredictions = GROUPS.every((group) => {
-      const groupMatches = allFixtures.filter((f) => f.group?.group_name === group);
-      return groupMatches.every((match) => {
-        const pred = asyncPredictions[match.id] || predictions[match.id];
-        return pred &&
-               pred.home_score !== null &&
-               pred.home_score !== undefined &&
-               typeof pred.home_score === 'number' &&
-               pred.away_score !== null &&
-               pred.away_score !== undefined &&
-               typeof pred.away_score === 'number';
-      });
-    });
+  const allGroupMatchesComplete = useCallback(
+    (scoreMap: Record<string, LocalGroupPrediction>) =>
+      GROUPS.every((group) => {
+        const groupMatches = allFixtures.filter((f) => f.group?.group_name === group);
+        return (
+          groupMatches.length > 0 &&
+          groupMatches.every((match) => {
+            const pred = scoreMap[match.id];
+            return pred && isCompleteScorePair(pred.home_score, pred.away_score);
+          })
+        );
+      }),
+    [allFixtures]
+  );
 
-    if (!allGroupsHaveSavedPredictions) {
-      alert(
-        'Please enter home and away scores for every group-stage match. Fully scored games save when you change group tab or leave this screen.'
+  const handleConfirmAllGroups = async () => {
+    if (isLocked || continuingToR32) return;
+
+    await Promise.all(GROUPS.map((g) => persistOutgoingGroupScores(g)));
+
+    const scoreMap = buildMergedGroupScoreMap();
+    if (!allGroupMatchesComplete(scoreMap)) {
+      showAlert(
+        'Incomplete predictions',
+        'Please enter home and away scores for every group-stage match (0–0 is allowed). Each match needs both scores filled in.'
       );
       return;
     }
 
-    // Show confirmation dialog
-    Alert.alert(
+    const confirmed = await confirmDialog(
       'Continue to Round of 32',
       'Your group stage predictions will be used to generate the Round of 32 fixtures. You can still edit them later until you submit your final ante post selections.',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Continue',
-          style: 'default',
-          onPress: async () => {
-            try {
-              if (!userId) {
-                Alert.alert('Sign in required', 'You must be signed in to continue and save predictions to your account.');
-                return;
-              }
-
-              Alert.alert(
-                'Calculating Round of 32',
-                'Generating Round of 32 fixtures based on your predictions...',
-                [],
-                { cancelable: false }
-              );
-
-              // Ensure every group-stage pick is on the server before bracket generation
-              try {
-                const { upsertPrediction } = await import('@/features/wc2026/services/predictions');
-                await Promise.all(
-                  Object.entries(asyncPredictions).map(([matchId, pred]) =>
-                    upsertPrediction(userId, matchId, 'ante_post', pred.home_score, pred.away_score, null)
-                  )
-                );
-              } catch (syncErr) {
-                console.error('Failed to sync group predictions before R32:', syncErr);
-                const msg = syncErr instanceof Error ? syncErr.message : 'Sync failed';
-                Alert.alert(
-                  'Could not save to server',
-                  `All groups must be saved to your account before continuing. (${msg})`
-                );
-                return;
-              }
-
-              // Convert AsyncStorage predictions to full Prediction format needed by generateRoundOf32
-              const predictionsForCalculation: Record<string, Prediction> = {};
-              Object.entries(asyncPredictions).forEach(([matchId, pred]) => {
-                predictionsForCalculation[matchId] = {
-                  id: '',
-                  user_id: userId || '',
-                  match_id: matchId,
-                  match_number: null,
-                  prediction_type: 'ante_post' as const,
-                  home_score: pred.home_score,
-                  away_score: pred.away_score,
-                  predicted_winner_id: null,
-                  points_awarded: null,
-                  is_correct: null,
-                  created_at: '',
-                  updated_at: '',
-                };
-              });
-              
-              // Calculate Round of 32 bracket
-              const result = await generateRoundOf32(allFixtures, predictionsForCalculation);
-              
-              // Determine advancing and knocked out teams
-              const advancing = new Set<string>();
-              const knockedOut = new Set<string>();
-              
-              // Collect all third-place team IDs first
-              const allThirdPlace = new Set<string>();
-              Object.values(result.groupStandings).forEach((standings) => {
-                standings.forEach((team) => {
-                  if (team.position === 1 || team.position === 2) {
-                    advancing.add(team.teamId);
-                  } else if (team.position === 3) {
-                    allThirdPlace.add(team.teamId);
-                  } else if (team.position === 4) {
-                    knockedOut.add(team.teamId);
-                  }
-                });
-              });
-              
-              // Add best 8 third-place teams to advancing
-              const bestThirdPlaceIds = new Set(result.bestThirdPlace.map((t) => t.teamId));
-              bestThirdPlaceIds.forEach((id) => advancing.add(id));
-              
-              // Mark remaining third-place teams as knocked out
-              allThirdPlace.forEach((id) => {
-                if (!bestThirdPlaceIds.has(id)) {
-                  knockedOut.add(id);
-                }
-              });
-              
-              // Store data in AsyncStorage for persistence
-              try {
-                await AsyncStorage.setItem(ROUND_OF_32_STANDINGS_KEY, JSON.stringify(result.groupStandings));
-                await AsyncStorage.setItem(ROUND_OF_32_ADVANCING_KEY, JSON.stringify(Array.from(advancing)));
-                await AsyncStorage.setItem(ROUND_OF_32_KNOCKED_OUT_KEY, JSON.stringify(Array.from(knockedOut)));
-                await AsyncStorage.setItem(`${WC2026_STORAGE_PREFIX}round_of_32_third_place`, JSON.stringify(result.bestThirdPlace));
-              } catch (error) {
-                console.error('Error storing Round of 32 data:', error);
-              }
-              
-              // Navigate to results screen (bracket will be generated after user reviews/orders third-place teams)
-              router.push(
-                wcHrefWithParams('/(wc2026)/round-of-32-results', {
-                  groupStandings: JSON.stringify(result.groupStandings),
-                  advancingTeams: JSON.stringify(Array.from(advancing)),
-                  knockedOutTeams: JSON.stringify(Array.from(knockedOut)),
-                  bestThirdPlace: JSON.stringify(result.bestThirdPlace),
-                })
-              );
-            } catch (error) {
-              console.error('Error generating Round of 32:', error);
-              Alert.alert('Error', 'Failed to calculate Round of 32 bracket. Please try again.');
-            }
-          },
-        },
-      ]
+      { confirmLabel: 'Continue', cancelLabel: 'Cancel' }
     );
+    if (!confirmed) return;
+
+    if (!userId) {
+      showAlert('Sign in required', 'You must be signed in to continue and save predictions to your account.');
+      return;
+    }
+
+    setContinuingToR32(true);
+    try {
+      const { saveGroupPredictions } = await import('@/features/wc2026/services/async-predictions');
+      await saveGroupPredictions(scoreMap);
+
+      const { upsertPrediction } = await import('@/features/wc2026/services/predictions');
+      await Promise.all(
+        Object.entries(scoreMap).map(([matchId, pred]) =>
+          upsertPrediction(userId, matchId, 'ante_post', pred.home_score, pred.away_score, null)
+        )
+      );
+
+      const predictionsForCalculation: Record<string, Prediction> = {};
+      Object.entries(scoreMap).forEach(([matchId, pred]) => {
+        predictionsForCalculation[matchId] = {
+          id: '',
+          user_id: userId,
+          match_id: matchId,
+          match_number: null,
+          prediction_type: 'ante_post',
+          home_score: pred.home_score,
+          away_score: pred.away_score,
+          predicted_winner_id: null,
+          points_awarded: null,
+          is_correct: null,
+          created_at: '',
+          updated_at: '',
+        };
+      });
+
+      await saveGroupManualOrder(groupManualOrder);
+      const result = await generateRoundOf32(allFixtures, predictionsForCalculation, groupManualOrder);
+
+      const advancing = new Set<string>();
+      const knockedOut = new Set<string>();
+      const allThirdPlace = new Set<string>();
+      Object.values(result.groupStandings).forEach((standings) => {
+        standings.forEach((team) => {
+          if (team.position === 1 || team.position === 2) {
+            advancing.add(team.teamId);
+          } else if (team.position === 3) {
+            allThirdPlace.add(team.teamId);
+          } else if (team.position === 4) {
+            knockedOut.add(team.teamId);
+          }
+        });
+      });
+
+      const bestThirdPlaceIds = new Set(result.bestThirdPlace.map((t) => t.teamId));
+      bestThirdPlaceIds.forEach((id) => advancing.add(id));
+      allThirdPlace.forEach((id) => {
+        if (!bestThirdPlaceIds.has(id)) knockedOut.add(id);
+      });
+
+      await AsyncStorage.setItem(ROUND_OF_32_STANDINGS_KEY, JSON.stringify(result.groupStandings));
+      await AsyncStorage.setItem(ROUND_OF_32_ADVANCING_KEY, JSON.stringify(Array.from(advancing)));
+      await AsyncStorage.setItem(ROUND_OF_32_KNOCKED_OUT_KEY, JSON.stringify(Array.from(knockedOut)));
+      await AsyncStorage.setItem(
+        `${WC2026_STORAGE_PREFIX}round_of_32_third_place`,
+        JSON.stringify(result.bestThirdPlace)
+      );
+
+      router.push(wcHref('/(wc2026)/round-of-32-results'));
+    } catch (error) {
+      console.error('Error generating Round of 32:', error);
+      const msg = error instanceof Error ? error.message : 'Please try again.';
+      showAlert(
+        'Could not continue',
+        `Failed to save predictions or generate the Round of 32 bracket. ${msg}`
+      );
+    } finally {
+      setContinuingToR32(false);
+    }
   };
 
   const allGroupsCompleted = completedGroups.size === GROUPS.length;
@@ -585,32 +635,23 @@ export default function AntePostSelectionsScreen() {
     return allFixtures.some((match) => {
       const lp = localPredictions[match.id];
       if (!lp) return false;
-      const h = lp.home_score;
-      const a = lp.away_score;
-      const hNum = h !== null && h !== undefined && typeof h === 'number';
-      const aNum = a !== null && a !== undefined && typeof a === 'number';
-      if (hNum && aNum) return false;
-      const hTouched = h !== null && h !== undefined;
-      const aTouched = a !== null && a !== undefined;
-      return hTouched || aTouched;
+      if (isCompleteScorePair(lp.home_score, lp.away_score)) return false;
+      return coerceScore(lp.home_score) !== null || coerceScore(lp.away_score) !== null;
     });
   };
 
   const handleBackPress = () => {
     const leave = () => {
-      void persistOutgoingGroupScores(activeGroup).finally(() =>
-        router.replace(wcHref('/(wc2026)/ante-post-navigation'))
-      );
+      void persistOutgoingGroupScores(activeGroup).finally(() => goBackFromAntePostStage());
     };
     if (hasAnyPartialScore()) {
-      Alert.alert(
+      void confirmDialog(
         'Incomplete scores',
         'Some matches only have one score entered. Those scores are not saved. Leave anyway?',
-        [
-          { text: 'Stay', style: 'cancel' },
-          { text: 'Leave', style: 'destructive', onPress: leave },
-        ]
-      );
+        { confirmLabel: 'Leave', cancelLabel: 'Stay', destructive: true }
+      ).then((ok) => {
+        if (ok) leave();
+      });
     } else {
       leave();
     }
@@ -624,14 +665,7 @@ export default function AntePostSelectionsScreen() {
     if (!pred) return false;
     const homeScore = localPred?.home_score ?? savedPred?.home_score;
     const awayScore = localPred?.away_score ?? savedPred?.away_score;
-    return (
-      homeScore !== null &&
-      homeScore !== undefined &&
-      typeof homeScore === 'number' &&
-      awayScore !== null &&
-      awayScore !== undefined &&
-      typeof awayScore === 'number'
-    );
+    return isCompleteScorePair(homeScore, awayScore);
   }).length;
 
   const styles = useMemo(
@@ -640,6 +674,7 @@ export default function AntePostSelectionsScreen() {
         container: {
           flex: 1,
           backgroundColor: theme.colors.background,
+          position: 'relative',
         },
         headerRow: {
           flexDirection: 'row',
@@ -827,6 +862,33 @@ export default function AntePostSelectionsScreen() {
           fontSize: 16,
           fontWeight: '700',
         },
+        continueButtonDisabled: {
+          opacity: 0.55,
+        },
+        continuingOverlay: {
+          ...StyleSheet.absoluteFillObject,
+          backgroundColor: 'rgba(0,0,0,0.45)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 20,
+        },
+        continuingCard: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.lg,
+          padding: theme.spacing.xl,
+          alignItems: 'center',
+          maxWidth: 280,
+          marginHorizontal: theme.spacing.lg,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        continuingText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 15,
+          color: theme.colors.text,
+          marginTop: theme.spacing.md,
+          textAlign: 'center',
+        },
       }),
     [theme, insets.bottom]
   );
@@ -916,12 +978,11 @@ export default function AntePostSelectionsScreen() {
           >
             <View style={styles.mainContent}>
               {/* All Groups Completed Message - Above Tables */}
-              {allGroupsCompleted && (
+              {allGroupsCompleted && !isLocked && (
                 <View style={styles.completionMessage}>
                   <Text style={styles.completionTitle}>All group stage predictions made</Text>
                   <Text style={styles.completionText}>
-                    Fully scored matches save automatically when you switch group tab. When every group is complete, use
-                    Continue to next stage below.
+                    When every group is complete, tap Continue below to save all scores and open the Round of 32.
                   </Text>
                 </View>
               )}
@@ -933,6 +994,27 @@ export default function AntePostSelectionsScreen() {
                   groupName={activeGroup}
                   fixtures={fixtures}
                   predictions={getMergedPredictions()}
+                  standings={activeGroupDisplayStandings.map((s) => ({
+                    teamId: s.teamId,
+                    teamCode: s.teamCode,
+                    teamName: s.teamName,
+                    played: s.played,
+                    won: s.won,
+                    drawn: s.drawn,
+                    lost: s.lost,
+                    goalDifference: s.goalDifference,
+                    points: s.points,
+                    position: s.position,
+                  }))}
+                  allowManualReorder={!isLocked}
+                  onMoveTeam={handleMoveTeamInGroup}
+                  canMoveUp={canMoveTeamUp}
+                  canMoveDown={canMoveTeamDown}
+                  showTieHint={groupHasUserResolvableTie(
+                    activeGroupAutoStandings,
+                    fixtures,
+                    mergedPredictions
+                  )}
                 />
               </View>
 
@@ -966,10 +1048,13 @@ export default function AntePostSelectionsScreen() {
                 {/* Continue to Next Stage Button - Only show when all groups completed */}
                 {allGroupsCompleted && !isLocked && (
                   <TouchableOpacity
-                    style={styles.continueButton}
+                    style={[styles.continueButton, continuingToR32 && styles.continueButtonDisabled]}
                     onPress={handleConfirmAllGroups}
+                    disabled={continuingToR32}
                   >
-                    <Text style={styles.continueButtonText}>Continue to next stage</Text>
+                    <Text style={styles.continueButtonText}>
+                      {continuingToR32 ? 'Saving…' : 'Continue to next stage'}
+                    </Text>
                   </TouchableOpacity>
                 )}
               </ScrollView>
@@ -977,6 +1062,15 @@ export default function AntePostSelectionsScreen() {
           </KeyboardAvoidingView>
         )}
       </View>
+
+      {continuingToR32 ? (
+        <View style={styles.continuingOverlay} pointerEvents="auto">
+          <View style={styles.continuingCard}>
+            <ActivityIndicator size="large" color={theme.colors.accent} />
+            <Text style={styles.continuingText}>Saving predictions and building your Round of 32…</Text>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }

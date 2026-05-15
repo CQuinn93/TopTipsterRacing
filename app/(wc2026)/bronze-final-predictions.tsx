@@ -22,10 +22,17 @@ import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
 import { KnockoutMatchScorePresets } from '@/features/wc2026/components/KnockoutMatchScorePresets';
 import { applyKnockoutScorePreset } from '@/features/wc2026/utils/knockout-preset-score';
 import { requestKnockoutEditWithDownstreamClear } from '@/features/wc2026/utils/knockoutDownstreamEditGuard';
+import { goBackFromAntePostStage } from '@/features/wc2026/utils/ante-post-nav';
+import {
+  hydrateKnockoutPredictionsFromDb,
+  resolveKnockoutWinner,
+  type KnockoutUiPrediction,
+} from '@/features/wc2026/utils/knockout-prediction-hydrate';
 import { hasDownstreamKnockoutPredictions } from '@/features/wc2026/services/async-predictions';
 import { type KnockoutMatch } from '@/features/wc2026/services/knockout-bracket';
 import { supabase } from '@/lib/supabase';
 import { wcHref, wcHrefWithParams } from '@/features/wc2026/utils/href';
+import { showAntePostFilledHighlight } from '@/features/wc2026/utils/knockout-ui';
 
 const SEMI_FINALS_BRACKET_KEY = `${WC2026_STORAGE_PREFIX}semi_finals_bracket`;
 const BRONZE_FINAL_BRACKET_KEY = `${WC2026_STORAGE_PREFIX}bronze_final_bracket`;
@@ -35,20 +42,13 @@ interface RouteParams {
   bracket?: string; // JSON stringified KnockoutMatch[]
 }
 
-interface KnockoutPrediction {
-  matchNumber: number;
-  homeScore: string;
-  awayScore: string;
-  predictedWinnerId?: string | null;
-}
-
 export default function BronzeFinalPredictionsScreen() {
   const theme = useTheme();
   const styles = useKnockoutPredictionsScreenStyles();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams() as RouteParams;
   const [bracket, setBracket] = useState<KnockoutMatch[]>([]);
-  const [predictions, setPredictions] = useState<Record<number, KnockoutPrediction>>({});
+  const [predictions, setPredictions] = useState<Record<number, KnockoutUiPrediction>>({});
   const [savedPredictions, setSavedPredictions] = useState<Record<number, { home_score: number | null; away_score: number | null }>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -59,45 +59,29 @@ export default function BronzeFinalPredictionsScreen() {
   const predictionsLoadedRef = useRef(false);
   const initializedRef = useRef(false);
 
-  // Memoize loadExistingPredictions to prevent recreation on every render
-  const loadExistingPredictions = useCallback(async (bracketMatches: KnockoutMatch[], currentUserId: string) => {
-    if (!currentUserId || predictionsLoadedRef.current) return;
-    
-    predictionsLoadedRef.current = true;
-    
-    try {
-      const { getUserPredictionsByMatchNumber } = await import('@/features/wc2026/services/predictions');
-      const existingPreds: Record<number, { home_score: number | null; away_score: number | null }> = {};
-      const newPredictions: Record<number, KnockoutPrediction> = {};
-      
-      await Promise.all(
-        bracketMatches.map(async (match) => {
-          const preds = await getUserPredictionsByMatchNumber(currentUserId, match.matchNumber);
-          const antePostPred = preds.find((p) => p.prediction_type === 'ante_post');
-          if (antePostPred) {
-            existingPreds[match.matchNumber] = {
-              home_score: antePostPred.home_score,
-              away_score: antePostPred.away_score,
-            };
-            
-            newPredictions[match.matchNumber] = {
-              matchNumber: match.matchNumber,
-              homeScore: antePostPred.home_score?.toString() ?? '',
-              awayScore: antePostPred.away_score?.toString() ?? '',
-              predictedWinnerId: antePostPred.predicted_winner_id ?? null,
-            };
-          }
-        })
-      );
-      
-      // Batch state updates to prevent multiple re-renders
-      setPredictions((prev) => ({ ...prev, ...newPredictions }));
-      setSavedPredictions(existingPreds);
-    } catch (error) {
-      console.error('Error loading existing predictions:', error);
-      predictionsLoadedRef.current = false; // Reset on error so we can retry
-    }
-  }, []);
+  const loadExistingPredictions = useCallback(
+    async (bracketMatches: KnockoutMatch[], currentUserId: string, force = false) => {
+      if (!currentUserId || bracketMatches.length === 0) return;
+      if (predictionsLoadedRef.current && !force) return;
+
+      predictionsLoadedRef.current = true;
+
+      try {
+        const { predictions: fromDb, savedScores } = await hydrateKnockoutPredictionsFromDb(
+          currentUserId,
+          bracketMatches
+        );
+        if (Object.keys(fromDb).length === 0) return;
+
+        setPredictions((prev) => ({ ...prev, ...fromDb }));
+        setSavedPredictions((prev) => ({ ...prev, ...savedScores }));
+      } catch (error) {
+        console.error('Error loading existing predictions:', error);
+        predictionsLoadedRef.current = false;
+      }
+    },
+    []
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -113,6 +97,14 @@ export default function BronzeFinalPredictionsScreen() {
         cancelled = true;
       };
     }, [])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId || bracket.length === 0) return;
+      predictionsLoadedRef.current = false;
+      void loadExistingPredictions(bracket, userId, true);
+    }, [userId, bracket, loadExistingPredictions])
   );
 
   useEffect(() => {
@@ -153,7 +145,7 @@ export default function BronzeFinalPredictionsScreen() {
           // Try loading from AsyncStorage first (saved predictions)
           const { getBronzeFinalPredictions, getAntePostLockedStatus } = await import('@/features/wc2026/services/async-predictions');
           const savedBronzeFinalPredictions = await getBronzeFinalPredictions();
-          const loadedPredictions: Record<number, KnockoutPrediction> = {};
+          const loadedPredictions: Record<number, KnockoutUiPrediction> = {};
           const loadedSaved: Record<number, { home_score: number | null; away_score: number | null }> = {};
           
           if (Object.keys(savedBronzeFinalPredictions).length > 0) {
@@ -180,9 +172,8 @@ export default function BronzeFinalPredictionsScreen() {
           const locked = await getAntePostLockedStatus();
           setIsLocked(locked);
           
-          // If no AsyncStorage data, try database (works for both locked and unlocked)
-          if (currentUser && Object.keys(loadedPredictions).length === 0) {
-            await loadExistingPredictions(parsedBracket, currentUser);
+          if (currentUser && (Object.keys(loadedPredictions).length === 0 || locked)) {
+            await loadExistingPredictions(parsedBracket, currentUser, true);
           }
         } else {
           Alert.alert('Error', 'No bracket data found. Please go back and complete the previous stage.');
@@ -490,12 +481,12 @@ export default function BronzeFinalPredictionsScreen() {
           {
             text: 'Go Back',
             style: 'destructive',
-            onPress: () => router.replace(wcHref('/(wc2026)/ante-post-navigation')),
+            onPress: goBackFromAntePostStage,
           },
         ]
       );
     } else {
-      router.replace(wcHref('/(wc2026)/ante-post-navigation'));
+      goBackFromAntePostStage();
     }
   };
 
@@ -537,27 +528,8 @@ export default function BronzeFinalPredictionsScreen() {
           {bracket
             .map((match) => {
               const pred = predictions[match.matchNumber];
-              if (!pred || pred.homeScore.trim() === '' || pred.awayScore.trim() === '') {
-                return null;
-              }
-              
-              const homeScore = parseInt(pred.homeScore, 10);
-              const awayScore = parseInt(pred.awayScore, 10);
-              if (isNaN(homeScore) || isNaN(awayScore)) {
-                return null;
-              }
-              
-              // Determine winner
-              let winner: { id: string; code: string; name: string; source: string } | null = null;
-              if (homeScore > awayScore) {
-                winner = match.homeTeam;
-              } else if (awayScore > homeScore) {
-                winner = match.awayTeam;
-              } else if (pred.predictedWinnerId) {
-                // Draw - use selected winner
-                winner = match.homeTeam.id === pred.predictedWinnerId ? match.homeTeam : match.awayTeam;
-              }
-              
+              if (!pred) return null;
+              const winner = resolveKnockoutWinner(match, pred);
               return winner ? { team: winner, matchNumber: match.matchNumber } : null;
             })
             .filter((item): item is { team: { id: string; code: string; name: string; source: string }; matchNumber: number } => item !== null)
@@ -617,7 +589,7 @@ export default function BronzeFinalPredictionsScreen() {
             const awaySelected = pred.predictedWinnerId === match.awayTeam.id;
 
             return (
-              <View key={match.matchNumber} style={[styles.matchCard, hasPrediction && styles.matchCardFilled]}>
+              <View key={match.matchNumber} style={[styles.matchCard, showAntePostFilledHighlight(hasPrediction, isLocked) && styles.matchCardFilled]}>
                 <Text style={styles.matchNumber}>Game #{match.matchNumber}</Text>
                 
                 <View style={styles.matchContent}>
@@ -639,7 +611,7 @@ export default function BronzeFinalPredictionsScreen() {
                       </Text>
                     </View>
                     <TextInput
-                      style={[styles.scoreInput, hasPrediction && styles.scoreInputFilled]}
+                      style={[styles.scoreInput, showAntePostFilledHighlight(hasPrediction, isLocked) && styles.scoreInputFilled]}
                       value={pred.homeScore}
                       onChangeText={(text) => handleScoreChange(match.matchNumber, 'home', text, match.homeTeam.id, match.awayTeam.id)}
                       placeholder="0"
@@ -657,7 +629,7 @@ export default function BronzeFinalPredictionsScreen() {
                   {/* Away Team */}
                   <View style={styles.teamSection}>
                     <TextInput
-                      style={[styles.scoreInput, hasPrediction && styles.scoreInputFilled]}
+                      style={[styles.scoreInput, showAntePostFilledHighlight(hasPrediction, isLocked) && styles.scoreInputFilled]}
                       value={pred.awayScore}
                       onChangeText={(text) => handleScoreChange(match.matchNumber, 'away', text, match.homeTeam.id, match.awayTeam.id)}
                       placeholder="0"
@@ -721,7 +693,7 @@ export default function BronzeFinalPredictionsScreen() {
                       <TouchableOpacity
                         style={[
                           styles.advanceButton,
-                          homeSelected && styles.advanceButtonSelected
+                          showAntePostFilledHighlight(homeSelected, isLocked) && styles.advanceButtonSelected
                         ]}
                         onPress={() => handleWinnerSelection(match.matchNumber, match.homeTeam.id)}
                       >
@@ -734,7 +706,7 @@ export default function BronzeFinalPredictionsScreen() {
                         />
                         <Text style={[
                           styles.advanceButtonText,
-                          homeSelected && styles.advanceButtonTextSelected
+                          showAntePostFilledHighlight(homeSelected, isLocked) && styles.advanceButtonTextSelected
                         ]}>
                           {match.homeTeam.name}
                         </Text>
@@ -742,7 +714,7 @@ export default function BronzeFinalPredictionsScreen() {
                       <TouchableOpacity
                         style={[
                           styles.advanceButton,
-                          awaySelected && styles.advanceButtonSelected
+                          showAntePostFilledHighlight(awaySelected, isLocked) && styles.advanceButtonSelected
                         ]}
                         onPress={() => handleWinnerSelection(match.matchNumber, match.awayTeam.id)}
                       >
@@ -755,7 +727,7 @@ export default function BronzeFinalPredictionsScreen() {
                         />
                         <Text style={[
                           styles.advanceButtonText,
-                          awaySelected && styles.advanceButtonTextSelected
+                          showAntePostFilledHighlight(awaySelected, isLocked) && styles.advanceButtonTextSelected
                         ]}>
                           {match.awayTeam.name}
                         </Text>
@@ -766,8 +738,8 @@ export default function BronzeFinalPredictionsScreen() {
 
                 {/* Show winner if not a draw */}
                 {hasPrediction && !isDraw && pred.predictedWinnerId && (
-                  <View style={styles.winnerSection}>
-                    <Text style={styles.winnerText}>
+                  <View style={[styles.winnerSection, isLocked && styles.winnerSectionLocked]}>
+                    <Text style={[styles.winnerText, isLocked && styles.winnerTextLocked]}>
                       Winner: {pred.predictedWinnerId === match.homeTeam.id ? match.homeTeam.name : match.awayTeam.name}
                     </Text>
                   </View>

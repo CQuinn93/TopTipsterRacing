@@ -3,7 +3,7 @@
 
 import { type Match } from './fixtures';
 import { type Prediction } from './predictions';
-import { type TeamStanding, applyTiebreakers, applyFinalTiebreakers } from './tiebreakers';
+import { type TeamStanding, applyFinalTiebreakers, resolveTeamsTiedOnPoints } from './tiebreakers';
 
 export interface FinalGroupStanding extends TeamStanding {
   position: number; // Final position in group (1, 2, 3, or 4)
@@ -11,11 +11,11 @@ export interface FinalGroupStanding extends TeamStanding {
 }
 
 // Calculate standings for a single group
-export const calculateGroupStandings = async (
+export const calculateGroupStandings = (
   groupName: string,
   fixtures: Match[],
   predictions: Record<string, Prediction>
-): Promise<FinalGroupStanding[]> => {
+): FinalGroupStanding[] => {
   // Use team data from fixtures (no database call needed - FIFA ranking is already included)
   const standingsMap: Record<string, TeamStanding> = {};
   
@@ -131,13 +131,9 @@ export const calculateGroupStandings = async (
       });
       position++;
     } else {
-      // Teams are tied - apply tiebreakers
-      const resolved = applyTiebreakers(teamsWithPoints, fixtures, predictions);
-      
-      // Apply final tiebreakers to any teams that are still tied after H2H
-      // (This handles cases where H2H didn't fully resolve)
-      const finalResolved = applyFinalTiebreakers(resolved);
-      
+      // Same points: GD → H2H → user (no FIFA)
+      const finalResolved = resolveTeamsTiedOnPoints(teamsWithPoints, fixtures, predictions);
+
       finalResolved.forEach((team) => {
         finalStandings.push({
           ...team,
@@ -173,34 +169,19 @@ export const calculateGroupStandings = async (
 };
 
 // Calculate standings for all groups
-export const calculateAllGroupStandings = async (
+export const calculateAllGroupStandings = (
   allFixtures: Match[],
   predictions: Record<string, Prediction>
-): Promise<Record<string, FinalGroupStanding[]>> => {
+): Record<string, FinalGroupStanding[]> => {
   const GROUPS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'];
   const allStandings: Record<string, FinalGroupStanding[]> = {};
-  
-  // Calculate standings for each group in parallel
-  const standingsPromises = GROUPS.map(async (groupName) => {
-    const groupFixtures = allFixtures.filter(
-      (f) => f.group?.group_name === groupName
-    );
-    
+
+  for (const groupName of GROUPS) {
+    const groupFixtures = allFixtures.filter((f) => f.group?.group_name === groupName);
     if (groupFixtures.length > 0) {
-      return {
-        groupName,
-        standings: await calculateGroupStandings(groupName, groupFixtures, predictions),
-      };
+      allStandings[groupName] = calculateGroupStandings(groupName, groupFixtures, predictions);
     }
-    return { groupName, standings: [] };
-  });
-  
-  const results = await Promise.all(standingsPromises);
-  results.forEach(({ groupName, standings }) => {
-    if (standings.length > 0) {
-      allStandings[groupName] = standings;
-    }
-  });
-  
+  }
+
   return allStandings;
 };
