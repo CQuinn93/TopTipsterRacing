@@ -20,6 +20,7 @@ import { useKnockoutPredictionsScreenStyles } from '@/features/wc2026/components
 import { WC2026_STORAGE_PREFIX } from '@/features/wc2026/constants/storage-keys';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
 import { KnockoutMatchScorePresets } from '@/features/wc2026/components/KnockoutMatchScorePresets';
+import { KnockoutMatchScoreRow } from '@/features/wc2026/components/KnockoutMatchScoreRow';
 import { applyKnockoutScorePreset } from '@/features/wc2026/utils/knockout-preset-score';
 import { hydrateKnockoutBracketsFromStoredPicks } from '@/features/wc2026/services/knockout-bracket-hydration';
 import { runKnockoutPresetEdit, runKnockoutScoreEdit, runKnockoutWinnerPick } from '@/features/wc2026/utils/knockout-edit';
@@ -45,7 +46,7 @@ interface KnockoutPrediction {
 
 export default function SemiFinalsPredictionsScreen() {
   const theme = useTheme();
-  const styles = useKnockoutPredictionsScreenStyles();
+  const { styles, useMatchGrid } = useKnockoutPredictionsScreenStyles();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams() as RouteParams;
   const [bracket, setBracket] = useState<KnockoutMatch[]>([]);
@@ -575,6 +576,7 @@ export default function SemiFinalsPredictionsScreen() {
             </Text>
           </View>
 
+          <View style={styles.matchesGrid}>
           {bracket.map((match) => {
             const pred = predictions[match.matchNumber] || { matchNumber: match.matchNumber, homeScore: '', awayScore: '', predictedWinnerId: null };
             const hasPrediction = pred.homeScore.trim() !== '' && pred.awayScore.trim() !== '';
@@ -588,69 +590,22 @@ export default function SemiFinalsPredictionsScreen() {
               <View key={match.matchNumber} style={[styles.matchCard, showAntePostFilledHighlight(hasPrediction, isLocked) && styles.matchCardFilled]}>
                 <Text style={styles.matchNumber}>Game #{match.matchNumber}</Text>
                 
-                <View style={styles.matchContent}>
-                  {/* Home Team */}
-                  <View style={styles.teamSection}>
-                    <View style={styles.teamInfo}>
-                      <CountryFlag
-                        countryCode={match.homeTeam.code}
-                        countryName={match.homeTeam.name}
-                        flagSize={40}
-                        showName={false}
-                        align="center"
-                      />
-                      <Text style={styles.teamName} numberOfLines={2} ellipsizeMode="tail">
-                        {match.homeTeam.name}
-                      </Text>
-                      <Text style={styles.teamSource} numberOfLines={1} ellipsizeMode="tail">
-                        {match.homeTeam.source}
-                      </Text>
-                    </View>
-                    <TextInput
-                      style={[styles.scoreInput, showAntePostFilledHighlight(hasPrediction, isLocked) && styles.scoreInputFilled]}
-                      value={pred.homeScore}
-                      onChangeText={(text) => handleScoreChange(match.matchNumber, 'home', text, match.homeTeam.id, match.awayTeam.id)}
-                      placeholder="0"
-                      placeholderTextColor={theme.colors.textMuted}
-                      keyboardType="numeric"
-                      editable={!isLocked}
-                      maxLength={2}
-                      textAlign="center"
-                    />
-                  </View>
-
-                  {/* VS */}
-                  <Text style={styles.vsText}>vs</Text>
-
-                  {/* Away Team */}
-                  <View style={styles.teamSection}>
-                    <TextInput
-                      style={[styles.scoreInput, showAntePostFilledHighlight(hasPrediction, isLocked) && styles.scoreInputFilled]}
-                      value={pred.awayScore}
-                      onChangeText={(text) => handleScoreChange(match.matchNumber, 'away', text, match.homeTeam.id, match.awayTeam.id)}
-                      placeholder="0"
-                      placeholderTextColor={theme.colors.textMuted}
-                      keyboardType="numeric"
-                      editable={!isLocked}
-                      maxLength={2}
-                      textAlign="center"
-                    />
-                    <View style={styles.teamInfo}>
-                      <CountryFlag
-                        countryCode={match.awayTeam.code}
-                        countryName={match.awayTeam.name}
-                        flagSize={40}
-                        showName={false}
-                        align="center"
-                      />
-                      <Text style={styles.teamName} numberOfLines={2} ellipsizeMode="tail">
-                        {match.awayTeam.name}
-                      </Text>
-                      <Text style={styles.teamSource} numberOfLines={1} ellipsizeMode="tail">
-                        {match.awayTeam.source}
-                      </Text>
-                    </View>
-                  </View>
+                <View style={styles.matchScoreRowWrap}>
+                  <KnockoutMatchScoreRow
+                    compact={useMatchGrid}
+                    homeTeam={match.homeTeam}
+                    awayTeam={match.awayTeam}
+                    homeScore={pred.homeScore}
+                    awayScore={pred.awayScore}
+                    hasPrediction={hasPrediction}
+                    disabled={isLocked}
+                    onHomeScoreChange={(text) =>
+                      handleScoreChange(match.matchNumber, 'home', text, match.homeTeam.id, match.awayTeam.id)
+                    }
+                    onAwayScoreChange={(text) =>
+                      handleScoreChange(match.matchNumber, 'away', text, match.homeTeam.id, match.awayTeam.id)
+                    }
+                  />
                 </View>
 
                 <KnockoutMatchScorePresets
@@ -740,6 +695,7 @@ export default function SemiFinalsPredictionsScreen() {
               </View>
             );
           })}
+          </View>
 
           {/* Save Button */}
           <TouchableOpacity

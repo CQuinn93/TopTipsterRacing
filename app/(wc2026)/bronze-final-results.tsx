@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
@@ -12,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { WcKnockoutResultsHeader } from '@/features/wc2026/components/WcKnockoutResultsHeader';
+import { useKnockoutResultsScreenStyles } from '@/features/wc2026/components/useKnockoutResultsScreenStyles';
 import { WC2026_STORAGE_PREFIX } from '@/features/wc2026/constants/storage-keys';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
 import { type KnockoutMatch } from '@/features/wc2026/services/knockout-bracket';
@@ -88,138 +88,7 @@ export default function BronzeFinalResultsScreen() {
     loadData();
   }, []);
 
-  const styles = useMemo(
-    () =>
-      StyleSheet.create({
-        container: {
-          flex: 1,
-          backgroundColor: theme.colors.background,
-        },
-        loadingContainer: {
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          gap: theme.spacing.sm,
-          padding: theme.spacing.lg,
-        },
-        loadingText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          color: theme.colors.textSecondary,
-        },
-        scrollView: { flex: 1 },
-        scrollContent: {
-          padding: theme.spacing.md,
-          paddingBottom: theme.spacing.xl,
-          gap: theme.spacing.md,
-        },
-        headerSection: {
-          marginBottom: theme.spacing.sm,
-        },
-        description: {
-          fontFamily: theme.fontFamily.light,
-          color: theme.colors.textSecondary,
-          fontSize: 14,
-          lineHeight: 22,
-          textAlign: 'center',
-          marginBottom: theme.spacing.sm,
-        },
-        matchCard: {
-          backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.lg,
-          padding: theme.spacing.lg,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-        },
-        matchNumber: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.accent,
-          fontSize: 12,
-          fontWeight: '600',
-          marginBottom: theme.spacing.sm,
-          textAlign: 'center',
-        },
-        matchContent: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: theme.spacing.sm,
-        },
-        teamSection: {
-          flex: 1,
-          alignItems: 'center',
-          gap: theme.spacing.sm,
-          padding: theme.spacing.sm,
-          borderRadius: theme.radius.md,
-        },
-        winnerTeam: {
-          backgroundColor: theme.colors.accentMuted,
-          borderWidth: 1,
-          borderColor: theme.colors.accent,
-        },
-        loserTeam: {
-          backgroundColor: `${theme.colors.error}14`,
-          opacity: 0.75,
-        },
-        teamName: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.text,
-          fontSize: 14,
-          fontWeight: '600',
-          textAlign: 'center',
-          maxWidth: 120,
-        },
-        teamSource: {
-          fontFamily: theme.fontFamily.light,
-          color: theme.colors.textMuted,
-          fontSize: 11,
-          textAlign: 'center',
-          maxWidth: 120,
-        },
-        score: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.text,
-          fontSize: 24,
-          fontWeight: '700',
-        },
-        vsText: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.textMuted,
-          fontSize: 16,
-          fontWeight: '700',
-        },
-        advanceText: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.accent,
-          fontSize: 10,
-          fontWeight: '600',
-          marginTop: 4,
-        },
-        bronzeText: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.statusAccent,
-          fontSize: 10,
-          fontWeight: '600',
-          marginTop: 4,
-        },
-        continueButton: {
-          backgroundColor: theme.colors.accent,
-          borderRadius: theme.radius.md,
-          paddingVertical: theme.spacing.md,
-          paddingHorizontal: theme.spacing.lg,
-          alignItems: 'center',
-          marginTop: theme.spacing.lg,
-          marginBottom: theme.spacing.lg,
-        },
-        continueButtonText: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.white,
-          fontSize: 17,
-          fontWeight: '700',
-        },
-      }),
-    [theme]
-  );
+  const styles = useKnockoutResultsScreenStyles();
 
   const handleContinue = () => {
     // Generate Bronze Final bracket and navigate to predictions
@@ -258,6 +127,7 @@ export default function BronzeFinalResultsScreen() {
           </Text>
         </View>
 
+        <View style={styles.matchesResultsGrid}>
         {sfBracket.map((match) => {
           const pred = sfPredictions[match.matchNumber];
           if (!pred) return null;
@@ -282,7 +152,7 @@ export default function BronzeFinalResultsScreen() {
           const awayLost = !awayWon && !isDraw;
           
           return (
-            <View key={match.matchNumber} style={styles.matchCard}>
+            <View key={match.matchNumber} style={[styles.matchCard, styles.matchCardInGrid]}>
               <Text style={styles.matchNumber}>Game #{match.matchNumber}</Text>
               
               <View style={styles.matchContent}>
@@ -335,6 +205,7 @@ export default function BronzeFinalResultsScreen() {
             </View>
           );
         })}
+        </View>
 
         <TouchableOpacity
           style={styles.continueButton}

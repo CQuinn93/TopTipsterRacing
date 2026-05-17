@@ -310,6 +310,18 @@ export default function AntePostNavigationScreen() {
     router.push(wcHref(stage.route));
   };
 
+  /** First stage the user can still enter picks for (not complete, not blocked). */
+  const activeStageId = useMemo(() => {
+    for (const stage of stages) {
+      if (stage.isComplete) continue;
+      if (stage.userCommittedLocked) continue;
+      if (stage.knockoutAnteDisabled && stage.id !== 'group') continue;
+      if (stage.waitingOnPriorKnockoutStage) continue;
+      return stage.id;
+    }
+    return null;
+  }, [stages]);
+
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -430,6 +442,31 @@ export default function AntePostNavigationScreen() {
     [theme, insets.bottom]
   );
 
+  const renderStageIcon = (stage: StageStatus) => {
+    if (stage.isComplete) {
+      return <Ionicons name="checkmark-circle" size={24} color={theme.colors.accent} />;
+    }
+    if (stage.userCommittedLocked) {
+      return <Ionicons name="lock-closed-outline" size={22} color={theme.colors.textMuted} />;
+    }
+    const isBlocked =
+      (stage.knockoutAnteDisabled && stage.id !== 'group') || stage.waitingOnPriorKnockoutStage;
+    if (isBlocked) {
+      return <Ionicons name="lock-closed-outline" size={22} color={theme.colors.textMuted} />;
+    }
+    if (stage.id === activeStageId) {
+      return <Ionicons name="play-circle" size={24} color={theme.colors.accent} />;
+    }
+    if (stage.completedCount !== undefined && stage.completedCount > 0 && stage.total !== undefined) {
+      return (
+        <Text style={styles.stageCount}>
+          {stage.completedCount}/{stage.total}
+        </Text>
+      );
+    }
+    return <Ionicons name="chevron-forward" size={22} color={theme.colors.textMuted} />;
+  };
+
   return (
     <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
@@ -496,23 +533,7 @@ export default function AntePostNavigationScreen() {
                     <Text style={styles.stageProgress}>Complete</Text>
                   ) : null}
                 </View>
-                <View style={styles.stageRight}>
-                  {stage.userCommittedLocked ? (
-                    <Ionicons name="lock-closed-outline" size={22} color={theme.colors.accent} />
-                  ) : stage.knockoutAnteDisabled && stage.id !== 'group' ? (
-                    <Ionicons name="pause-circle-outline" size={24} color={theme.colors.textMuted} />
-                  ) : stage.waitingOnPriorKnockoutStage && !stage.isComplete ? (
-                    <Ionicons name="hourglass-outline" size={22} color={theme.colors.textMuted} />
-                  ) : stage.isComplete ? (
-                    <Ionicons name="checkmark-circle" size={24} color={theme.colors.accent} />
-                  ) : stage.completedCount !== undefined && stage.completedCount > 0 ? (
-                    <Text style={styles.stageCount}>
-                      {stage.completedCount}/{stage.total}
-                    </Text>
-                  ) : (
-                    <Ionicons name="chevron-forward" size={22} color={theme.colors.textMuted} />
-                  )}
-                </View>
+                <View style={styles.stageRight}>{renderStageIcon(stage)}</View>
               </View>
             </TouchableOpacity>
           ))}

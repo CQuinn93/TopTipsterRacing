@@ -30,6 +30,12 @@ export const batchSaveAllAntePostPredictions = async (
     let savedCount = 0;
     const errors: string[] = [];
 
+    const formatSaveError = (label: string, error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`Error saving ${label}:`, error);
+      return `${label}: ${detail}`;
+    };
+
     // Save group stage predictions (use match_id)
     const groupPromises = Object.values(allPredictions.group).map(async (pred) => {
       try {
@@ -43,8 +49,7 @@ export const batchSaveAllAntePostPredictions = async (
         );
         savedCount++;
       } catch (error) {
-        console.error(`Error saving group prediction for match ${pred.match_id}:`, error);
-        errors.push(`Group match ${pred.match_id}`);
+        errors.push(formatSaveError(`Group match ${pred.match_id}`, error));
       }
     });
 
@@ -62,8 +67,7 @@ export const batchSaveAllAntePostPredictions = async (
         );
         savedCount++;
       } catch (error) {
-        console.error(`Error saving R32 prediction for match ${pred.match_number}:`, error);
-        errors.push(`R32 match ${pred.match_number}`);
+        errors.push(formatSaveError(`R32 match ${pred.match_number}`, error));
       }
     });
 
@@ -81,8 +85,7 @@ export const batchSaveAllAntePostPredictions = async (
         );
         savedCount++;
       } catch (error) {
-        console.error(`Error saving R16 prediction for match ${pred.match_number}:`, error);
-        errors.push(`R16 match ${pred.match_number}`);
+        errors.push(formatSaveError(`R16 match ${pred.match_number}`, error));
       }
     });
 
@@ -100,8 +103,7 @@ export const batchSaveAllAntePostPredictions = async (
         );
         savedCount++;
       } catch (error) {
-        console.error(`Error saving QF prediction for match ${pred.match_number}:`, error);
-        errors.push(`QF match ${pred.match_number}`);
+        errors.push(formatSaveError(`QF match ${pred.match_number}`, error));
       }
     });
 
@@ -119,8 +121,7 @@ export const batchSaveAllAntePostPredictions = async (
         );
         savedCount++;
       } catch (error) {
-        console.error(`Error saving SF prediction for match ${pred.match_number}:`, error);
-        errors.push(`SF match ${pred.match_number}`);
+        errors.push(formatSaveError(`SF match ${pred.match_number}`, error));
       }
     });
 
@@ -138,8 +139,7 @@ export const batchSaveAllAntePostPredictions = async (
         );
         savedCount++;
       } catch (error) {
-        console.error(`Error saving Bronze Final prediction for match ${pred.match_number}:`, error);
-        errors.push(`Bronze Final match ${pred.match_number}`);
+        errors.push(formatSaveError(`Bronze Final match ${pred.match_number}`, error));
       }
     });
 
@@ -157,8 +157,7 @@ export const batchSaveAllAntePostPredictions = async (
         );
         savedCount++;
       } catch (error) {
-        console.error(`Error saving Final prediction for match ${pred.match_number}:`, error);
-        errors.push(`Final match ${pred.match_number}`);
+        errors.push(formatSaveError(`Final match ${pred.match_number}`, error));
       }
     });
 
@@ -175,7 +174,7 @@ export const batchSaveAllAntePostPredictions = async (
 
     // If there were errors, log them but don't fail completely
     if (errors.length > 0) {
-      console.warn(`Some predictions failed to save: ${errors.join(', ')}`);
+      console.warn(`Some predictions failed to save: ${errors.join(' | ')}`);
     }
 
     if (errors.length === 0 && clearLocal) {
@@ -185,7 +184,10 @@ export const batchSaveAllAntePostPredictions = async (
     return {
       success: errors.length === 0,
       savedCount,
-      error: errors.length > 0 ? `Some predictions failed: ${errors.length} errors` : undefined,
+      error:
+        errors.length > 0
+          ? errors.slice(0, 3).join('\n') + (errors.length > 3 ? `\n…and ${errors.length - 3} more.` : '')
+          : undefined,
     };
   } catch (error) {
     console.error('Error in batch save:', error);

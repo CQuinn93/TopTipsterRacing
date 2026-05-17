@@ -39,6 +39,7 @@ import { wcHref } from '@/features/wc2026/utils/href';
 import { confirmDialog, showAlert } from '@/features/wc2026/utils/dialog';
 import { goBackFromAntePostStage } from '@/features/wc2026/utils/ante-post-nav';
 import { coerceScore, isCompleteScorePair } from '@/features/wc2026/utils/scores';
+import { ANTE_POST_WEB_MAX_WIDTH } from '@/features/wc2026/utils/ante-post-web-layout';
 import type { LocalGroupPrediction } from '@/features/wc2026/services/async-predictions';
 
 const ROUND_OF_32_BRACKET_KEY = `${WC2026_STORAGE_PREFIX}round_of_32_bracket`;
@@ -705,6 +706,9 @@ export default function AntePostSelectionsScreen() {
         headerSpacer: { width: 72 },
         content: {
           flex: 1,
+          ...(Platform.OS === 'web'
+            ? { alignItems: 'center' as const, width: '100%' }
+            : {}),
         },
         tabsContainer: {
           maxHeight: 56,
@@ -764,6 +768,10 @@ export default function AntePostSelectionsScreen() {
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: theme.colors.border,
           backgroundColor: theme.colors.background,
+          width: '100%',
+          ...(Platform.OS === 'web'
+            ? { maxWidth: ANTE_POST_WEB_MAX_WIDTH, alignSelf: 'center' as const }
+            : {}),
         },
         fixturesScrollView: {
           flex: 1,
@@ -772,6 +780,10 @@ export default function AntePostSelectionsScreen() {
           padding: theme.spacing.sm,
           paddingBottom: 100 + insets.bottom,
           gap: theme.spacing.sm,
+          width: '100%',
+          ...(Platform.OS === 'web'
+            ? { maxWidth: ANTE_POST_WEB_MAX_WIDTH, alignSelf: 'center' as const }
+            : {}),
         },
         loadingContainer: {
           flex: 1,

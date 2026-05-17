@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Alert } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
@@ -13,6 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { WcKnockoutResultsHeader } from '@/features/wc2026/components/WcKnockoutResultsHeader';
+import { useKnockoutResultsScreenStyles } from '@/features/wc2026/components/useKnockoutResultsScreenStyles';
 import { WC2026_STORAGE_PREFIX } from '@/features/wc2026/constants/storage-keys';
 import { AntePostGroupTable } from '@/features/wc2026/components/ante-post-group-table';
 import { type Match } from '@/features/wc2026/services/fixtures';
@@ -117,77 +117,7 @@ export default function RoundOf32ResultsScreen() {
     loadData();
   }, [params.groupStandings, params.advancingTeams, params.knockedOutTeams]);
 
-  const styles = useMemo(
-    () =>
-      StyleSheet.create({
-        container: {
-          flex: 1,
-          backgroundColor: theme.colors.background,
-        },
-        loadingContainer: {
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          gap: theme.spacing.md,
-          padding: theme.spacing.lg,
-        },
-        loadingText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          color: theme.colors.textSecondary,
-          textAlign: 'center',
-        },
-        scrollView: {
-          flex: 1,
-        },
-        scrollContent: {
-          padding: theme.spacing.md,
-          paddingBottom: 100,
-        },
-        sectionTitle: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.text,
-          fontSize: 22,
-          fontWeight: '700',
-          marginBottom: theme.spacing.sm,
-        },
-        description: {
-          fontFamily: theme.fontFamily.light,
-          color: theme.colors.textSecondary,
-          fontSize: 14,
-          lineHeight: 22,
-          marginBottom: theme.spacing.lg,
-        },
-        groupContainer: {
-          marginBottom: theme.spacing.lg,
-        },
-        groupTitle: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.text,
-          fontSize: 18,
-          fontWeight: '700',
-          marginBottom: theme.spacing.sm,
-        },
-        tableWrapper: {
-          position: 'relative',
-        },
-        continueButton: {
-          backgroundColor: theme.colors.accent,
-          borderRadius: theme.radius.md,
-          paddingVertical: theme.spacing.md,
-          paddingHorizontal: theme.spacing.lg,
-          alignItems: 'center',
-          marginTop: theme.spacing.lg,
-        },
-        continueButtonText: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.white,
-          fontSize: 17,
-          fontWeight: '700',
-        },
-      }),
-    [theme]
-  );
+  const styles = useKnockoutResultsScreenStyles();
 
   // Removed handleReorderThirdPlace - no longer needed with matrix-based assignments
 

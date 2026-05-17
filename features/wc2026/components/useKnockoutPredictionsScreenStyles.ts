@@ -1,18 +1,30 @@
 import { useMemo } from 'react';
-import { StyleSheet, useWindowDimensions } from 'react-native';
+import { Platform, StyleSheet, useWindowDimensions } from 'react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
+import {
+  ANTE_POST_WEB_MAX_WIDTH,
+  ANTE_POST_WEB_SINGLE_CARD_MAX,
+  useAntePostWebLayout,
+} from '@/features/wc2026/utils/ante-post-web-layout';
+
+type KnockoutScreenStyleOptions = {
+  /** One-match stages (Final, Bronze): centred card instead of multi-column grid. */
+  compactSingleMatch?: boolean;
+};
 
 /**
  * Shared layout/colors for WC knockout score prediction screens (R32 → Final).
  * Matches app ThemeContext (Laraz + green accent, light/dark surfaces).
  */
-export function useKnockoutPredictionsScreenStyles() {
+export function useKnockoutPredictionsScreenStyles(options?: KnockoutScreenStyleOptions) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
   const isSmall = width < 375;
+  const { isWeb, isWebGrid, gridCardWidth } = useAntePostWebLayout();
+  const useMatchGrid = isWebGrid && !options?.compactSingleMatch;
 
-  return useMemo(
+  const styles = useMemo(
     () =>
       StyleSheet.create({
         container: {
@@ -44,6 +56,13 @@ export function useKnockoutPredictionsScreenStyles() {
         scrollContent: {
           padding: isSmall ? theme.spacing.sm + 2 : theme.spacing.sm + 6,
           paddingBottom: isSmall ? 24 : theme.spacing.lg,
+          width: '100%',
+          ...(isWeb
+            ? {
+                maxWidth: ANTE_POST_WEB_MAX_WIDTH,
+                alignSelf: 'center',
+              }
+            : {}),
         },
         headerSection: {
           marginBottom: theme.spacing.sm + 4,
@@ -56,13 +75,37 @@ export function useKnockoutPredictionsScreenStyles() {
           textAlign: 'center',
           lineHeight: isSmall ? 17 : 19,
         },
+        matchesGrid: {
+          width: '100%',
+          ...(useMatchGrid
+            ? {
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                gap: theme.spacing.md,
+                justifyContent: 'flex-start',
+              }
+            : {
+                gap: theme.spacing.sm + 2,
+                ...(options?.compactSingleMatch && isWeb
+                  ? { alignItems: 'center' as const }
+                  : {}),
+              }),
+        },
         matchCard: {
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.md,
           padding: theme.spacing.sm,
-          marginBottom: theme.spacing.sm + 2,
           borderWidth: 2,
           borderColor: 'transparent',
+          width: useMatchGrid ? gridCardWidth : '100%',
+          marginBottom: useMatchGrid ? 0 : theme.spacing.sm + 2,
+          minWidth: useMatchGrid ? 300 : undefined,
+          ...(options?.compactSingleMatch && isWeb
+            ? {
+                maxWidth: ANTE_POST_WEB_SINGLE_CARD_MAX,
+                alignSelf: 'center',
+              }
+            : {}),
         },
         matchCardFilled: {
           borderColor: theme.colors.accent,
@@ -75,60 +118,8 @@ export function useKnockoutPredictionsScreenStyles() {
           marginBottom: theme.spacing.xs + 2,
           textAlign: 'center',
         },
-        matchContent: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+        matchScoreRowWrap: {
           marginBottom: theme.spacing.xs + 2,
-        },
-        teamSection: {
-          flex: 1,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: isSmall ? theme.spacing.xs + 4 : theme.spacing.sm,
-        },
-        teamInfo: {
-          flex: 1,
-          alignItems: 'center',
-          gap: 4,
-        },
-        teamName: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.text,
-          fontSize: isSmall ? 11 : 13,
-          fontWeight: '600',
-          textAlign: 'center',
-          maxWidth: isSmall ? 84 : 96,
-        },
-        teamSource: {
-          fontFamily: theme.fontFamily.light,
-          color: theme.colors.textMuted,
-          fontSize: isSmall ? 10 : 11,
-          textAlign: 'center',
-          maxWidth: isSmall ? 90 : 100,
-        },
-        vsText: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.textMuted,
-          fontSize: isSmall ? 13 : 16,
-          fontWeight: '700',
-          marginHorizontal: isSmall ? 4 : theme.spacing.sm,
-        },
-        scoreInput: {
-          width: isSmall ? 46 : 54,
-          height: isSmall ? 40 : 46,
-          borderRadius: theme.radius.md,
-          borderWidth: 2,
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.background,
-          fontSize: isSmall ? 18 : 22,
-          fontWeight: '700',
-          color: theme.colors.text,
-          fontFamily: theme.fontFamily.regular,
-        },
-        scoreInputFilled: {
-          borderColor: theme.colors.accent,
-          backgroundColor: theme.colors.accentMuted,
         },
         advanceSection: {
           marginTop: theme.spacing.sm + 2,
@@ -204,6 +195,13 @@ export function useKnockoutPredictionsScreenStyles() {
           borderBottomColor: theme.colors.border,
           paddingVertical: theme.spacing.sm + 4,
           paddingHorizontal: theme.spacing.sm,
+          width: '100%',
+          ...(isWeb
+            ? {
+                maxWidth: ANTE_POST_WEB_MAX_WIDTH,
+                alignSelf: 'center',
+              }
+            : {}),
         },
         winnersHeaderTitle: {
           fontFamily: theme.fontFamily.regular,
@@ -241,6 +239,7 @@ export function useKnockoutPredictionsScreenStyles() {
           paddingHorizontal: theme.spacing.lg,
           alignItems: 'center',
           marginTop: theme.spacing.md,
+          width: useMatchGrid ? '100%' : undefined,
         },
         saveButtonDisabled: {
           opacity: 0.45,
@@ -256,9 +255,9 @@ export function useKnockoutPredictionsScreenStyles() {
           padding: theme.spacing.md,
           borderRadius: theme.radius.md,
           marginBottom: theme.spacing.md,
-          marginHorizontal: theme.spacing.md,
           borderLeftWidth: 4,
           borderLeftColor: theme.colors.accent,
+          width: '100%',
         },
         lockedMessageText: {
           fontFamily: theme.fontFamily.regular,
@@ -278,6 +277,7 @@ export function useKnockoutPredictionsScreenStyles() {
           alignItems: 'center',
           marginTop: theme.spacing.sm + 4,
           marginBottom: theme.spacing.lg,
+          width: useMatchGrid ? '100%' : undefined,
         },
         continueButtonDisabled: {
           opacity: 0.35,
@@ -289,8 +289,10 @@ export function useKnockoutPredictionsScreenStyles() {
           fontWeight: '700',
         },
       }),
-    [theme, isSmall]
+    [theme, isSmall, isWeb, isWebGrid, useMatchGrid, gridCardWidth, options?.compactSingleMatch]
   );
+
+  return { styles, useMatchGrid };
 }
 
 /** Extra chrome for the single-match Final screen (trophy block, gold border, submit row). */
@@ -298,6 +300,7 @@ export function useFinalPredictionExtrasStyles() {
   const theme = useTheme();
   const { width } = useWindowDimensions();
   const isSmall = width < 375;
+  const { isWeb } = useAntePostWebLayout();
 
   return useMemo(
     () =>
@@ -305,8 +308,13 @@ export function useFinalPredictionExtrasStyles() {
         matchCardWrapper: {
           width: '100%',
           marginBottom: theme.spacing.md,
-          /** Stretch the gold card to full width; `center` shrink-wraps the card and breaks nested flex rows. */
           alignItems: 'stretch',
+          ...(isWeb
+            ? {
+                maxWidth: ANTE_POST_WEB_SINGLE_CARD_MAX,
+                alignSelf: 'center',
+              }
+            : {}),
         },
         finaleText: {
           fontFamily: theme.fontFamily.regular,
@@ -354,6 +362,13 @@ export function useFinalPredictionExtrasStyles() {
         buttonColumn: {
           gap: theme.spacing.sm + 4,
           marginTop: theme.spacing.lg,
+          width: '100%',
+          ...(isWeb
+            ? {
+                maxWidth: ANTE_POST_WEB_SINGLE_CARD_MAX,
+                alignSelf: 'center',
+              }
+            : {}),
         },
         submitCTA: {
           backgroundColor: theme.colors.accent,
@@ -385,6 +400,6 @@ export function useFinalPredictionExtrasStyles() {
           textAlign: 'center',
         },
       }),
-    [theme, isSmall]
+    [theme, isSmall, isWeb]
   );
 }

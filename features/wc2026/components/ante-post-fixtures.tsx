@@ -7,7 +7,6 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  type TextStyle,
 } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 import { type Match } from '@/features/wc2026/services/fixtures';
@@ -15,15 +14,10 @@ import { type Prediction } from '@/features/wc2026/services/predictions';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
 import { coerceScore } from '@/features/wc2026/utils/scores';
 import { showAntePostFilledHighlight } from '@/features/wc2026/utils/knockout-ui';
-
-/** Inner field only — border lives on `scoreInputShell` for consistent layout. */
-const scoreFieldPlatformStyle = Platform.select<TextStyle | undefined>({
-  android: { textAlignVertical: 'center', includeFontPadding: false },
-  ios: {},
-  // RN TextStyle typings omit web-only outline props; cast keeps focus ring off on web.
-  web: { outlineStyle: 'none' } as unknown as TextStyle,
-  default: {},
-});
+import {
+  antePostScoreFieldPlatformStyle,
+  useAntePostWebLayout,
+} from '@/features/wc2026/utils/ante-post-web-layout';
 
 /** Common scorelines — tap to fill both boxes for this match. */
 const QUICK_SCORE_PRESETS: ReadonlyArray<{ label: string; home: number; away: number }> = [
@@ -52,11 +46,15 @@ export function AntePostFixtures({
   scrollViewRef,
 }: AntePostFixturesProps) {
   const theme = useTheme();
+  const { isWeb, contentMaxWidth } = useAntePostWebLayout();
+
   const layoutStyles = useMemo(
     () =>
       StyleSheet.create({
         container: {
           gap: theme.spacing.sm,
+          width: '100%',
+          ...(isWeb ? { maxWidth: contentMaxWidth, alignSelf: 'center' as const } : {}),
         },
         groupCard: {
           backgroundColor: theme.colors.surface,
@@ -64,6 +62,7 @@ export function AntePostFixtures({
           overflow: 'hidden',
           borderWidth: 1,
           borderColor: theme.colors.border,
+          width: '100%',
         },
         cardHeader: {
           backgroundColor: theme.colors.surfaceElevated,
@@ -83,7 +82,7 @@ export function AntePostFixtures({
           gap: 0,
         },
       }),
-    [theme]
+    [theme, isWeb, contentMaxWidth]
   );
 
   return (
@@ -114,7 +113,6 @@ export function AntePostFixtures({
 
 interface FixtureInputProps {
   match: Match;
-  /** 0-based order within the current group tab (for labelling if `match_number` is missing). */
   matchIndexInGroup: number;
   prediction?: Prediction;
   onScoreChange: (matchId: string, homeScore: number | null, awayScore: number | null) => void;
@@ -162,12 +160,14 @@ function FixtureInput({
           width: '100%',
           alignItems: 'stretch',
         },
-        /** Symmetric grid: home block | score | vs | score | away block — keeps inputs on one vertical line. */
         matchContent: {
           flexDirection: 'row',
           alignItems: 'center',
+          justifyContent: 'center',
           width: '100%',
           minHeight: 56,
+          maxWidth: 520,
+          alignSelf: 'center',
         },
         sideColumn: {
           flex: 1,
@@ -223,6 +223,7 @@ function FixtureInput({
           borderColor: theme.colors.border,
           backgroundColor: theme.colors.background,
           justifyContent: 'center',
+          alignItems: 'center',
           overflow: 'hidden',
         },
         scoreInputShellFilled: {
@@ -230,7 +231,6 @@ function FixtureInput({
           backgroundColor: theme.colors.accentMuted,
         },
         scoreInputField: {
-          flex: 1,
           width: '100%',
           height: 40,
           margin: 0,
@@ -244,7 +244,7 @@ function FixtureInput({
           textAlign: 'center',
           fontFamily: theme.fontFamily.regular,
           ...(Platform.OS === 'ios' ? { paddingTop: 2 } : {}),
-          ...(Platform.OS === 'web' ? { lineHeight: 22 } : {}),
+          ...(Platform.OS === 'web' ? { lineHeight: 40 } : {}),
         },
         quickPickBlock: {
           marginTop: theme.spacing.sm,
@@ -382,7 +382,7 @@ function FixtureInput({
 
             <View style={[styles.scoreInputShell, highlightFilled && styles.scoreInputShellFilled]}>
               <TextInput
-                style={[styles.scoreInputField, scoreFieldPlatformStyle]}
+                style={[styles.scoreInputField, antePostScoreFieldPlatformStyle]}
                 value={homeScore}
                 onChangeText={handleHomeScoreChange}
                 placeholder="0"
@@ -399,7 +399,7 @@ function FixtureInput({
 
             <View style={[styles.scoreInputShell, highlightFilled && styles.scoreInputShellFilled]}>
               <TextInput
-                style={[styles.scoreInputField, scoreFieldPlatformStyle]}
+                style={[styles.scoreInputField, antePostScoreFieldPlatformStyle]}
                 value={awayScore}
                 onChangeText={handleAwayScoreChange}
                 placeholder="0"
@@ -435,37 +435,39 @@ function FixtureInput({
           </View>
         </View>
 
-      {!disabled && (
-        <View style={styles.quickPickBlock}>
-          <Text style={styles.quickPickLabel}>Quick scores for this match</Text>
-          <Text style={styles.quickPickHint}>
-            You can also tap the boxes above and type any score you want.
-          </Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={{ width: '100%' }}
-            contentContainerStyle={styles.quickPickScrollContent}
-          >
-            {QUICK_SCORE_PRESETS.map((p) => {
-              const isActive =
-                highlightFilled && hasNumericPair && curHome === p.home && curAway === p.away;
-              return (
-                <TouchableOpacity
-                  key={`${p.home}-${p.away}`}
-                  style={[styles.quickPickChip, isActive && styles.quickPickChipActive]}
-                  onPress={() => onScoreChange(match.id, p.home, p.away)}
-                  activeOpacity={0.75}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Set score ${p.label}`}
-                >
-                  <Text style={[styles.quickPickChipText, isActive && styles.quickPickChipTextActive]}>{p.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
+        {!disabled && (
+          <View style={styles.quickPickBlock}>
+            <Text style={styles.quickPickLabel}>Quick scores for this match</Text>
+            <Text style={styles.quickPickHint}>
+              You can also tap the boxes above and type any score you want.
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ width: '100%' }}
+              contentContainerStyle={styles.quickPickScrollContent}
+            >
+              {QUICK_SCORE_PRESETS.map((p) => {
+                const isActive =
+                  highlightFilled && hasNumericPair && curHome === p.home && curAway === p.away;
+                return (
+                  <TouchableOpacity
+                    key={`${p.home}-${p.away}`}
+                    style={[styles.quickPickChip, isActive && styles.quickPickChipActive]}
+                    onPress={() => onScoreChange(match.id, p.home, p.away)}
+                    activeOpacity={0.75}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Set score ${p.label}`}
+                  >
+                    <Text style={[styles.quickPickChipText, isActive && styles.quickPickChipTextActive]}>
+                      {p.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
       </View>
       {!isLast ? <View style={styles.matchDivider} /> : null}
     </View>

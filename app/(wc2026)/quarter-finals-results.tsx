@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   View,
   Text,
   TouchableOpacity,
-  StyleSheet,
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
@@ -12,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { WcKnockoutResultsHeader } from '@/features/wc2026/components/WcKnockoutResultsHeader';
+import { useKnockoutResultsScreenStyles } from '@/features/wc2026/components/useKnockoutResultsScreenStyles';
 import { WC2026_STORAGE_PREFIX } from '@/features/wc2026/constants/storage-keys';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
 import { type KnockoutMatch } from '@/features/wc2026/services/knockout-bracket';
@@ -88,116 +88,7 @@ export default function QuarterFinalsResultsScreen() {
     loadData();
   }, []);
 
-  const styles = useMemo(
-    () =>
-      StyleSheet.create({
-        container: {
-          flex: 1,
-          backgroundColor: theme.colors.background,
-        },
-        loadingContainer: {
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          gap: theme.spacing.sm,
-          padding: theme.spacing.lg,
-        },
-        loadingText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          color: theme.colors.textSecondary,
-        },
-        scrollView: { flex: 1 },
-        scrollContent: {
-          padding: theme.spacing.md,
-          paddingBottom: theme.spacing.xl,
-        },
-        headerSection: {
-          marginBottom: theme.spacing.lg,
-        },
-        description: {
-          fontFamily: theme.fontFamily.light,
-          color: theme.colors.textSecondary,
-          fontSize: 14,
-          lineHeight: 22,
-          textAlign: 'center',
-          marginBottom: theme.spacing.sm,
-        },
-        section: {
-          marginBottom: theme.spacing.xl,
-        },
-        sectionHeader: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.spacing.sm,
-          marginBottom: theme.spacing.md,
-        },
-        sectionHeaderIndicator: {
-          width: 4,
-          height: 24,
-          backgroundColor: theme.colors.accent,
-          borderRadius: theme.radius.sm,
-        },
-        sectionHeaderIndicatorRed: {
-          backgroundColor: theme.colors.error,
-        },
-        sectionTitle: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.text,
-          fontSize: 18,
-          fontWeight: '700',
-          flex: 1,
-        },
-        teamsGrid: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: theme.spacing.sm,
-          justifyContent: 'flex-start',
-        },
-        teamBadge: {
-          width: '30%',
-          minWidth: 100,
-          alignItems: 'center',
-          padding: theme.spacing.sm,
-          borderRadius: theme.radius.md,
-          backgroundColor: theme.colors.accentMuted,
-          borderWidth: 1,
-          borderColor: theme.colors.accent,
-        },
-        teamBadgeKnockedOut: {
-          backgroundColor: `${theme.colors.error}18`,
-          borderColor: theme.colors.error,
-          opacity: 0.85,
-        },
-        teamBadgeName: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.text,
-          fontSize: 12,
-          fontWeight: '600',
-          textAlign: 'center',
-          marginTop: theme.spacing.sm,
-        },
-        teamBadgeNameKnockedOut: {
-          opacity: 0.9,
-        },
-        continueButton: {
-          backgroundColor: theme.colors.accent,
-          borderRadius: theme.radius.md,
-          paddingVertical: theme.spacing.md,
-          paddingHorizontal: theme.spacing.lg,
-          alignItems: 'center',
-          marginTop: theme.spacing.lg,
-          marginBottom: theme.spacing.lg,
-        },
-        continueButtonText: {
-          fontFamily: theme.fontFamily.regular,
-          color: theme.colors.white,
-          fontSize: 17,
-          fontWeight: '700',
-        },
-      }),
-    [theme]
-  );
+  const styles = useKnockoutResultsScreenStyles();
 
   const handleContinue = () => {
     // Generate Quarter Finals bracket and navigate to predictions
@@ -276,7 +167,7 @@ export default function QuarterFinalsResultsScreen() {
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <View style={styles.sectionHeaderIndicator} />
-                  <Text style={styles.sectionTitle}>Teams Advancing to Quarter Finals</Text>
+                  <Text style={styles.sectionHeaderTitle}>Teams Advancing to Quarter Finals</Text>
                 </View>
                 <View style={styles.teamsGrid}>
                   {advancingTeams.map((team) => (
@@ -300,7 +191,7 @@ export default function QuarterFinalsResultsScreen() {
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <View style={[styles.sectionHeaderIndicator, styles.sectionHeaderIndicatorRed]} />
-                  <Text style={styles.sectionTitle}>Teams Knocked Out</Text>
+                  <Text style={styles.sectionHeaderTitle}>Teams Knocked Out</Text>
                 </View>
                 <View style={styles.teamsGrid}>
                   {knockedOutTeams.map((team) => (
