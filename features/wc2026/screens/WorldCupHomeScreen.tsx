@@ -20,15 +20,10 @@ import { useWcShell } from '@/contexts/WcShellContext';
 import { getUpcomingFixtures, type Match } from '@/features/wc2026/services/fixtures';
 import { getSharedProfile } from '@/features/wc2026/services/profile';
 import { wcHref } from '@/features/wc2026/utils/href';
-import { openAntePostHubFromHome } from '@/features/wc2026/utils/ante-post-nav';
-import { getAntePostLockedStatus } from '@/features/wc2026/services/async-predictions';
 import { getMatchDayTipsUnlocked } from '@/features/wc2026/services/tournament-gates';
 import { getUserPredictions, type Prediction } from '@/features/wc2026/services/predictions';
 import { CountryFlag } from '@/features/wc2026/components/CountryFlag';
-import {
-  summarizeAntePostPredictions,
-  formatWcPoints,
-} from '@/features/wc2026/utils/prediction-points-summary';
+import { formatWcPoints } from '@/features/wc2026/utils/prediction-points-summary';
 
 function countryCodeFromTeam(countryCode: string | undefined, countryName: string): string {
   if (countryCode && countryCode.length >= 2) return countryCode;
@@ -47,11 +42,8 @@ export function WorldCupHomeScreen() {
   const [predsLoading, setPredsLoading] = useState(false);
   const [username, setUsername] = useState('there');
   const [upcomingFixtures, setUpcomingFixtures] = useState<Match[]>([]);
-  const [antePostLocked, setAntePostLocked] = useState(false);
   const [matchDayTipsUnlocked, setMatchDayTipsUnlocked] = useState(false);
   const [predictions, setPredictions] = useState<Prediction[]>([]);
-  const [selectionKind, setSelectionKind] = useState<'ante_post' | 'match_day'>('ante_post');
-  const [pointsKind, setPointsKind] = useState<'ante_post' | 'match_day'>('ante_post');
 
   useEffect(() => {
     let cancelled = false;
@@ -64,8 +56,6 @@ export function WorldCupHomeScreen() {
           const profile = await getSharedProfile(userId);
           if (!cancelled && profile?.username) setUsername(profile.username);
         }
-        const locked = await getAntePostLockedStatus().catch(() => false);
-        if (!cancelled) setAntePostLocked(locked);
         const md = await getMatchDayTipsUnlocked().catch(() => false);
         if (!cancelled) setMatchDayTipsUnlocked(md);
         const fixtures = await getUpcomingFixtures(8);
@@ -97,19 +87,12 @@ export function WorldCupHomeScreen() {
 
   const nextFixture = upcomingFixtures[0] ?? null;
 
-  const antePreds = useMemo(() => predictions.filter((p) => p.prediction_type === 'ante_post'), [predictions]);
   const livePreds = useMemo(() => predictions.filter((p) => p.prediction_type === 'live'), [predictions]);
 
-  const anteTotalPoints = useMemo(
-    () => antePreds.reduce((s, p) => s + (p.points_awarded ?? 0), 0),
-    [antePreds]
-  );
   const matchDayTotalPoints = useMemo(
     () => livePreds.reduce((s, p) => s + (p.points_awarded ?? 0), 0),
     [livePreds]
   );
-
-  const anteTierSummary = useMemo(() => summarizeAntePostPredictions(antePreds), [antePreds]);
 
   const matchDayScoredCount = useMemo(
     () => livePreds.filter((p) => (p.points_awarded ?? 0) > 0).length,
@@ -671,24 +654,6 @@ export function WorldCupHomeScreen() {
         </View>
 
         <Text style={[styles.sectionTitle, styles.sectionTitleFirst]}>Your selections</Text>
-        <View style={styles.selTabsRow}>
-          <TouchableOpacity
-            style={[styles.selTab, selectionKind === 'ante_post' && styles.selTabActive]}
-            onPress={() => setSelectionKind('ante_post')}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.selTabText, selectionKind === 'ante_post' && styles.selTabTextActive]}>Ante post</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.selTab, selectionKind === 'match_day' && styles.selTabActive]}
-            onPress={() => setSelectionKind('match_day')}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.selTabText, selectionKind === 'match_day' && styles.selTabTextActive]}>
-              Match Day picks
-            </Text>
-          </TouchableOpacity>
-        </View>
 
         <View style={styles.compDropdownTrigger}>
           <View>
@@ -698,25 +663,7 @@ export function WorldCupHomeScreen() {
             <Text style={styles.compMetaAbove}>11 Jun – 19 Jul 2026</Text>
           </View>
           <View style={styles.modeDivider}>
-            {selectionKind === 'ante_post' ? (
-              <TouchableOpacity
-                style={styles.modeRow}
-                activeOpacity={0.8}
-                onPress={openAntePostHubFromHome}
-              >
-                <View style={styles.modeLeft}>
-                  <Ionicons name="create-outline" size={18} color={theme.colors.accent} />
-                  <View style={styles.modeText}>
-                    <Text style={styles.modeTitle} numberOfLines={1}>
-                      Ante post selections
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.statusPill}>
-                  <Text style={styles.statusText}>{antePostLocked ? 'LOCKED' : 'OPEN'}</Text>
-                </View>
-              </TouchableOpacity>
-            ) : matchDayTipsUnlocked ? (
+            {matchDayTipsUnlocked ? (
               <TouchableOpacity
                 style={styles.modeRow}
                 activeOpacity={0.8}
@@ -753,58 +700,12 @@ export function WorldCupHomeScreen() {
         </View>
 
         <Text style={styles.sectionTitle}>Points</Text>
-        <View style={styles.selTabsRow}>
-          <TouchableOpacity
-            style={[styles.selTab, pointsKind === 'ante_post' && styles.selTabActive]}
-            onPress={() => setPointsKind('ante_post')}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.selTabText, pointsKind === 'ante_post' && styles.selTabTextActive]}>Ante post</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.selTab, pointsKind === 'match_day' && styles.selTabActive]}
-            onPress={() => setPointsKind('match_day')}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.selTabText, pointsKind === 'match_day' && styles.selTabTextActive]}>
-              Match Day picks
-            </Text>
-          </TouchableOpacity>
-        </View>
 
         <View style={styles.pointsCard}>
           {predsLoading ? (
             <View style={styles.pointsLoading}>
               <ActivityIndicator color={theme.colors.accent} />
             </View>
-          ) : pointsKind === 'ante_post' ? (
-            <>
-              <View style={styles.tierBoxesRow}>
-                <View style={[styles.tierBox, styles.tierBoxResult]}>
-                  <Text style={[styles.tierCount, styles.tierCountResult]}>{anteTierSummary.result}</Text>
-                  <Text style={styles.tierLabel}>Result</Text>
-                  <Text style={styles.tierSub}>matches</Text>
-                </View>
-                <View style={[styles.tierBox, styles.tierBoxClose]}>
-                  <Text style={[styles.tierCount, styles.tierCountClose]}>{anteTierSummary.close}</Text>
-                  <Text style={styles.tierLabel}>Close</Text>
-                  <Text style={styles.tierSub}>matches</Text>
-                </View>
-                <View style={[styles.tierBox, styles.tierBoxExact]}>
-                  <Text style={[styles.tierCount, styles.tierCountExact]}>{anteTierSummary.exact}</Text>
-                  <Text style={styles.tierLabel}>Exact</Text>
-                  <Text style={styles.tierSub}>matches</Text>
-                </View>
-                <View style={[styles.tierBox, styles.tierBoxTotal]}>
-                  <Text style={[styles.tierCount, styles.tierCountTotal]}>
-                    {formatWcPoints(anteTierSummary.totalPoints)}
-                  </Text>
-                  <Text style={styles.tierLabel}>Total</Text>
-                  <Text style={styles.tierSub}>pts</Text>
-                </View>
-              </View>
-              <Text style={styles.pointsFootnote}>Full breakdown on the leaderboard.</Text>
-            </>
           ) : (
             <>
               <View style={styles.tierBoxesRow}>

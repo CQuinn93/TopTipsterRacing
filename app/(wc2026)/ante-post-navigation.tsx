@@ -1,5 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { router, useFocusEffect } from 'expo-router';
+
+import { AntePostRouteGuard } from '@/features/wc2026/components/AntePostRouteGuard';
 import {
   View,
   Text,
@@ -468,7 +470,9 @@ export default function AntePostNavigationScreen() {
   };
 
   return (
-    <View style={styles.root}>
+    <>
+      <AntePostRouteGuard />
+      <View style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity style={styles.back} onPress={goBackFromAntePostHub}>
           <Ionicons name="chevron-back" size={22} color={theme.colors.accent} />
@@ -540,5 +544,6 @@ export default function AntePostNavigationScreen() {
         </ScrollView>
       )}
     </View>
+    </>
   );
 }

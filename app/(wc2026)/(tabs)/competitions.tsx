@@ -253,7 +253,7 @@ export default function WorldCupCompetitionsTab() {
           <Text style={styles.title}>Mini-leagues</Text>
           <Text style={styles.body}>
             Join with an access code from your organiser. Your World Cup picks are the same in every league; each
-            mini-league has its own leaderboard; tap a player to open their picks in a drawer (ante post and match day tabs).
+            mini-league has its own leaderboard; tap a player to open their match day picks in a drawer.
           </Text>
           <TextInput
             style={styles.input}

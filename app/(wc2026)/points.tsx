@@ -154,46 +154,15 @@ export default function WorldCupPointsScreen() {
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.intro}>
-          On a mini-league leaderboard, tap a player to open their drawer and switch between ante post and match day picks.
-          You earn only one ante-post tier per match (never 1 + 1.5 together).
+          On a mini-league leaderboard, tap a player to open their match day picks. Points are awarded per match after full
+          time.
         </Text>
-
-        <Text style={styles.sectionTitle}>Ante post</Text>
-        <View style={styles.card}>
-          <View style={styles.tierRow}>
-            <View style={styles.tierBox}>
-              <Text style={styles.tierPoints}>1</Text>
-              <Text style={styles.tierLabel}>Result</Text>
-            </View>
-            <View style={styles.tierBox}>
-              <Text style={styles.tierPoints}>1.5</Text>
-              <Text style={styles.tierLabel}>Close</Text>
-            </View>
-            <View style={styles.tierBox}>
-              <Text style={styles.tierPoints}>3</Text>
-              <Text style={styles.tierLabel}>Exact</Text>
-            </View>
-          </View>
-          <Text style={styles.desc}>
-            <Text style={{ fontWeight: '700' as const }}>Result (1 pt):</Text> you predicted the right outcome only — home win, draw, or away
-            win — but not an exact scoreline and not a “close” total-goals pick.
-          </Text>
-          <Text style={styles.desc}>
-            <Text style={{ fontWeight: '700' as const }}>Close (1.5 pts):</Text> correct outcome and your predicted total goals (home + away)
-            is exactly one goal away from the actual total in the match.
-          </Text>
-          <Text style={styles.desc}>
-            <Text style={{ fontWeight: '700' as const }}>Exact (3 pts):</Text> both home and away goals match the final score.
-          </Text>
-          <Text style={styles.note}>
-            Only one of these applies per match — whichever tier you qualify for (exact beats close beats result-only).
-          </Text>
-        </View>
 
         <Text style={styles.sectionTitle}>Match day picks</Text>
         <View style={styles.card}>
           <Text style={[styles.intro, { marginBottom: theme.spacing.sm }]}>
-            After 90 minutes (plus stoppage): result (1X2), total goals, and both teams to score. Each line can earn 1 point on its own.
+            After 90 minutes (plus stoppage): result (1X2), total goals, and both teams to score. Points add up per line; get all
+            three right for a bonus.
           </Text>
           <View style={styles.tierRow}>
             <View style={styles.tierBox}>
@@ -201,7 +170,7 @@ export default function WorldCupPointsScreen() {
               <Text style={styles.tierLabel}>1X2</Text>
             </View>
             <View style={styles.tierBox}>
-              <Text style={styles.tierPoints}>1</Text>
+              <Text style={styles.tierPoints}>2</Text>
               <Text style={styles.tierLabel}>Goals</Text>
             </View>
             <View style={styles.tierBox}>
@@ -210,12 +179,13 @@ export default function WorldCupPointsScreen() {
             </View>
           </View>
           <View style={styles.bonusBox}>
-            <Text style={styles.bonusPoints}>5</Text>
-            <Text style={styles.bonusLabel}>All three correct</Text>
+            <Text style={styles.bonusPoints}>+1</Text>
+            <Text style={styles.bonusLabel}>All three correct (5 max)</Text>
           </View>
           <Text style={styles.desc}>
-            If all three tips are right on the same match, you score <Text style={{ fontWeight: '700' as const }}>5 points</Text> for that
-            match instead of only adding three separate 1s.
+            Correct lines score <Text style={{ fontWeight: '700' as const }}>1 + 2 + 1</Text> when you get 1X2, total goals, and BTTS
+            right. If all three are correct on the same match, you also get a <Text style={{ fontWeight: '700' as const }}>+1 bonus</Text>{' '}
+            (5 points maximum for that match).
           </Text>
           <Text style={styles.note}>Extra time and penalties do not count unless we say otherwise for a specific market.</Text>
         </View>

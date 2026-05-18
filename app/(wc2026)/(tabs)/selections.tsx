@@ -242,26 +242,9 @@ export default function WorldCupSelectionsTab() {
       <View style={styles.makePicksSection}>
         <Text style={styles.makePicksSectionTitle}>Make your predictions</Text>
         <Text style={styles.makePicksSectionSubtitle}>
-          Open a hub to add or review picks. The same predictions count in every mini-league you join.
+          Make match day picks for each fixture. The same predictions count in every mini-league you join.
         </Text>
         <View style={styles.raceCardsList}>
-          <TouchableOpacity
-            style={[styles.raceCard, styles.raceCardOpen, styles.raceCardActive]}
-            onPress={() => router.push(wcHref('/(wc2026)/ante-post-navigation'))}
-            activeOpacity={0.8}
-          >
-            <View style={styles.raceCardRow}>
-              <View style={styles.raceCardLeft}>
-                <Text style={styles.raceCardTitle}>Ante post & knockout</Text>
-                <Text style={styles.raceCardMeta}>Group stage through final — brackets and scorelines</Text>
-                <Text style={styles.raceCardStatus}>Continue or review your stages</Text>
-              </View>
-              <View style={styles.raceCardRight}>
-                <Ionicons name="chevron-forward" size={22} color={theme.colors.accent} />
-              </View>
-            </View>
-          </TouchableOpacity>
-
           {gatesLoading ? (
             <View style={[styles.raceCard, styles.raceCardOpen]}>
               <ActivityIndicator color={theme.colors.accent} />

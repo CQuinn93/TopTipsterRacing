@@ -158,7 +158,7 @@ async function main() {
       m.away_score
     );
     console.log(
-      `  user ${p.user_id.slice(0, 8)}… m${p.match_number}: ${br.points} pts (1X2:${br.correct1x2} goals:${br.correctGoals} btts:${br.correctBtts})`
+      `  user ${p.user_id.slice(0, 8)}… m${p.match_number}: ${br.points} pts (base ${br.basePoints}+bonus ${br.bonusPoints}; 1X2:${br.correct1x2} goals:${br.correctGoals} btts:${br.correctBtts})`
     );
   }
 

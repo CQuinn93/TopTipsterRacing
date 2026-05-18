@@ -42,18 +42,16 @@ export default function WorldCupRulesScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <Text style={styles.title}>Rules</Text>
       <Text style={styles.rule}>
-        Make predictions for each match. Your Group Stage predictions are used to calculate final standings and generate the Round of 32
-        bracket.
+        Make match day picks for each open fixture: the result (1X2), total goals, and both teams to score. You can edit picks
+        until kick-off unless we say otherwise.
       </Text>
       <Text style={styles.rule}>
-        Knockout rounds (Round of 32 → Round of 16 → Quarter Finals → Semi Finals → Bronze Final) are generated from your previous-round
-        predictions.
+        Join a mini-league with an access code from your organiser. Your picks are the same in every league; each mini-league
+        has its own leaderboard ranked on match day points.
       </Text>
       <Text style={styles.rule}>
-        Once you submit your final ante post selections, they are locked and cannot be edited. You can still view your picks and results.
-      </Text>
-      <Text style={styles.rule}>
-        Scoring for ante post and match day picks (including per-player drawers on mini-league leaderboards) is described on the Points System screen.
+        Scoring for match day picks (including per-player drawers on mini-league leaderboards) is described on the Points
+        System screen.
       </Text>
       <TouchableOpacity onPress={() => router.push(wcHref('/(wc2026)/points') as any)} activeOpacity={0.7}>
         <Text style={styles.link}>Open Points System</Text>
@@ -61,4 +59,3 @@ export default function WorldCupRulesScreen() {
     </ScrollView>
   );
 }
-

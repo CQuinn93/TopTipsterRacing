@@ -19,6 +19,7 @@ import { WC2026_STORAGE_PREFIX } from '@/features/wc2026/constants/storage-keys'
 import { getFixtures, type Match } from '@/features/wc2026/services/fixtures';
 import { type Prediction } from '@/features/wc2026/services/predictions';
 import { supabase } from '@/lib/supabase';
+import { AntePostRouteGuard } from '@/features/wc2026/components/AntePostRouteGuard';
 import { AntePostGroupTable } from '@/features/wc2026/components/ante-post-group-table';
 import { AntePostFixtures } from '@/features/wc2026/components/ante-post-fixtures';
 import { getGroupPredictions, saveGroupPredictions, getAntePostLockedStatus } from '@/features/wc2026/services/async-predictions';
@@ -906,7 +907,9 @@ export default function AntePostSelectionsScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <>
+      <AntePostRouteGuard />
+      <View style={styles.container}>
       <View style={[styles.headerRow, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity style={styles.back} onPress={handleBackPress}>
           <Ionicons name="chevron-back" size={22} color={theme.colors.accent} />
@@ -1084,5 +1087,6 @@ export default function AntePostSelectionsScreen() {
         </View>
       ) : null}
     </View>
+    </>
   );
 }

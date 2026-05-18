@@ -28,8 +28,6 @@ import {
 } from '@/features/wc2026/services/football-leaderboard';
 import { buildKnockoutTeamsByMatchNumber } from '@/features/wc2026/services/knockout-teams-from-predictions';
 
-type LeaderTab = 'ante_post' | 'live';
-
 function firstParam(v: string | string[] | undefined): string {
   if (v == null) return '';
   const raw = Array.isArray(v) ? v[0] : v;
@@ -242,7 +240,6 @@ export default function WcFootballLeaderboardScreen() {
     {}
   );
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
-  const [drawerTab, setDrawerTab] = useState<LeaderTab>('ante_post');
   const [openStages, setOpenStages] = useState<Record<string, boolean>>({});
   /** Deduplicate overlapping fetches for the same user (e.g. prefetch + drawer). */
   const fetchInflightRef = useRef<Map<string, Promise<void>>>(new Map());
@@ -349,7 +346,6 @@ export default function WcFootballLeaderboardScreen() {
 
   useEffect(() => {
     setOpenStages({});
-    if (expandedUserId) setDrawerTab('ante_post');
   }, [expandedUserId]);
 
   useEffect(() => {
@@ -378,12 +374,12 @@ export default function WcFootballLeaderboardScreen() {
 
   const rankedCombined = useMemo(() => {
     if (lbRows.length === 0) return [];
-    const sorted = [...lbRows].sort((a, b) => b.total_points - a.total_points || a.user_id.localeCompare(b.user_id));
+    const sorted = [...lbRows].sort((a, b) => b.live_points - a.live_points || a.user_id.localeCompare(b.user_id));
     const out: { row: WcFootballLeaderboardRow; rank: number }[] = [];
     for (let i = 0; i < sorted.length; i++) {
       let rank = 1;
       if (i > 0) {
-        if (sorted[i].total_points < sorted[i - 1].total_points) rank = i + 1;
+        if (sorted[i].live_points < sorted[i - 1].live_points) rank = i + 1;
         else rank = out[i - 1].rank;
       }
       out.push({ row: sorted[i], rank });
@@ -607,9 +603,9 @@ export default function WcFootballLeaderboardScreen() {
       ) : (
         <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <Text style={styles.intro}>
-            Rankings use combined points. Tap a player to load their picks once (cached for this competition until you
-            leave). Inside the drawer, switch between ante post and match day; expand each stage to see flags, result, your
-            prediction, and Win or Loss when the match is finished and points are in.
+            Rankings use match day pick points. Tap a player to load their picks once (cached for this competition until you
+            leave). Expand each stage to see flags, result, your prediction, and Win or Loss when the match is finished and
+            points are in.
           </Text>
           {loadError ? (
             <Text style={[styles.intro, { color: theme.colors.error }]}>
@@ -629,8 +625,7 @@ export default function WcFootballLeaderboardScreen() {
                 const expanded = expandedUserId === uid;
                 const cacheLoaded = Object.prototype.hasOwnProperty.call(predCache, uid);
                 const list = predCache[uid] ?? [];
-                const breakdownRows =
-                  drawerTab === 'ante_post' ? list.filter((p) => p.prediction_type === 'ante_post') : list.filter((p) => p.prediction_type === 'live');
+                const breakdownRows = list.filter((p) => p.prediction_type === 'live');
                 const stageBuckets = groupPredictionsByStage(breakdownRows, fixtures);
                 const drawerBusy = drawerLoadingUserId === uid;
                 return (
@@ -646,31 +641,13 @@ export default function WcFootballLeaderboardScreen() {
                           {names[uid] ?? (isYou ? 'You' : 'Player')}
                           {isYou ? ' (you)' : ''}
                         </Text>
-                        <Text style={styles.subTotals}>
-                          Ante post {formatPoints(row.ante_points)} pts · Match day {formatPoints(row.live_points)} pts
-                        </Text>
+                        <Text style={styles.subTotals}>Match day picks</Text>
                       </View>
-                      <Text style={styles.pts}>{formatPoints(row.total_points)}</Text>
+                      <Text style={styles.pts}>{formatPoints(row.live_points)}</Text>
                       <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.textMuted} />
                     </TouchableOpacity>
                     {expanded ? (
                       <View style={styles.breakdown}>
-                        <View style={styles.drawerTabRow}>
-                          <TouchableOpacity
-                            style={[styles.drawerTabPill, drawerTab === 'ante_post' && styles.drawerTabPillActive]}
-                            onPress={() => setDrawerTab('ante_post')}
-                            activeOpacity={0.85}
-                          >
-                            <Text style={[styles.drawerTabText, drawerTab === 'ante_post' && styles.drawerTabTextActive]}>Ante post</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.drawerTabPill, drawerTab === 'live' && styles.drawerTabPillActive]}
-                            onPress={() => setDrawerTab('live')}
-                            activeOpacity={0.85}
-                          >
-                            <Text style={[styles.drawerTabText, drawerTab === 'live' && styles.drawerTabTextActive]}>Match day picks</Text>
-                          </TouchableOpacity>
-                        </View>
                         {drawerBusy && !cacheLoaded ? (
                           <View style={styles.drawerLoading}>
                             <ActivityIndicator color={theme.colors.accent} />
@@ -678,7 +655,7 @@ export default function WcFootballLeaderboardScreen() {
                         ) : null}
                         {cacheLoaded && breakdownRows.length === 0 ? (
                           <Text style={styles.emptyBreak}>
-                            {drawerTab === 'ante_post' ? 'No ante post rows yet.' : 'No match day tips saved yet.'}
+                            No match day picks saved yet.
                           </Text>
                         ) : null}
                         {cacheLoaded && breakdownRows.length > 0

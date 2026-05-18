@@ -24,30 +24,39 @@ function flagCode(team: Team | undefined): string {
   return (team.country_name ?? 'UN').toUpperCase().slice(0, 2);
 }
 
-function buildAntePostPickMap(predictions: Prediction[]): {
-  byMatchId: Map<string, { home: number; away: number }>;
-  byMatchNumber: Map<number, { home: number; away: number }>;
+function formatLivePick(p: Prediction): string | null {
+  const parts: string[] = [];
+  if (p.live_outcome === 'H') parts.push('Home win');
+  else if (p.live_outcome === 'D') parts.push('Draw');
+  else if (p.live_outcome === 'A') parts.push('Away win');
+  if (p.live_total_goals != null) parts.push(`${p.live_total_goals} goals`);
+  if (p.live_btts === true) parts.push('BTTS Yes');
+  else if (p.live_btts === false) parts.push('BTTS No');
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+function buildLivePickMap(predictions: Prediction[]): {
+  byMatchId: Map<string, string>;
+  byMatchNumber: Map<number, string>;
 } {
-  const byMatchId = new Map<string, { home: number; away: number }>();
-  const byMatchNumber = new Map<number, { home: number; away: number }>();
+  const byMatchId = new Map<string, string>();
+  const byMatchNumber = new Map<number, string>();
   for (const p of predictions) {
-    if (p.prediction_type !== 'ante_post') continue;
-    if (p.home_score == null || p.away_score == null) continue;
-    const row = { home: p.home_score, away: p.away_score };
-    if (p.match_id) byMatchId.set(p.match_id, row);
+    if (p.prediction_type !== 'live') continue;
+    const label = formatLivePick(p);
+    if (!label) continue;
+    if (p.match_id) byMatchId.set(p.match_id, label);
     const mn = p.match_number != null ? Number(p.match_number) : null;
-    if (mn != null && Number.isFinite(mn) && mn >= 1 && mn <= 72) {
-      byMatchNumber.set(mn, row);
-    }
+    if (mn != null && Number.isFinite(mn)) byMatchNumber.set(mn, label);
   }
   return { byMatchId, byMatchNumber };
 }
 
-function pickFromMaps(
+function livePickFromMaps(
   fixture: Match,
-  byMatchId: Map<string, { home: number; away: number }>,
-  byMatchNumber: Map<number, { home: number; away: number }>
-): { home: number; away: number } | null {
+  byMatchId: Map<string, string>,
+  byMatchNumber: Map<number, string>
+): string | null {
   return byMatchId.get(fixture.id) ?? byMatchNumber.get(Number(fixture.match_number)) ?? null;
 }
 
@@ -97,7 +106,7 @@ export default function WorldCupFixturesRoute() {
     setRefreshing(false);
   }, [load]);
 
-  const antePickMaps = useMemo(() => buildAntePostPickMap(predictions), [predictions]);
+  const livePickMaps = useMemo(() => buildLivePickMap(predictions), [predictions]);
 
   const sortedFixtures = useMemo(() => {
     return [...fixtures].sort((a, b) => {
@@ -219,7 +228,7 @@ export default function WorldCupFixturesRoute() {
           sortedFixtures.map((fixture) => {
             const home = fixture.home_team;
             const away = fixture.away_team;
-            const pick = userId ? pickFromMaps(fixture, antePickMaps.byMatchId, antePickMaps.byMatchNumber) : null;
+            const pick = userId ? livePickFromMaps(fixture, livePickMaps.byMatchId, livePickMaps.byMatchNumber) : null;
 
             return (
               <View style={styles.card} key={fixture.id}>
@@ -242,15 +251,13 @@ export default function WorldCupFixturesRoute() {
                   <View style={styles.centerCol}>
                     {pick ? (
                       <>
-                        <Text style={styles.pickCaption}>Your prediction</Text>
+                        <Text style={styles.pickCaption}>Your match day pick</Text>
                         <View style={styles.pickCapsule}>
-                          <Text style={styles.pickCapsuleText}>
-                            {pick.home} | {pick.away}
-                          </Text>
+                          <Text style={styles.pickCapsuleText}>{pick}</Text>
                         </View>
                       </>
                     ) : userId ? (
-                      <Text style={styles.pickMissing}>No ante post pick</Text>
+                      <Text style={styles.pickMissing}>No match day pick</Text>
                     ) : (
                       <Text style={styles.pickMissing}>Sign in to see your pick</Text>
                     )}

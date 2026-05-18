@@ -41,7 +41,6 @@ export default function AdminWcFootballScreen() {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [comps, setComps] = useState<WcFootballCompetition[]>([]);
-  const [knockoutAnte, setKnockoutAnte] = useState(false);
   const [matchDay, setMatchDay] = useState(false);
 
   const load = useCallback(async () => {
@@ -59,7 +58,6 @@ export default function AdminWcFootballScreen() {
       const { data: flags } = await wcSupabase.from('tournament_flags').select('flag_key, flag_value');
       for (const row of flags ?? []) {
         const r = row as { flag_key: string; flag_value: boolean };
-        if (r.flag_key === 'knockout_ante_enabled') setKnockoutAnte(Boolean(r.flag_value));
         if (r.flag_key === 'match_day_tips_unlocked') setMatchDay(Boolean(r.flag_value));
       }
 
@@ -193,21 +191,17 @@ export default function AdminWcFootballScreen() {
         >
           <Ionicons name="clipboard-outline" size={22} color={theme.colors.accent} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>Ante-post entries</Text>
-            <Text style={styles.muted}>Reopen locked picks or override a match for a participant.</Text>
+            <Text style={styles.cardTitle}>Legacy ante-post entries</Text>
+            <Text style={styles.muted}>Reopen or override ante-post picks (separate competition flow, not shown in the app).</Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
         </TouchableOpacity>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Tournament gates</Text>
-          <Text style={styles.muted}>Control when knockout ante-post and Match Day Tips open for all users.</Text>
+          <Text style={styles.muted}>Control when match day picks open for all users.</Text>
           <View style={styles.row}>
-            <Text style={{ fontFamily: theme.fontFamily.regular, color: theme.colors.text }}>Knockout ante-post (R32+)</Text>
-            <Switch value={knockoutAnte} onValueChange={(v) => void setFlag('knockout_ante_enabled', v)} />
-          </View>
-          <View style={styles.row}>
-            <Text style={{ fontFamily: theme.fontFamily.regular, color: theme.colors.text }}>Match Day Tips (live)</Text>
+            <Text style={{ fontFamily: theme.fontFamily.regular, color: theme.colors.text }}>Match day picks</Text>
             <Switch value={matchDay} onValueChange={(v) => void setFlag('match_day_tips_unlocked', v)} />
           </View>
         </View>

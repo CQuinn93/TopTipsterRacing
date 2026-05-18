@@ -494,7 +494,7 @@ export default function AdminScreen() {
           activeOpacity={0.85}
         >
           <Ionicons name="clipboard-outline" size={18} color={activeTheme.colors.accent} />
-          <Text style={styles.wcFootballLinkText}>World Cup football — ante-post entries (reopen / override)</Text>
+          <Text style={styles.wcFootballLinkText}>World Cup football — legacy ante-post entries</Text>
           <Ionicons name="chevron-forward" size={16} color={activeTheme.colors.textMuted} />
         </TouchableOpacity>
       </View>

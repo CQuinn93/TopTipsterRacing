@@ -7,15 +7,16 @@ export type LiveMatchDayPick = {
   btts: boolean;
 };
 
-const LINE_PTS = 1;
-const ALL_THREE_BONUS_PTS = 5;
+/** Points per correct market line (90-minute result). */
+export const LIVE_OUTCOME_PTS = 1;
+export const LIVE_GOALS_PTS = 2;
+export const LIVE_BTTS_PTS = 1;
+/** Extra point when 1X2, total goals, and BTTS are all correct on the same match. */
+export const LIVE_ALL_LINES_BONUS_PTS = 1;
+export const LIVE_MATCH_DAY_MAX_PTS =
+  LIVE_OUTCOME_PTS + LIVE_GOALS_PTS + LIVE_BTTS_PTS + LIVE_ALL_LINES_BONUS_PTS;
 
-/**
- * Match day: 1 pt per correct line (1X2, total goals, BTTS); 5 if all three correct.
- * Uses 90-minute scores only (home_score + away_score on the match row).
- * @see app/(wc2026)/points.tsx
- */
-export function scoreLiveMatchDayPick(pick: LiveMatchDayPick, actualHome: number, actualAway: number): number {
+function evaluateLivePick(pick: LiveMatchDayPick, actualHome: number, actualAway: number) {
   const actualTotal = actualHome + actualAway;
   const actualOutcome = matchOutcome(actualHome, actualAway);
   const actualBtts = actualHome > 0 && actualAway > 0;
@@ -23,16 +24,30 @@ export function scoreLiveMatchDayPick(pick: LiveMatchDayPick, actualHome: number
   const correct1x2 = pick.outcome === actualOutcome;
   const correctGoals = pick.totalGoals === actualTotal;
   const correctBtts = pick.btts === actualBtts;
+  const allThree = correct1x2 && correctGoals && correctBtts;
 
-  if (correct1x2 && correctGoals && correctBtts) return ALL_THREE_BONUS_PTS;
+  const basePoints =
+    (correct1x2 ? LIVE_OUTCOME_PTS : 0) +
+    (correctGoals ? LIVE_GOALS_PTS : 0) +
+    (correctBtts ? LIVE_BTTS_PTS : 0);
+  const points = basePoints + (allThree ? LIVE_ALL_LINES_BONUS_PTS : 0);
 
-  return (
-    (correct1x2 ? LINE_PTS : 0) + (correctGoals ? LINE_PTS : 0) + (correctBtts ? LINE_PTS : 0)
-  );
+  return { correct1x2, correctGoals, correctBtts, allThree, basePoints, points };
+}
+
+/**
+ * Match day: 1 pt (1X2), 2 pts (total goals), 1 pt (BTTS); +1 bonus when all three are correct (5 max).
+ * Uses 90-minute scores only (home_score + away_score on the match row).
+ * @see app/(wc2026)/points.tsx
+ */
+export function scoreLiveMatchDayPick(pick: LiveMatchDayPick, actualHome: number, actualAway: number): number {
+  return evaluateLivePick(pick, actualHome, actualAway).points;
 }
 
 export type LiveScoreBreakdown = {
   points: number;
+  basePoints: number;
+  bonusPoints: number;
   correct1x2: boolean;
   correctGoals: boolean;
   correctBtts: boolean;
@@ -44,19 +59,15 @@ export function scoreLiveMatchDayPickWithBreakdown(
   actualHome: number,
   actualAway: number
 ): LiveScoreBreakdown {
-  const actualTotal = actualHome + actualAway;
-  const actualOutcome = matchOutcome(actualHome, actualAway);
-  const actualBtts = actualHome > 0 && actualAway > 0;
-
-  const correct1x2 = pick.outcome === actualOutcome;
-  const correctGoals = pick.totalGoals === actualTotal;
-  const correctBtts = pick.btts === actualBtts;
-  const allThree = correct1x2 && correctGoals && correctBtts;
-
+  const { correct1x2, correctGoals, correctBtts, allThree, basePoints, points } = evaluateLivePick(
+    pick,
+    actualHome,
+    actualAway
+  );
   return {
-    points: allThree
-      ? ALL_THREE_BONUS_PTS
-      : (correct1x2 ? LINE_PTS : 0) + (correctGoals ? LINE_PTS : 0) + (correctBtts ? LINE_PTS : 0),
+    points,
+    basePoints,
+    bonusPoints: allThree ? LIVE_ALL_LINES_BONUS_PTS : 0,
     correct1x2,
     correctGoals,
     correctBtts,
