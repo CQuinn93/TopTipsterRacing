@@ -1,15 +1,15 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
+  Pressable,
   ScrollView,
   useWindowDimensions,
   Platform,
   Linking,
-  ImageBackground,
   useColorScheme,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -22,9 +22,7 @@ import { supabase } from '@/lib/supabase';
 import { setLastRoute } from '@/lib/lastRoute';
 
 const DESKTOP_BREAKPOINT = 768;
-const HUB_BACKGROUND = require('../assets/Background.png');
-const GOLD_BORDER = '#D4AF37';
-const GOLD_BORDER_MUTED = 'rgba(212, 175, 55, 0.45)';
+const COMPACT_BREAKPOINT = 400;
 
 const TERMS_OF_USE_URL =
   'https://doc-hosting.flycricket.io/top-tipster-racing-terms-of-use/bf206b6c-02a2-4394-aedc-dbf95f95d955/terms';
@@ -33,110 +31,123 @@ const PRIVACY_POLICY_URL =
 
 type SportRowProps = {
   label: string;
-  description?: string;
+  description: string;
   icon: ReactNode;
   onPress?: () => void;
   unavailable?: boolean;
-  isLast?: boolean;
+  featured?: boolean;
 };
 
-function SportRow({ label, description, icon, onPress, unavailable, isLast }: SportRowProps) {
+function SportRow({ label, description, icon, onPress, unavailable, featured }: SportRowProps) {
   const theme = useTheme();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
-  const rowStyles = useMemo(
+  const styles = useMemo(
     () =>
       StyleSheet.create({
-        capsule: {
-          borderRadius: theme.radius.full,
-          borderWidth: 2,
-          borderColor: unavailable ? GOLD_BORDER_MUTED : GOLD_BORDER,
-          backgroundColor: isDark ? 'rgba(20, 20, 20, 0.9)' : 'rgba(255, 255, 255, 0.92)',
-          marginBottom: isLast ? 0 : theme.spacing.md,
-          overflow: 'hidden' as const,
-          ...(Platform.OS === 'web'
-            ? { boxShadow: '0 4px 14px rgba(0,0,0,0.12)' }
-            : {
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 3 },
-                shadowOpacity: isDark ? 0.35 : 0.1,
-                shadowRadius: 8,
-                elevation: 4,
-              }),
-        },
         row: {
-          flexDirection: 'row' as const,
-          alignItems: 'center' as const,
-          paddingVertical: theme.spacing.md + 2,
-          paddingHorizontal: theme.spacing.lg,
+          flexDirection: 'row',
+          alignItems: 'center',
           gap: theme.spacing.md,
+          paddingVertical: featured ? theme.spacing.md + 4 : theme.spacing.md,
+          paddingHorizontal: theme.spacing.md + 2,
+          borderRadius: theme.radius.lg,
+          borderWidth: 1,
+          borderColor: featured
+            ? isDark
+              ? 'rgba(21, 128, 61, 0.55)'
+              : 'rgba(21, 128, 61, 0.35)'
+            : theme.colors.border,
+          backgroundColor: featured
+            ? isDark
+              ? 'rgba(21, 128, 61, 0.14)'
+              : 'rgba(21, 128, 61, 0.08)'
+            : isDark
+              ? 'rgba(20, 20, 20, 0.72)'
+              : 'rgba(255, 255, 255, 0.78)',
+        },
+        rowPressed: {
+          opacity: 0.88,
+          transform: [{ scale: 0.985 }],
         },
         rowUnavailable: {
-          opacity: 0.5,
+          opacity: 0.55,
         },
         iconWrap: {
-          width: 44,
-          height: 44,
-          borderRadius: theme.radius.full,
-          backgroundColor: theme.colors.accentMuted,
-          alignItems: 'center' as const,
-          justifyContent: 'center' as const,
-        },
-        iconWrapMuted: {
-          backgroundColor: theme.colors.surfaceElevated,
+          width: featured ? 48 : 42,
+          height: featured ? 48 : 42,
+          borderRadius: theme.radius.md,
+          backgroundColor: featured ? theme.colors.accent : theme.colors.surfaceElevated,
+          alignItems: 'center',
+          justifyContent: 'center',
         },
         textBlock: {
           flex: 1,
           minWidth: 0,
         },
+        labelRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.spacing.sm,
+        },
         label: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 17,
-          fontWeight: '600',
+          fontSize: featured ? 18 : 16,
+          fontWeight: '700',
           color: theme.colors.text,
-          letterSpacing: -0.2,
+          letterSpacing: -0.3,
         },
-        labelMuted: {
-          color: theme.colors.textSecondary,
+        badge: {
+          paddingHorizontal: 8,
+          paddingVertical: 2,
+          borderRadius: theme.radius.sm,
+          backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+        },
+        badgeText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 11,
+          fontWeight: '600',
+          color: theme.colors.textMuted,
+          letterSpacing: 0.2,
         },
         description: {
           fontFamily: theme.fontFamily.light,
           fontSize: 13,
-          color: theme.colors.textMuted,
-          marginTop: 2,
-        },
-        trailing: {
-          marginLeft: theme.spacing.xs,
+          color: theme.colors.textSecondary,
+          marginTop: 3,
+          lineHeight: 18,
         },
       }),
-    [theme, isLast, isDark]
+    [theme, featured, isDark]
   );
 
   const content = (
-    <View style={[rowStyles.row, unavailable && rowStyles.rowUnavailable]}>
-      <View style={[rowStyles.iconWrap, unavailable && rowStyles.iconWrapMuted]}>{icon}</View>
-      <View style={rowStyles.textBlock}>
-        <Text style={[rowStyles.label, unavailable && rowStyles.labelMuted]}>{label}</Text>
-        {description ? <Text style={rowStyles.description}>{description}</Text> : null}
+    <>
+      <View style={styles.iconWrap}>{icon}</View>
+      <View style={styles.textBlock}>
+        <View style={styles.labelRow}>
+          <Text style={styles.label}>{label}</Text>
+          {unavailable ? (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>Soon</Text>
+            </View>
+          ) : null}
+        </View>
+        <Text style={styles.description}>{description}</Text>
       </View>
       {!unavailable ? (
-        <Ionicons
-          name="chevron-forward"
-          size={20}
-          color={GOLD_BORDER}
-          style={rowStyles.trailing}
-        />
+        <Ionicons name="arrow-forward" size={18} color={theme.colors.accent} />
       ) : null}
-    </View>
+    </>
   );
 
   if (unavailable || !onPress) {
     return (
       <View
-        style={rowStyles.capsule}
+        style={[styles.row, styles.rowUnavailable]}
         accessibilityState={{ disabled: true }}
-        accessibilityLabel={label}
+        accessibilityLabel={`${label}, coming soon`}
       >
         {content}
       </View>
@@ -144,15 +155,14 @@ function SportRow({ label, description, icon, onPress, unavailable, isLast }: Sp
   }
 
   return (
-    <TouchableOpacity
-      style={rowStyles.capsule}
+    <Pressable
       onPress={onPress}
-      activeOpacity={0.7}
       accessibilityRole="button"
       accessibilityLabel={label}
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
     >
       {content}
-    </TouchableOpacity>
+    </Pressable>
   );
 }
 
@@ -162,11 +172,30 @@ export default function CompetitionHubScreen() {
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
   const { session, userId } = useAuth();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const [displayName, setDisplayName] = useState<string>('');
+
   const isDesktop = width >= DESKTOP_BREAKPOINT;
+  const isCompact = width < COMPACT_BREAKPOINT || height < 640;
   const isWeb = Platform.OS === 'web';
-  const isNativeMobile = !isWeb && !isDesktop;
+
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const riseAnim = useRef(new Animated.Value(14)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 420,
+        useNativeDriver: true,
+      }),
+      Animated.timing(riseAnim, {
+        toValue: 0,
+        duration: 420,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [fadeAnim, riseAnim]);
 
   useEffect(() => {
     if (!userId) {
@@ -194,202 +223,216 @@ export default function CompetitionHubScreen() {
     };
   }, [userId, session?.user?.email]);
 
-  const horizontalPad = theme.spacing.md;
-  const maxHubWidth = isDesktop ? 480 : 420;
-  const hubColumnWidth = Math.max(280, Math.min(maxHubWidth, width - horizontalPad * 2));
-  const iconSz = 24;
-  const iconColor = theme.colors.accent;
-  const iconMuted = theme.colors.textMuted;
+  const horizontalPad = isCompact ? theme.spacing.md : theme.spacing.lg;
+  const maxHubWidth = isDesktop ? 440 : 400;
+  const hubColumnWidth = Math.max(260, Math.min(maxHubWidth, width - horizontalPad * 2));
+  const iconSz = isCompact ? 20 : 22;
 
   const styles = useMemo(
     () =>
       StyleSheet.create({
         root: {
           flex: 1,
+          backgroundColor: theme.colors.background,
         },
-        bgGradient: {
+        ambient: {
           ...StyleSheet.absoluteFillObject,
-          zIndex: 0,
+        },
+        accentGlow: {
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: Math.min(height * 0.55, 420),
         },
         scroll: {
           flex: 1,
-          zIndex: 1,
         },
         scrollContent: {
           flexGrow: 1,
           paddingHorizontal: horizontalPad,
-          alignItems: 'center' as const,
-          width: '100%' as const,
+          paddingTop: isWeb
+            ? Math.max(theme.spacing.lg, insets.top + theme.spacing.md)
+            : insets.top + (isCompact ? theme.spacing.lg : theme.spacing.xl),
+          paddingBottom: theme.spacing.md,
+          alignItems: 'center',
+          justifyContent: isCompact ? 'flex-start' : 'center',
         },
         inner: {
-          alignSelf: 'center' as const,
+          width: hubColumnWidth,
+          alignSelf: 'center',
         },
         wordmarkBlock: {
           alignItems: 'center',
-          marginBottom: theme.spacing.xl,
+          marginBottom: isCompact ? theme.spacing.lg : theme.spacing.xl,
         },
         wordmarkTop: {
           fontFamily: theme.fontFamily.swish,
-          fontSize: isNativeMobile ? 42 : isDesktop ? 44 : isWeb ? 38 : 40,
+          fontSize: isCompact ? 36 : isDesktop ? 48 : 42,
           color: theme.colors.text,
           textAlign: 'center',
-          letterSpacing: isNativeMobile ? 1.2 : 1.1,
-          textShadowColor: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.85)',
-          textShadowOffset: { width: 0, height: 1 },
-          textShadowRadius: 6,
+          letterSpacing: 1.1,
         },
         wordmarkSub: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: isNativeMobile ? 15 : isDesktop ? 12 : 13,
+          fontSize: isCompact ? 11 : 12,
           fontWeight: '800',
           color: theme.colors.accent,
           textAlign: 'center',
-          marginTop: isNativeMobile ? 10 : 8,
-          letterSpacing: isNativeMobile ? 8 : 7,
-          textShadowColor: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.75)',
-          textShadowOffset: { width: 0, height: 1 },
-          textShadowRadius: 4,
+          marginTop: theme.spacing.sm,
+          letterSpacing: isCompact ? 6 : 8,
         },
         welcomeBlock: {
-          marginBottom: theme.spacing.xl,
+          marginBottom: isCompact ? theme.spacing.lg : theme.spacing.xl,
+          alignItems: 'center',
         },
         welcomeName: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: isDesktop ? 26 : 22,
+          fontSize: isCompact ? 20 : 24,
           fontWeight: '700',
           color: theme.colors.text,
           textAlign: 'center',
           letterSpacing: -0.4,
-          textShadowColor: isDark ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.7)',
-          textShadowOffset: { width: 0, height: 1 },
-          textShadowRadius: 4,
         },
         welcomeSub: {
           fontFamily: theme.fontFamily.light,
-          fontSize: 15,
+          fontSize: isCompact ? 14 : 15,
           color: theme.colors.textSecondary,
           textAlign: 'center',
           marginTop: theme.spacing.sm,
-          lineHeight: 22,
+          lineHeight: 21,
+          maxWidth: 320,
         },
-        sportCards: {
-          width: '100%' as const,
+        sportList: {
+          width: '100%',
+          gap: theme.spacing.sm + 2,
+        },
+        sectionLabel: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          fontWeight: '700',
+          color: theme.colors.textMuted,
+          letterSpacing: 1.4,
+          textTransform: 'uppercase',
+          marginBottom: theme.spacing.sm,
+          marginTop: theme.spacing.md,
+        },
+        footer: {
+          paddingTop: theme.spacing.md,
+          paddingBottom: Math.max(insets.bottom, theme.spacing.md),
+          paddingHorizontal: horizontalPad,
+          alignItems: 'center',
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.colors.border,
+          backgroundColor: isDark ? 'rgba(10, 10, 10, 0.72)' : 'rgba(250, 250, 250, 0.82)',
         },
         legalRow: {
-          flexDirection: 'row' as const,
-          justifyContent: 'center' as const,
-          alignItems: 'center' as const,
-          flexWrap: 'wrap' as const,
+          flexDirection: 'row',
+          justifyContent: 'center',
+          alignItems: 'center',
+          flexWrap: 'wrap',
           gap: theme.spacing.md,
-          marginBottom: theme.spacing.md,
         },
         legalLink: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
-          color: theme.colors.textMuted,
-          textDecorationLine: 'underline' as const,
-        },
-        bottomBar: {
-          zIndex: 1,
-          alignItems: 'center' as const,
-          paddingTop: theme.spacing.md,
-          paddingHorizontal: horizontalPad,
-          borderTopWidth: 2,
-          borderTopColor: GOLD_BORDER,
-          backgroundColor: isDark ? 'rgba(10, 10, 10, 0.88)' : 'rgba(250, 250, 250, 0.9)',
-          maxWidth: maxHubWidth,
-          width: '100%' as const,
-          alignSelf: 'center' as const,
-        },
-        bottomBarTitle: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 15,
-          fontWeight: '700',
-          color: theme.colors.text,
-          letterSpacing: -0.2,
-          textAlign: 'center' as const,
-        },
-        bottomBarSub: {
-          fontFamily: theme.fontFamily.light,
           fontSize: 12,
-          color: theme.colors.textSecondary,
-          marginTop: 4,
-          lineHeight: 18,
-          textAlign: 'center' as const,
+          color: theme.colors.textMuted,
+        },
+        legalDot: {
+          width: 3,
+          height: 3,
+          borderRadius: 2,
+          backgroundColor: theme.colors.textMuted,
+          opacity: 0.5,
         },
       }),
-    [theme, isDesktop, isNativeMobile, isWeb, horizontalPad, maxHubWidth, isDark]
+    [
+      theme,
+      isCompact,
+      isDesktop,
+      isWeb,
+      isDark,
+      horizontalPad,
+      hubColumnWidth,
+      insets.top,
+      insets.bottom,
+      height,
+    ]
   );
 
-  const bgGradientColors = isDark
-    ? (['rgba(10, 10, 10, 0.38)', 'rgba(10, 10, 10, 0.68)', 'rgba(10, 10, 10, 0.88)'] as const)
-    : (['rgba(250, 250, 250, 0.48)', 'rgba(250, 250, 250, 0.76)', 'rgba(250, 250, 250, 0.9)'] as const);
+  const bgGradient = isDark
+    ? (['#0a0a0a', '#0f1410', '#0a0a0a'] as const)
+    : (['#f7faf7', '#eef5f0', '#fafafa'] as const);
 
-  const scrollPaddingTop = isWeb
-    ? theme.spacing.lg + 8
-    : insets.top + theme.spacing.lg + 20;
-  const bottomBarReserve =
-    theme.spacing.md +
-    36 +
-    theme.spacing.md +
-    52 +
-    theme.spacing.sm +
-    Math.max(insets.bottom, theme.spacing.md);
-  const scrollPaddingBottom = theme.spacing.lg + bottomBarReserve;
+  const glowGradient = isDark
+    ? (['rgba(21, 128, 61, 0.22)', 'rgba(21, 128, 61, 0.06)', 'transparent'] as const)
+    : (['rgba(21, 128, 61, 0.14)', 'rgba(21, 128, 61, 0.04)', 'transparent'] as const);
 
   const sportRows = useMemo(
     () => [
       {
         key: 'racing',
         label: 'Racing',
-        description: 'Daily picks & leaderboards',
-        icon: <MaterialCommunityIcons name="horse-variant" size={iconSz} color={iconColor} />,
+        description: 'Daily picks, competitions and leaderboards',
+        icon: (
+          <MaterialCommunityIcons name="horse-variant" size={iconSz} color={theme.colors.white} />
+        ),
         onPress: () => {
           void setLastRoute('/(app)');
           router.replace('/(app)');
         },
         unavailable: false,
+        featured: true,
       },
       {
         key: 'football',
         label: 'Football',
-        icon: <Ionicons name="football-outline" size={iconSz} color={iconMuted} />,
+        description: 'Coming in a future update',
+        icon: <Ionicons name="football-outline" size={iconSz} color={theme.colors.textMuted} />,
         onPress: undefined,
         unavailable: true,
+        featured: false,
       },
       {
         key: 'golf',
         label: 'Golf',
-        icon: <Ionicons name="flag-outline" size={iconSz} color={iconMuted} />,
+        description: 'Coming in a future update',
+        icon: <Ionicons name="flag-outline" size={iconSz} color={theme.colors.textMuted} />,
         onPress: undefined,
         unavailable: true,
+        featured: false,
       },
     ],
-    [iconColor, iconMuted]
+    [iconSz, theme.colors.textMuted, theme.colors.white]
   );
 
   return (
-    <ImageBackground source={HUB_BACKGROUND} style={styles.root} resizeMode="cover">
+    <View style={styles.root}>
+      <LinearGradient colors={[...bgGradient]} locations={[0, 0.45, 1]} style={styles.ambient} />
       <LinearGradient
-        colors={[...bgGradientColors]}
-        locations={[0, 0.4, 1]}
-        style={styles.bgGradient}
+        colors={[...glowGradient]}
+        locations={[0, 0.45, 1]}
+        style={styles.accentGlow}
         pointerEvents="none"
       />
+
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[
-          styles.scrollContent,
-          {
-            paddingTop: scrollPaddingTop,
-            paddingBottom: scrollPaddingBottom,
-          },
-        ]}
+        contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        bounces={false}
       >
-        <View style={[styles.inner, { width: hubColumnWidth }]}>
-          <View style={[styles.wordmarkBlock, !isWeb && { paddingTop: theme.spacing.sm }]}>
+        <Animated.View
+          style={[
+            styles.inner,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: riseAnim }],
+            },
+          ]}
+        >
+          <View style={styles.wordmarkBlock}>
             <Text style={styles.wordmarkTop} accessibilityRole="header">
               Top Tipster
             </Text>
@@ -400,51 +443,68 @@ export default function CompetitionHubScreen() {
             <Text style={styles.welcomeName}>
               Hi{displayName ? `, ${displayName}` : ''}
             </Text>
-            <Text style={styles.welcomeSub}>Pick a sport to get started</Text>
+            <Text style={styles.welcomeSub}>Choose a sport to continue</Text>
           </View>
 
-          <View style={styles.sportCards}>
-            {sportRows.map((row, index) => (
-              <SportRow
-                key={row.key}
-                label={row.label}
-                description={row.description}
-                icon={row.icon}
-                onPress={row.onPress}
-                unavailable={row.unavailable}
-                isLast={index === sportRows.length - 1}
-              />
-            ))}
+          <Text style={styles.sectionLabel}>Available now</Text>
+          <View style={styles.sportList}>
+            {sportRows
+              .filter((row) => !row.unavailable)
+              .map((row) => (
+                <SportRow
+                  key={row.key}
+                  label={row.label}
+                  description={row.description}
+                  icon={row.icon}
+                  onPress={row.onPress}
+                  unavailable={row.unavailable}
+                  featured={row.featured}
+                />
+              ))}
           </View>
-        </View>
+
+          <Text style={styles.sectionLabel}>Coming soon</Text>
+          <View style={styles.sportList}>
+            {sportRows
+              .filter((row) => row.unavailable)
+              .map((row) => (
+                <SportRow
+                  key={row.key}
+                  label={row.label}
+                  description={row.description}
+                  icon={row.icon}
+                  onPress={row.onPress}
+                  unavailable={row.unavailable}
+                  featured={row.featured}
+                />
+              ))}
+          </View>
+        </Animated.View>
       </ScrollView>
-      <View
-        style={[
-          styles.bottomBar,
-          { paddingBottom: Math.max(insets.bottom, theme.spacing.md) },
-        ]}
-      >
+
+      <View style={styles.footer}>
         <View style={styles.legalRow}>
-          <TouchableOpacity
+          <Pressable
             onPress={() => {
               void Linking.openURL(TERMS_OF_USE_URL);
             }}
             accessibilityRole="link"
+            hitSlop={8}
           >
-            <Text style={styles.legalLink}>Terms & conditions</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+            <Text style={styles.legalLink}>Terms</Text>
+          </Pressable>
+          <View style={styles.legalDot} />
+          <Pressable
             onPress={() => {
               void Linking.openURL(PRIVACY_POLICY_URL);
             }}
             accessibilityRole="link"
+            hitSlop={8}
           >
-            <Text style={styles.legalLink}>Privacy policy</Text>
-          </TouchableOpacity>
+            <Text style={styles.legalLink}>Privacy</Text>
+          </Pressable>
         </View>
-        <Text style={styles.bottomBarTitle}>One account. Every sport.</Text>
-        <Text style={styles.bottomBarSub}>Track, tip and compete — all in one place.</Text>
       </View>
-    </ImageBackground>
+    </View>
   );
 }
