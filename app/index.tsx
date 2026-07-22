@@ -31,7 +31,8 @@ export default function Index() {
         return;
       }
       const last = await getLastRoute();
-      if (!cancelled) setResolvedRoute(last || '/competition-hub');
+      const isRemovedWorldCupRoute = !!last && last.includes('wc2026');
+      if (!cancelled) setResolvedRoute(isRemovedWorldCupRoute ? '/competition-hub' : last || '/competition-hub');
     })();
     return () => {
       cancelled = true;

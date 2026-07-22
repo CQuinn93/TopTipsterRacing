@@ -9,8 +9,6 @@ export default function AuthLayout() {
       <Stack.Screen name="access-code" />
       <Stack.Screen name="tablet-mode" />
       <Stack.Screen name="admin" />
-      <Stack.Screen name="admin-wc-football" />
-      <Stack.Screen name="admin-wc-football-entries" />
       <Stack.Screen name="admin-edit-selection" />
     </Stack>
   );

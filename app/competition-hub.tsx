@@ -8,6 +8,8 @@ import {
   useWindowDimensions,
   Platform,
   Linking,
+  ImageBackground,
+  useColorScheme,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -17,10 +19,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { wcHref } from '@/features/wc2026/utils/href';
 import { setLastRoute } from '@/lib/lastRoute';
 
 const DESKTOP_BREAKPOINT = 768;
+const HUB_BACKGROUND = require('../assets/Background.png');
+const GOLD_BORDER = '#D4AF37';
+const GOLD_BORDER_MUTED = 'rgba(212, 175, 55, 0.45)';
 
 const TERMS_OF_USE_URL =
   'https://doc-hosting.flycricket.io/top-tipster-racing-terms-of-use/bf206b6c-02a2-4394-aedc-dbf95f95d955/terms';
@@ -38,26 +42,43 @@ type SportRowProps = {
 
 function SportRow({ label, description, icon, onPress, unavailable, isLast }: SportRowProps) {
   const theme = useTheme();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
 
   const rowStyles = useMemo(
     () =>
       StyleSheet.create({
+        capsule: {
+          borderRadius: theme.radius.full,
+          borderWidth: 2,
+          borderColor: unavailable ? GOLD_BORDER_MUTED : GOLD_BORDER,
+          backgroundColor: isDark ? 'rgba(20, 20, 20, 0.9)' : 'rgba(255, 255, 255, 0.92)',
+          marginBottom: isLast ? 0 : theme.spacing.md,
+          overflow: 'hidden' as const,
+          ...(Platform.OS === 'web'
+            ? { boxShadow: '0 4px 14px rgba(0,0,0,0.12)' }
+            : {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 3 },
+                shadowOpacity: isDark ? 0.35 : 0.1,
+                shadowRadius: 8,
+                elevation: 4,
+              }),
+        },
         row: {
           flexDirection: 'row' as const,
           alignItems: 'center' as const,
-          paddingVertical: theme.spacing.md,
-          paddingHorizontal: theme.spacing.md,
+          paddingVertical: theme.spacing.md + 2,
+          paddingHorizontal: theme.spacing.lg,
           gap: theme.spacing.md,
-          borderBottomWidth: isLast ? 0 : StyleSheet.hairlineWidth,
-          borderBottomColor: theme.colors.border,
         },
         rowUnavailable: {
-          opacity: 0.45,
+          opacity: 0.5,
         },
         iconWrap: {
           width: 44,
           height: 44,
-          borderRadius: theme.radius.md,
+          borderRadius: theme.radius.full,
           backgroundColor: theme.colors.accentMuted,
           alignItems: 'center' as const,
           justifyContent: 'center' as const,
@@ -89,7 +110,7 @@ function SportRow({ label, description, icon, onPress, unavailable, isLast }: Sp
           marginLeft: theme.spacing.xs,
         },
       }),
-    [theme, isLast]
+    [theme, isLast, isDark]
   );
 
   const content = (
@@ -103,7 +124,7 @@ function SportRow({ label, description, icon, onPress, unavailable, isLast }: Sp
         <Ionicons
           name="chevron-forward"
           size={20}
-          color={theme.colors.accent}
+          color={GOLD_BORDER}
           style={rowStyles.trailing}
         />
       ) : null}
@@ -112,7 +133,11 @@ function SportRow({ label, description, icon, onPress, unavailable, isLast }: Sp
 
   if (unavailable || !onPress) {
     return (
-      <View accessibilityState={{ disabled: true }} accessibilityLabel={label}>
+      <View
+        style={rowStyles.capsule}
+        accessibilityState={{ disabled: true }}
+        accessibilityLabel={label}
+      >
         {content}
       </View>
     );
@@ -120,6 +145,7 @@ function SportRow({ label, description, icon, onPress, unavailable, isLast }: Sp
 
   return (
     <TouchableOpacity
+      style={rowStyles.capsule}
       onPress={onPress}
       activeOpacity={0.7}
       accessibilityRole="button"
@@ -132,6 +158,8 @@ function SportRow({ label, description, icon, onPress, unavailable, isLast }: Sp
 
 export default function CompetitionHubScreen() {
   const theme = useTheme();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
   const { session, userId } = useAuth();
   const { width } = useWindowDimensions();
@@ -178,14 +206,9 @@ export default function CompetitionHubScreen() {
       StyleSheet.create({
         root: {
           flex: 1,
-          backgroundColor: theme.colors.background,
         },
-        meshTop: {
-          position: 'absolute' as const,
-          top: 0,
-          left: 0,
-          right: 0,
-          height: 200,
+        bgGradient: {
+          ...StyleSheet.absoluteFillObject,
           zIndex: 0,
         },
         scroll: {
@@ -211,6 +234,9 @@ export default function CompetitionHubScreen() {
           color: theme.colors.text,
           textAlign: 'center',
           letterSpacing: isNativeMobile ? 1.2 : 1.1,
+          textShadowColor: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.85)',
+          textShadowOffset: { width: 0, height: 1 },
+          textShadowRadius: 6,
         },
         wordmarkSub: {
           fontFamily: theme.fontFamily.regular,
@@ -220,6 +246,9 @@ export default function CompetitionHubScreen() {
           textAlign: 'center',
           marginTop: isNativeMobile ? 10 : 8,
           letterSpacing: isNativeMobile ? 8 : 7,
+          textShadowColor: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.75)',
+          textShadowOffset: { width: 0, height: 1 },
+          textShadowRadius: 4,
         },
         welcomeBlock: {
           marginBottom: theme.spacing.xl,
@@ -231,6 +260,9 @@ export default function CompetitionHubScreen() {
           color: theme.colors.text,
           textAlign: 'center',
           letterSpacing: -0.4,
+          textShadowColor: isDark ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.7)',
+          textShadowOffset: { width: 0, height: 1 },
+          textShadowRadius: 4,
         },
         welcomeSub: {
           fontFamily: theme.fontFamily.light,
@@ -240,13 +272,8 @@ export default function CompetitionHubScreen() {
           marginTop: theme.spacing.sm,
           lineHeight: 22,
         },
-        sportList: {
+        sportCards: {
           width: '100%' as const,
-          borderRadius: theme.radius.lg,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.surface,
-          overflow: 'hidden' as const,
         },
         legalRow: {
           flexDirection: 'row' as const,
@@ -267,9 +294,9 @@ export default function CompetitionHubScreen() {
           alignItems: 'center' as const,
           paddingTop: theme.spacing.md,
           paddingHorizontal: horizontalPad,
-          borderTopWidth: StyleSheet.hairlineWidth,
-          borderTopColor: theme.colors.border,
-          backgroundColor: theme.colors.background,
+          borderTopWidth: 2,
+          borderTopColor: GOLD_BORDER,
+          backgroundColor: isDark ? 'rgba(10, 10, 10, 0.88)' : 'rgba(250, 250, 250, 0.9)',
           maxWidth: maxHubWidth,
           width: '100%' as const,
           alignSelf: 'center' as const,
@@ -291,10 +318,12 @@ export default function CompetitionHubScreen() {
           textAlign: 'center' as const,
         },
       }),
-    [theme, isDesktop, isNativeMobile, isWeb, horizontalPad, maxHubWidth]
+    [theme, isDesktop, isNativeMobile, isWeb, horizontalPad, maxHubWidth, isDark]
   );
 
-  const accentRgb = theme.colors.accent;
+  const bgGradientColors = isDark
+    ? (['rgba(10, 10, 10, 0.38)', 'rgba(10, 10, 10, 0.68)', 'rgba(10, 10, 10, 0.88)'] as const)
+    : (['rgba(250, 250, 250, 0.48)', 'rgba(250, 250, 250, 0.76)', 'rgba(250, 250, 250, 0.9)'] as const);
 
   const scrollPaddingTop = isWeb
     ? theme.spacing.lg + 8
@@ -311,17 +340,6 @@ export default function CompetitionHubScreen() {
   const sportRows = useMemo(
     () => [
       {
-        key: 'football',
-        label: 'Football',
-        description: 'World Cup 2026',
-        icon: <Ionicons name="football-outline" size={iconSz} color={iconColor} />,
-        onPress: () => {
-          void setLastRoute('/(wc2026)/(tabs)');
-          router.replace(wcHref('/(wc2026)/(tabs)'));
-        },
-        unavailable: false,
-      },
-      {
         key: 'racing',
         label: 'Racing',
         description: 'Daily picks & leaderboards',
@@ -331,6 +349,13 @@ export default function CompetitionHubScreen() {
           router.replace('/(app)');
         },
         unavailable: false,
+      },
+      {
+        key: 'football',
+        label: 'Football',
+        icon: <Ionicons name="football-outline" size={iconSz} color={iconMuted} />,
+        onPress: undefined,
+        unavailable: true,
       },
       {
         key: 'golf',
@@ -344,11 +369,11 @@ export default function CompetitionHubScreen() {
   );
 
   return (
-    <View style={styles.root}>
+    <ImageBackground source={HUB_BACKGROUND} style={styles.root} resizeMode="cover">
       <LinearGradient
-        style={styles.meshTop}
-        colors={[`${accentRgb}10`, 'transparent']}
-        locations={[0, 1]}
+        colors={[...bgGradientColors]}
+        locations={[0, 0.4, 1]}
+        style={styles.bgGradient}
         pointerEvents="none"
       />
       <ScrollView
@@ -378,7 +403,7 @@ export default function CompetitionHubScreen() {
             <Text style={styles.welcomeSub}>Pick a sport to get started</Text>
           </View>
 
-          <View style={styles.sportList}>
+          <View style={styles.sportCards}>
             {sportRows.map((row, index) => (
               <SportRow
                 key={row.key}
@@ -420,6 +445,6 @@ export default function CompetitionHubScreen() {
         <Text style={styles.bottomBarTitle}>One account. Every sport.</Text>
         <Text style={styles.bottomBarSub}>Track, tip and compete — all in one place.</Text>
       </View>
-    </View>
+    </ImageBackground>
   );
 }

@@ -10,15 +10,22 @@ import {
   Alert,
   ActivityIndicator,
   Linking,
+  ImageBackground,
+  useColorScheme,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+const LOGIN_BACKGROUND = require('../../assets/Background.png');
+
 export default function LoginScreen() {
   const theme = useTheme();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -31,10 +38,16 @@ export default function LoginScreen() {
   const styles = useMemo(
     () =>
       StyleSheet.create({
+        bg: {
+          flex: 1,
+        },
+        bgGradient: {
+          ...StyleSheet.absoluteFillObject,
+        },
         container: {
           flex: 1,
-          backgroundColor: theme.colors.background,
           padding: theme.spacing.lg,
+          paddingTop: Math.max(theme.spacing.lg, insets.top + theme.spacing.sm),
           paddingBottom: Math.max(theme.spacing.lg, insets.bottom + theme.spacing.sm),
         },
         content: {
@@ -57,6 +70,9 @@ export default function LoginScreen() {
           textAlign: 'center',
           marginBottom: theme.spacing.xs,
           letterSpacing: Platform.OS === 'web' ? 1 : 1.2,
+          textShadowColor: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.85)',
+          textShadowOffset: { width: 0, height: 1 },
+          textShadowRadius: 6,
         },
         wordmarkSub: {
           fontFamily: theme.fontFamily.regular,
@@ -66,13 +82,16 @@ export default function LoginScreen() {
           textAlign: 'center',
           marginTop: 8,
           letterSpacing: Platform.OS === 'web' ? 6 : 7,
+          textShadowColor: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.75)',
+          textShadowOffset: { width: 0, height: 1 },
+          textShadowRadius: 4,
         },
         input: {
           fontFamily: theme.fontFamily.input,
           /* ≥16px avoids iOS Safari auto-zoom on focus; web also enforced in global.css */
           fontSize: 16,
           color: theme.colors.text,
-          backgroundColor: theme.colors.surface,
+          backgroundColor: isDark ? 'rgba(20, 20, 20, 0.92)' : 'rgba(255, 255, 255, 0.94)',
           borderWidth: 1,
           borderColor: theme.colors.border,
           borderRadius: theme.radius.md,
@@ -186,8 +205,12 @@ export default function LoginScreen() {
           letterSpacing: 0.6,
         },
       }),
-    [theme, insets.bottom]
+    [theme, insets.bottom, insets.top, isDark]
   );
+
+  const bgGradientColors = isDark
+    ? (['rgba(10, 10, 10, 0.42)', 'rgba(10, 10, 10, 0.72)', 'rgba(10, 10, 10, 0.9)'] as const)
+    : (['rgba(250, 250, 250, 0.5)', 'rgba(250, 250, 250, 0.78)', 'rgba(250, 250, 250, 0.92)'] as const);
 
   useFocusEffect(
     useCallback(() => {
@@ -296,10 +319,17 @@ export default function LoginScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <ImageBackground source={LOGIN_BACKGROUND} style={styles.bg} resizeMode="cover">
+      <LinearGradient
+        colors={[...bgGradientColors]}
+        locations={[0, 0.42, 1]}
+        style={styles.bgGradient}
+        pointerEvents="none"
+      />
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
       <View style={styles.content}>
         <View style={styles.formArea}>
           <View style={styles.wordmarkBlock}>
@@ -427,7 +457,8 @@ export default function LoginScreen() {
           </View>
         </View>
       </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </ImageBackground>
   );
 }
 

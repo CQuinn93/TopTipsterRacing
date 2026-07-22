@@ -9,8 +9,7 @@
     "android": "node ./scripts/expo-start.cjs start --android",
     "ios": "node ./scripts/expo-start.cjs start --ios",
     "web": "node ./scripts/expo-start.cjs start --web",
-    "build:web": "expo export --platform web",
-    "score-wc-trial": "tsx scripts/score-wc-trial-live.ts"
+    "build:web": "expo export --platform web"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
