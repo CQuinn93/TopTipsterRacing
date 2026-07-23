@@ -609,6 +609,7 @@ export default function LmsCompetitionDashboard() {
           fontFamily: theme.fontFamily.baiMedium,
           fontSize: 13,
           color: theme.colors.text,
+          flexShrink: 1,
         },
         teamTileNameSelected: { fontFamily: theme.fontFamily.baiSemiBold, color: theme.colors.accent },
         teamTileVs: {
