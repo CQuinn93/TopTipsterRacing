@@ -186,6 +186,15 @@ export default function LmsCompetitionDashboard() {
     return ids;
   }, [pickGwFixtures]);
 
+  const opponentByTeamId = useMemo(() => {
+    const map = new Map<string, LmsTeam>();
+    for (const f of pickGwFixtures) {
+      if (f.away_team) map.set(f.home_team_id, f.away_team);
+      if (f.home_team) map.set(f.away_team_id, f.home_team);
+    }
+    return map;
+  }, [pickGwFixtures]);
+
   const remainingTeams = useMemo(() => {
     const used = new Set(usedIds);
     if (pick?.team_id) used.delete(pick.team_id);
@@ -591,14 +600,25 @@ export default function LmsCompetitionDashboard() {
         teamTileDisabled: {
           opacity: 0.45,
         },
+        teamTileTextCol: {
+          flex: 1,
+          flexShrink: 1,
+          gap: 2,
+        },
         teamTileName: {
           fontFamily: theme.fontFamily.baiMedium,
           fontSize: 13,
           color: theme.colors.text,
-          flex: 1,
-          flexShrink: 1,
         },
         teamTileNameSelected: { fontFamily: theme.fontFamily.baiSemiBold, color: theme.colors.accent },
+        teamTileVs: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textSecondary,
+        },
+        teamTileVsSelected: {
+          color: theme.colors.accentDim,
+        },
         primaryBtn: {
           backgroundColor: theme.colors.accent,
           borderRadius: theme.radius.md,
@@ -1092,24 +1112,44 @@ export default function LmsCompetitionDashboard() {
                     <View style={styles.teamGrid}>
                       {remainingTeams.map((t) => {
                         const selected = selectedTeamId === t.id;
+                        const opponent = opponentByTeamId.get(t.id);
+                        const opponentLabel =
+                          opponent?.short_name || opponent?.name || null;
                         return (
                           <Pressable
                             key={t.id}
                             style={[styles.teamTile, selected && styles.teamTileSelected]}
                             onPress={() => setSelectedTeamId(t.id)}
                             accessibilityRole="button"
-                            accessibilityLabel={`Select ${t.name}`}
+                            accessibilityLabel={
+                              opponentLabel
+                                ? `Select ${t.name} versus ${opponentLabel}`
+                                : `Select ${t.name}`
+                            }
                           >
                             <TeamCrest uri={t.crest_url} label={t.name} size={28} />
-                            <Text
-                              style={[
-                                styles.teamTileName,
-                                selected && styles.teamTileNameSelected,
-                              ]}
-                              numberOfLines={2}
-                            >
-                              {t.name}
-                            </Text>
+                            <View style={styles.teamTileTextCol}>
+                              <Text
+                                style={[
+                                  styles.teamTileName,
+                                  selected && styles.teamTileNameSelected,
+                                ]}
+                                numberOfLines={2}
+                              >
+                                {t.name}
+                              </Text>
+                              {opponentLabel ? (
+                                <Text
+                                  style={[
+                                    styles.teamTileVs,
+                                    selected && styles.teamTileVsSelected,
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  vs {opponentLabel}
+                                </Text>
+                              ) : null}
+                            </View>
                             {selected ? (
                               <Ionicons
                                 name="checkmark-circle"
