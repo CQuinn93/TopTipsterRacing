@@ -1050,7 +1050,7 @@ begin
     values (
       '2026/27',
       i,
-      start_ts - interval '90 minutes',
+      start_ts - interval '20 minutes',
       start_ts,
       'upcoming'
     )

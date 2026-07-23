@@ -1,6 +1,6 @@
 /**
  * Theme: black, white, greys, green only.
- * Font: Laraz Regular / Laraz Light (loaded in _layout).
+ * Fonts: Laraz (racing), Bai Jamjuree (LMS), Swish / Polygon accents.
  * Supports light and dark mode based on system preference.
  */
 
@@ -27,6 +27,13 @@ const fontFamily = {
   input: 'Arial, Helvetica, sans-serif',
   polygon: 'Polygon-Regular',
   polygonItalic: 'Polygon-Italic',
+  /** Bai Jamjuree — LMS / football UI */
+  baiExtraLight: 'BaiJamjuree-ExtraLight',
+  baiLight: 'BaiJamjuree-Light',
+  bai: 'BaiJamjuree-Regular',
+  baiMedium: 'BaiJamjuree-Medium',
+  baiSemiBold: 'BaiJamjuree-SemiBold',
+  baiBold: 'BaiJamjuree-Bold',
 } as const;
 
 export const darkTheme = {

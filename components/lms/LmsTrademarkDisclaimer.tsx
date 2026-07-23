@@ -11,7 +11,7 @@ export function LmsTrademarkDisclaimer() {
       style={[
         styles.text,
         {
-          fontFamily: theme.fontFamily.light,
+          fontFamily: theme.fontFamily.baiExtraLight,
           color: theme.colors.textMuted,
         },
       ]}

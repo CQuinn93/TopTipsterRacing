@@ -44,6 +44,12 @@ export default function RootLayout() {
     'Swish-Regular': require('../assets/fonts/Swish-Regular.ttf'),
     'Polygon-Regular': require('../assets/fonts/Polygon-Regular.otf'),
     'Polygon-Italic': require('../assets/fonts/Polygon-Italic.otf'),
+    'BaiJamjuree-ExtraLight': require('../assets/fonts/BaiJamjuree-ExtraLight.ttf'),
+    'BaiJamjuree-Light': require('../assets/fonts/BaiJamjuree-Light.ttf'),
+    'BaiJamjuree-Regular': require('../assets/fonts/BaiJamjuree-Regular.ttf'),
+    'BaiJamjuree-Medium': require('../assets/fonts/BaiJamjuree-Medium.ttf'),
+    'BaiJamjuree-SemiBold': require('../assets/fonts/BaiJamjuree-SemiBold.ttf'),
+    'BaiJamjuree-Bold': require('../assets/fonts/BaiJamjuree-Bold.ttf'),
   });
 
   const isWeb = Platform.OS === 'web';

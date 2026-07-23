@@ -136,9 +136,11 @@ async function main() {
 
   const byExternal = new Map<number, LmsTeamRow>();
   const bySlug = new Map<string, LmsTeamRow>();
+  const byName = new Map<string, LmsTeamRow>();
   for (const t of teams) {
     if (t.external_id != null) byExternal.set(t.external_id, t);
     bySlug.set(t.slug, t);
+    byName.set(t.name.trim().toLowerCase(), t);
   }
 
   let teamsUpserted = 0;
@@ -146,7 +148,11 @@ async function main() {
     const slug = slugify(ft.shortName || ft.name);
     const shortName = (ft.tla || ft.shortName || ft.name).slice(0, 3).toUpperCase();
     const crestUrl = ft.crest?.trim() || null;
-    const existing = byExternal.get(ft.id) ?? bySlug.get(slug) ?? bySlug.get(slugify(ft.name));
+    const existing =
+      byExternal.get(ft.id) ??
+      bySlug.get(slug) ??
+      bySlug.get(slugify(ft.name)) ??
+      byName.get(ft.name.trim().toLowerCase());
 
     if (existing) {
       const { error } = await supabase
@@ -166,6 +172,7 @@ async function main() {
       existing.crest_url = crestUrl;
       byExternal.set(ft.id, existing);
       bySlug.set(existing.slug, existing);
+      byName.set(existing.name.trim().toLowerCase(), existing);
     } else {
       const { data, error } = await supabase
         .from('lms_teams')
@@ -182,12 +189,36 @@ async function main() {
       const row = data as LmsTeamRow;
       byExternal.set(ft.id, row);
       bySlug.set(row.slug, row);
+      byName.set(row.name.trim().toLowerCase(), row);
     }
     teamsUpserted += 1;
   }
   console.log(`[lms-sync] Teams upserted/updated: ${teamsUpserted}`);
 
-  // Refresh team map
+  // Remove leftover teams not in this PL season response (seed / old clubs)
+  const keepExternalIds = new Set(fdTeams.map((t) => t.id));
+  const { data: teamsAfterUpsert, error: afterErr } = await supabase
+    .from('lms_teams')
+    .select('id, external_id');
+  if (afterErr) throw afterErr;
+
+  const staleIds = ((teamsAfterUpsert ?? []) as { id: string; external_id: number | null }[])
+    .filter((t) => t.external_id == null || !keepExternalIds.has(t.external_id))
+    .map((t) => t.id);
+
+  if (staleIds.length) {
+    await supabase
+      .from('lms_fixtures')
+      .delete()
+      .or(`home_team_id.in.(${staleIds.join(',')}),away_team_id.in.(${staleIds.join(',')})`);
+    await supabase.from('lms_picks').delete().in('team_id', staleIds);
+    await supabase.from('lms_used_teams').delete().in('team_id', staleIds);
+    const { error: delErr } = await supabase.from('lms_teams').delete().in('id', staleIds);
+    if (delErr) throw delErr;
+    console.log(`[lms-sync] Removed stale / non-PL teams: ${staleIds.length}`);
+  }
+
+  // Refresh team map for fixture linking
   const { data: allTeams, error: allTeamsErr } = await supabase
     .from('lms_teams')
     .select('id, name, short_name, slug, external_id, crest_url');
@@ -239,7 +270,7 @@ async function main() {
       kickoffs.length > 0
         ? new Date(kickoffs[0]).toISOString()
         : new Date(Date.UTC(2026, 7, 22, 11, 30) + (n - 1) * 7 * 24 * 3600 * 1000).toISOString();
-    const deadlineAt = new Date(new Date(startsAt).getTime() - 90 * 60 * 1000).toISOString();
+    const deadlineAt = new Date(new Date(startsAt).getTime() - 20 * 60 * 1000).toISOString();
 
     const existing = gwByNumber.get(n);
     if (existing) {
@@ -354,44 +385,74 @@ async function main() {
   }
   console.log(`[lms-sync] Fixtures upserted/updated: ${fixturesUpserted}; skipped: ${fixturesSkipped}`);
 
-  // --- Auto-settle finished gameweeks ---
+  // --- Auto-assign missed picks (deadline passed) + settle finished GWs ---
+  let autoAssigned = 0;
   let settled = 0;
-  if (AUTO_SETTLE) {
-    for (const gw of gwByNumber.values()) {
-      if (gw.status === 'complete') continue;
-      const { count, error: cntErr } = await supabase
-        .from('lms_fixtures')
-        .select('id', { count: 'exact', head: true })
-        .eq('gameweek_id', gw.id);
-      if (cntErr) throw cntErr;
-      if (!count || count < 1) continue;
+  for (const gw of gwByNumber.values()) {
+    if (gw.status === 'complete') continue;
 
-      const { count: unfinished, error: unfinishedErr } = await supabase
-        .from('lms_fixtures')
-        .select('id', { count: 'exact', head: true })
-        .eq('gameweek_id', gw.id)
-        .neq('status', 'finished');
-      if (unfinishedErr) throw unfinishedErr;
-      if ((unfinished ?? 0) > 0) continue;
-
-      const { data: settleRes, error: settleErr } = await supabase.rpc('lms_settle_gameweek_internal', {
-        p_gameweek_id: gw.id,
-      });
-      if (settleErr) {
-        console.warn(`[lms-sync] Settle GW${gw.number} failed:`, settleErr.message);
-        continue;
-      }
-      const ok = (settleRes as { success?: boolean })?.success;
-      if (ok) {
-        settled += 1;
-        console.log(`[lms-sync] Settled GW${gw.number}`);
+    const { data: gwRow } = await supabase
+      .from('lms_gameweeks')
+      .select('deadline_at')
+      .eq('id', gw.id)
+      .maybeSingle();
+    const deadlineMs = gwRow?.deadline_at ? new Date(gwRow.deadline_at as string).getTime() : NaN;
+    if (Number.isFinite(deadlineMs) && Date.now() >= deadlineMs) {
+      const { data: assignRes, error: assignErr } = await supabase.rpc(
+        'lms_auto_assign_missed_picks',
+        { p_gameweek_id: gw.id }
+      );
+      if (assignErr) {
+        console.warn(`[lms-sync] Auto-assign GW${gw.number} failed:`, assignErr.message);
       } else {
-        console.warn(`[lms-sync] Settle GW${gw.number} response:`, settleRes);
+        const n = Number((assignRes as { assigned?: number })?.assigned ?? 0);
+        if (n > 0) {
+          autoAssigned += n;
+          console.log(`[lms-sync] Auto-assigned ${n} pick(s) for GW${gw.number}`);
+        }
       }
+    }
+
+    if (!AUTO_SETTLE) continue;
+
+    const { count, error: cntErr } = await supabase
+      .from('lms_fixtures')
+      .select('id', { count: 'exact', head: true })
+      .eq('gameweek_id', gw.id);
+    if (cntErr) throw cntErr;
+    if (!count || count < 1) continue;
+
+    const { count: unfinished, error: unfinishedErr } = await supabase
+      .from('lms_fixtures')
+      .select('id', { count: 'exact', head: true })
+      .eq('gameweek_id', gw.id)
+      .neq('status', 'finished');
+    if (unfinishedErr) throw unfinishedErr;
+    if ((unfinished ?? 0) > 0) continue;
+
+    const { data: settleRes, error: settleErr } = await supabase.rpc('lms_settle_gameweek_internal', {
+      p_gameweek_id: gw.id,
+    });
+    if (settleErr) {
+      console.warn(`[lms-sync] Settle GW${gw.number} failed:`, settleErr.message);
+      continue;
+    }
+    const ok = (settleRes as { success?: boolean })?.success;
+    if (ok) {
+      settled += 1;
+      console.log(`[lms-sync] Settled GW${gw.number}`);
+    } else {
+      console.warn(`[lms-sync] Settle GW${gw.number} response:`, settleRes);
     }
   }
 
-  console.log('[lms-sync] Done.', { teamsUpserted, fixturesUpserted, fixturesSkipped, settled });
+  console.log('[lms-sync] Done.', {
+    teamsUpserted,
+    fixturesUpserted,
+    fixturesSkipped,
+    autoAssigned,
+    settled,
+  });
 }
 
 main().catch((e) => {
