@@ -10,8 +10,7 @@ import {
   Alert,
   ActivityIndicator,
   Linking,
-  ImageBackground,
-  useColorScheme,
+  useWindowDimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,13 +19,45 @@ import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const LOGIN_BACKGROUND = require('../../assets/Background.png');
+function ContourDecor({ color, compact }: { color: string; compact: boolean }) {
+  const rings = compact ? [140, 210, 280] : [200, 300, 400, 520];
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <View
+        style={{
+          position: 'absolute',
+          right: compact ? -100 : -160,
+          top: compact ? -30 : -60,
+          width: compact ? 340 : 580,
+          height: compact ? 340 : 580,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {rings.map((size) => (
+          <View
+            key={size}
+            style={{
+              position: 'absolute',
+              width: size,
+              height: size,
+              borderRadius: size / 2,
+              borderWidth: StyleSheet.hairlineWidth,
+              borderColor: color,
+              opacity: 0.55,
+            }}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
 
 export default function LoginScreen() {
   const theme = useTheme();
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const isCompact = width < 420 || height < 680;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
@@ -40,6 +71,7 @@ export default function LoginScreen() {
       StyleSheet.create({
         bg: {
           flex: 1,
+          backgroundColor: '#0a0a0a',
         },
         bgGradient: {
           ...StyleSheet.absoluteFillObject,
@@ -49,6 +81,7 @@ export default function LoginScreen() {
           padding: theme.spacing.lg,
           paddingTop: Math.max(theme.spacing.lg, insets.top + theme.spacing.sm),
           paddingBottom: Math.max(theme.spacing.lg, insets.bottom + theme.spacing.sm),
+          zIndex: 1,
         },
         content: {
           flex: 1,
@@ -66,13 +99,10 @@ export default function LoginScreen() {
         wordmarkTop: {
           fontFamily: theme.fontFamily.swish,
           fontSize: Platform.OS === 'web' ? 40 : 48,
-          color: theme.colors.text,
+          color: '#fafafa',
           textAlign: 'center',
           marginBottom: theme.spacing.xs,
           letterSpacing: Platform.OS === 'web' ? 1 : 1.2,
-          textShadowColor: isDark ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.85)',
-          textShadowOffset: { width: 0, height: 1 },
-          textShadowRadius: 6,
         },
         wordmarkSub: {
           fontFamily: theme.fontFamily.regular,
@@ -82,18 +112,14 @@ export default function LoginScreen() {
           textAlign: 'center',
           marginTop: 8,
           letterSpacing: Platform.OS === 'web' ? 6 : 7,
-          textShadowColor: isDark ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.75)',
-          textShadowOffset: { width: 0, height: 1 },
-          textShadowRadius: 4,
         },
         input: {
           fontFamily: theme.fontFamily.input,
-          /* ≥16px avoids iOS Safari auto-zoom on focus; web also enforced in global.css */
           fontSize: 16,
-          color: theme.colors.text,
-          backgroundColor: isDark ? 'rgba(20, 20, 20, 0.92)' : 'rgba(255, 255, 255, 0.94)',
+          color: '#fafafa',
+          backgroundColor: 'rgba(20, 20, 20, 0.92)',
           borderWidth: 1,
-          borderColor: theme.colors.border,
+          borderColor: '#2a2a2a',
           borderRadius: theme.radius.md,
           paddingHorizontal: theme.spacing.md,
           paddingVertical: theme.spacing.md,
@@ -145,7 +171,7 @@ export default function LoginScreen() {
         forgotPasswordText: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 13,
-          color: theme.colors.textSecondary,
+          color: '#a3a3a3',
           textAlign: 'center',
           textDecorationLine: 'underline',
           marginTop: theme.spacing.sm,
@@ -161,7 +187,7 @@ export default function LoginScreen() {
         policyLink: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 13,
-          color: theme.colors.textMuted,
+          color: '#737373',
           textDecorationLine: 'underline',
         },
         tabletModeRow: {
@@ -205,12 +231,10 @@ export default function LoginScreen() {
           letterSpacing: 0.6,
         },
       }),
-    [theme, insets.bottom, insets.top, isDark]
+    [theme, insets.bottom, insets.top]
   );
 
-  const bgGradientColors = isDark
-    ? (['rgba(10, 10, 10, 0.42)', 'rgba(10, 10, 10, 0.72)', 'rgba(10, 10, 10, 0.9)'] as const)
-    : (['rgba(250, 250, 250, 0.5)', 'rgba(250, 250, 250, 0.78)', 'rgba(250, 250, 250, 0.92)'] as const);
+  const loginBg = ['#0a0a0a', '#111111', '#0a0a0a'] as const;
 
   useFocusEffect(
     useCallback(() => {
@@ -319,13 +343,14 @@ export default function LoginScreen() {
   };
 
   return (
-    <ImageBackground source={LOGIN_BACKGROUND} style={styles.bg} resizeMode="cover">
+    <View style={styles.bg}>
       <LinearGradient
-        colors={[...bgGradientColors]}
-        locations={[0, 0.42, 1]}
+        colors={[...loginBg]}
+        locations={[0, 0.45, 1]}
         style={styles.bgGradient}
         pointerEvents="none"
       />
+      <ContourDecor color="rgba(250, 250, 250, 0.16)" compact={isCompact} />
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -342,7 +367,7 @@ export default function LoginScreen() {
           <TextInput
             style={styles.input}
             placeholder="Email"
-            placeholderTextColor={theme.colors.textMuted}
+            placeholderTextColor="#737373"
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
@@ -353,7 +378,7 @@ export default function LoginScreen() {
             <TextInput
               style={[styles.input, styles.passwordInput]}
               placeholder="Password"
-              placeholderTextColor={theme.colors.textMuted}
+              placeholderTextColor="#737373"
               value={password}
               onChangeText={setPassword}
               secureTextEntry={!passwordVisible}
@@ -382,7 +407,7 @@ export default function LoginScreen() {
             <TextInput
               style={styles.input}
               placeholder="Username (for leaderboard)"
-              placeholderTextColor={theme.colors.textMuted}
+              placeholderTextColor="#737373"
               value={username}
               onChangeText={setUsername}
               autoCapitalize="none"
@@ -458,7 +483,7 @@ export default function LoginScreen() {
         </View>
       </View>
       </KeyboardAvoidingView>
-    </ImageBackground>
+    </View>
   );
 }
 

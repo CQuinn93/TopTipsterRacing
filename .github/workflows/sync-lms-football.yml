@@ -1,0 +1,28 @@
+# Sync Premier League LMS data from football-data.org.
+# Triggered by cron-job.org (recommended) or manually via workflow_dispatch.
+# GitHub Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY, Football_API
+# Optional: LMS_SEASON, FOOTBALL_DATA_SEASON, LMS_AUTO_SETTLE
+name: Sync LMS football data
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Sync LMS football data
+        run: npx tsx scripts/sync-lms-football.ts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          Football_API: ${{ secrets.Football_API }}
+          LMS_SEASON: '2026/27'
+          FOOTBALL_DATA_SEASON: '2026'
+          LMS_AUTO_SETTLE: 'true'

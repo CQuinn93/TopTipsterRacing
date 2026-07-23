@@ -15,13 +15,12 @@ import {
   Platform,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
 import type { Theme } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
+import { AdminScreenLayout, useAdminAccent } from '@/components/AdminScreenLayout';
 
 const IRISH_COURSES = [
   'Ballinrobe', 'Bellewstown', 'Clonmel', 'Cork', 'The Curragh', 'Down Royal', 'Downpatrick', 'Dundalk',
@@ -160,12 +159,18 @@ type TabId = 'requests' | 'admins' | 'create' | 'competitionList' | 'selections'
 
 export default function AdminScreen() {
   const activeTheme = useTheme();
-  const styles = useMemo(() => createAdminStyles(activeTheme), [activeTheme]);
+  const admin = useAdminAccent();
+  const styles = useMemo(
+    () => createAdminStyles(activeTheme, admin.accent, admin.accentMuted),
+    [activeTheme, admin.accent, admin.accentMuted]
+  );
   const params = useLocalSearchParams<{ code?: string; returnTo?: string }>();
   const adminCode = String(params.code ?? '').trim();
   const returnToRaw = String(params.returnTo ?? '').trim();
   const returnTo =
-    returnToRaw === '/(auth)/tablet-mode' || returnToRaw.startsWith('/(app)')
+    returnToRaw === '/(auth)/tablet-mode' ||
+    returnToRaw === '/competition-hub' ||
+    returnToRaw.startsWith('/(app)')
       ? returnToRaw
       : '/(auth)/tablet-mode';
   const [tab, setTab] = useState<TabId>('requests');
@@ -454,7 +459,20 @@ export default function AdminScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: activeTheme.colors.background }]} edges={['top']}>
+    <AdminScreenLayout
+      sectionTitle="Racing"
+      onExit={() => router.replace(returnTo as any)}
+      tabs={[
+        { key: 'requests', label: 'Join requests' },
+        { key: 'admins', label: 'Admin access' },
+        { key: 'create', label: 'New competition' },
+        { key: 'competitionList', label: 'Competitions' },
+        { key: 'selections', label: 'Edit selections' },
+      ]}
+      activeTab={tab}
+      onTabChange={(key) => setTab(key as TabId)}
+      loading={!!adminCode && loading}
+    >
       {!adminCode ? (
         <View style={styles.scrollContent}>
           <Text style={styles.empty}>Admin session expired. Please reopen Admin tools from the menu.</Text>
@@ -462,69 +480,12 @@ export default function AdminScreen() {
             <Text style={styles.backButtonText}>Back</Text>
           </TouchableOpacity>
         </View>
-      ) : (
-      <>
-      <View style={styles.adminChrome}>
-        <View style={styles.adminChromeTop}>
-          <View style={styles.adminBadge}>
-            <Ionicons name="shield-checkmark" size={14} color={activeTheme.colors.barAccent} />
-            <Text style={styles.adminBadgeText}>Admin console</Text>
-          </View>
-          <TouchableOpacity style={styles.exitPill} onPress={() => router.replace(returnTo as any)} activeOpacity={0.8}>
-            <Ionicons name="log-out-outline" size={16} color={activeTheme.colors.textSecondary} />
-            <Text style={styles.exitPillText}>Exit</Text>
-          </TouchableOpacity>
-        </View>
-        <Text style={styles.title}>Operations</Text>
-        <Text style={styles.adminSubTitle}>
-          Join requests, admin access, competition list (codes & creators), new competitions, and selection edits.
-        </Text>
-      </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.tabScroll}
-        contentContainerStyle={styles.tabScrollContent}
-      >
-        {(
-          [
-            { id: 'requests' as const, label: 'Join requests', icon: 'people-outline' as const },
-            { id: 'admins' as const, label: 'Admin access', icon: 'key-outline' as const },
-            { id: 'create' as const, label: 'New competition', icon: 'add-circle-outline' as const },
-            { id: 'competitionList' as const, label: 'Competitions', icon: 'trophy-outline' as const },
-            { id: 'selections' as const, label: 'Edit selections', icon: 'create-outline' as const },
-          ] as const
-        ).map((item) => {
-          const active = tab === item.id;
-          return (
-            <TouchableOpacity
-              key={item.id}
-              style={[styles.tabPill, active && styles.tabPillActive]}
-              onPress={() => setTab(item.id)}
-              activeOpacity={0.85}
-            >
-              <Ionicons
-                name={item.icon}
-                size={16}
-                color={active ? activeTheme.colors.white : activeTheme.colors.textSecondary}
-              />
-              <Text style={[styles.tabPillText, active && styles.tabPillTextActive]} numberOfLines={1}>
-                {item.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-
-      {loading ? (
-        <ActivityIndicator size="large" color={activeTheme.colors.accent} style={styles.loader} />
       ) : tab === 'requests' ? (
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={activeTheme.colors.accent} />
+            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={admin.accent} />
           }
         >
           <Text style={styles.pullToRefreshHint}>Pull down to refresh</Text>
@@ -570,7 +531,7 @@ export default function AdminScreen() {
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={activeTheme.colors.accent} />
+            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={admin.accent} />
           }
         >
           <Text style={styles.pullToRefreshHint}>Pull down to refresh</Text>
@@ -830,7 +791,7 @@ export default function AdminScreen() {
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={activeTheme.colors.accent} />
+            <RefreshControl refreshing={refreshing} onRefresh={load} tintColor={admin.accent} />
           }
         >
           <Text style={styles.pullToRefreshHint}>Pull down to refresh</Text>
@@ -876,8 +837,8 @@ export default function AdminScreen() {
                     <Text
                       style={[
                         styles.statusPillText,
-                        c.display_status === 'live' && { color: activeTheme.colors.accent },
-                        c.display_status === 'upcoming' && { color: activeTheme.colors.barAccent },
+                        c.display_status === 'live' && { color: admin.accent },
+                        c.display_status === 'upcoming' && { color: admin.accent },
                         c.display_status === 'complete' && { color: activeTheme.colors.textMuted },
                       ]}
                     >
@@ -987,13 +948,11 @@ export default function AdminScreen() {
           )}
         </ScrollView>
       )}
-      </>
-      )}
-    </SafeAreaView>
+    </AdminScreenLayout>
   );
 }
 
-function createAdminStyles(t: Theme) {
+function createAdminStyles(t: Theme, adminAccent: string, adminAccentMuted: string) {
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: t.colors.background },
   adminChrome: {
@@ -1020,14 +979,14 @@ function createAdminStyles(t: Theme) {
     borderRadius: t.radius.sm,
     backgroundColor: t.colors.surface,
     borderWidth: 1,
-    borderColor: t.colors.barAccent,
+    borderColor: adminAccent,
   },
   adminBadgeText: {
     fontFamily: t.fontFamily.regular,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1,
-    color: t.colors.barAccent,
+    color: adminAccent,
     textTransform: 'uppercase',
   },
   exitPill: {
@@ -1069,7 +1028,7 @@ function createAdminStyles(t: Theme) {
   backButtonText: {
     fontFamily: t.fontFamily.regular,
     fontSize: 14,
-    color: t.colors.accent,
+    color: adminAccent,
     textDecorationLine: 'underline',
   },
   tabScroll: {
@@ -1098,8 +1057,8 @@ function createAdminStyles(t: Theme) {
     backgroundColor: t.colors.background,
   },
   tabPillActive: {
-    backgroundColor: t.colors.barAccent,
-    borderColor: t.colors.barAccent,
+    backgroundColor: adminAccent,
+    borderColor: adminAccent,
   },
   tabPillText: {
     fontFamily: t.fontFamily.regular,
@@ -1145,7 +1104,7 @@ function createAdminStyles(t: Theme) {
     borderWidth: 1,
     borderColor: t.colors.border,
     borderLeftWidth: 3,
-    borderLeftColor: t.colors.barAccent,
+    borderLeftColor: adminAccent,
   },
   catalogIntroTitle: {
     fontFamily: t.fontFamily.regular,
@@ -1176,7 +1135,7 @@ function createAdminStyles(t: Theme) {
     justifyContent: 'center',
   },
   compTabActive: {
-    backgroundColor: t.colors.accent,
+    backgroundColor: adminAccent,
   },
   compTabText: {
     fontFamily: t.fontFamily.regular,
@@ -1195,7 +1154,7 @@ function createAdminStyles(t: Theme) {
     borderWidth: 1,
     borderColor: t.colors.border,
     borderLeftWidth: 3,
-    borderLeftColor: t.colors.barAccent,
+    borderLeftColor: adminAccent,
   },
   catalogCardTop: {
     flexDirection: 'row',
@@ -1239,7 +1198,7 @@ function createAdminStyles(t: Theme) {
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: 2,
-    color: t.colors.accent,
+    color: adminAccent,
   },
   catalogCreator: {
     fontFamily: t.fontFamily.input,
@@ -1260,12 +1219,12 @@ function createAdminStyles(t: Theme) {
     fontWeight: '700',
   },
   statusPillLive: {
-    backgroundColor: t.colors.accentMuted,
-    borderColor: t.colors.accent,
+    backgroundColor: adminAccentMuted,
+    borderColor: adminAccent,
   },
   statusPillUpcoming: {
     backgroundColor: t.colors.surface,
-    borderColor: t.colors.barAccent,
+    borderColor: adminAccent,
   },
   statusPillComplete: {
     backgroundColor: t.colors.surface,
@@ -1343,7 +1302,7 @@ function createAdminStyles(t: Theme) {
   modalClose: {
     fontFamily: t.fontFamily.regular,
     fontSize: 16,
-    color: t.colors.barAccent,
+    color: adminAccent,
     fontWeight: '600',
   },
   courseSearchInput: {
@@ -1373,9 +1332,9 @@ function createAdminStyles(t: Theme) {
     borderWidth: 1,
     borderColor: t.colors.border,
   },
-  courseFilterChipActive: { backgroundColor: t.colors.accentMuted, borderColor: t.colors.accent },
+  courseFilterChipActive: { backgroundColor: adminAccentMuted, borderColor: adminAccent },
   courseFilterChipText: { fontFamily: t.fontFamily.regular, fontSize: 14, color: t.colors.textSecondary },
-  courseFilterChipTextActive: { color: t.colors.accent, fontWeight: '600' },
+  courseFilterChipTextActive: { color: adminAccent, fontWeight: '600' },
   courseList: { maxHeight: 400 },
   courseListEmpty: {
     fontFamily: t.fontFamily.regular,
@@ -1390,15 +1349,15 @@ function createAdminStyles(t: Theme) {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: t.colors.border,
   },
-  courseItemActive: { backgroundColor: t.colors.accentMuted },
+  courseItemActive: { backgroundColor: adminAccentMuted },
   courseItemText: {
     fontFamily: t.fontFamily.regular,
     fontSize: 16,
     color: t.colors.text,
   },
-  courseItemTextActive: { color: t.colors.accent, fontWeight: '600' },
+  courseItemTextActive: { color: adminAccent, fontWeight: '600' },
   createButton: {
-    backgroundColor: t.colors.accent,
+    backgroundColor: adminAccent,
     borderRadius: t.radius.md,
     paddingVertical: t.spacing.md,
     alignItems: 'center',
@@ -1442,7 +1401,7 @@ function createAdminStyles(t: Theme) {
     borderWidth: 1,
     borderColor: t.colors.border,
     borderLeftWidth: 3,
-    borderLeftColor: t.colors.barAccent,
+    borderLeftColor: adminAccent,
   },
   cardName: {
     fontFamily: t.fontFamily.regular,
@@ -1458,13 +1417,13 @@ function createAdminStyles(t: Theme) {
   editHint: {
     fontFamily: t.fontFamily.regular,
     fontSize: 12,
-    color: t.colors.accent,
+    color: adminAccent,
     marginTop: t.spacing.xs,
   },
   actions: { flexDirection: 'row', gap: t.spacing.sm, marginTop: t.spacing.sm },
   approveBtn: {
     flex: 1,
-    backgroundColor: t.colors.accent,
+    backgroundColor: adminAccent,
     borderRadius: t.radius.sm,
     paddingVertical: t.spacing.sm,
     alignItems: 'center',
@@ -1500,9 +1459,9 @@ function createAdminStyles(t: Theme) {
     borderWidth: 1,
     borderColor: t.colors.border,
   },
-  chipActive: { backgroundColor: t.colors.accentMuted, borderColor: t.colors.accent },
+  chipActive: { backgroundColor: adminAccentMuted, borderColor: adminAccent },
   chipText: { fontFamily: t.fontFamily.regular, fontSize: 14, color: t.colors.textSecondary },
-  chipTextActive: { color: t.colors.accent },
+  chipTextActive: { color: adminAccent },
   editSelectionsIntro: {
     marginBottom: t.spacing.xl,
     paddingVertical: t.spacing.md,
@@ -1512,7 +1471,7 @@ function createAdminStyles(t: Theme) {
     borderWidth: 1,
     borderColor: t.colors.border,
     borderLeftWidth: 3,
-    borderLeftColor: t.colors.barAccent,
+    borderLeftColor: adminAccent,
   },
   editSelectionsTitle: {
     fontFamily: t.fontFamily.regular,
@@ -1564,7 +1523,7 @@ function createAdminStyles(t: Theme) {
     borderWidth: 1,
     borderColor: t.colors.border,
     borderLeftWidth: 3,
-    borderLeftColor: t.colors.accent,
+    borderLeftColor: adminAccent,
   },
   selectionCardName: {
     fontFamily: t.fontFamily.regular,
@@ -1581,7 +1540,7 @@ function createAdminStyles(t: Theme) {
   selectionCardEdit: {
     fontFamily: t.fontFamily.regular,
     fontSize: 13,
-    color: t.colors.accent,
+    color: adminAccent,
     marginTop: t.spacing.xs,
   },
   });

@@ -107,13 +107,38 @@ Then **CREATE** (or **Save**).
 
 ---
 
+### Job 4: Sync LMS football data (a few times per day)
+
+**COMMON tab**
+
+- **Title:** `Sync LMS football data`
+- **URL:**  
+  `https://api.github.com/repos/OWNER/REPO/actions/workflows/sync-lms-football.yml/dispatches`  
+  (or the numeric workflow ID once the workflow exists on GitHub).
+- **Enable job:** On.
+- **Execution schedule:** **Custom** crontab, e.g. `0 */6 * * *` (every 6 hours UTC). On match days you can run more often, e.g. `0 12,15,18,21 * * *`.
+- **Schedule timezone:** UTC (or adjust for Europe/Dublin).
+
+**ADVANCED tab**
+
+- **Request method:** **POST**.
+- **Request headers:** Same as Job 1.
+- **Request body:** `{"ref":"BRANCH"}`.
+
+Then **CREATE** (or **Save**).
+
+Requires GitHub Secret **`Football_API`** (football-data.org token), plus the usual `SUPABASE_URL` / `SUPABASE_SERVICE_KEY`.
+
+---
+
 ## 4. Summary
 
-| cron-job.org title   | Workflow file            | Schedule (UTC)              |
-|----------------------|--------------------------|-----------------------------|
-| Update race results  | update-race-results.yml  | Every 10 min, 12:00–19:59   |
-| Pull races           | pull-races.yml           | 17:00 and 18:00 daily       |
-| Remove old races     | remove-old-races.yml     | 18:00 daily                 |
+| cron-job.org title      | Workflow file            | Schedule (UTC)              |
+|-------------------------|--------------------------|-----------------------------|
+| Update race results     | update-race-results.yml  | Every 10 min, 12:00–19:59   |
+| Pull races              | pull-races.yml           | 17:00 and 18:00 daily       |
+| Remove old races        | remove-old-races.yml     | 18:00 daily                 |
+| Sync LMS football data  | sync-lms-football.yml    | Every 6 hours (or as needed)|
 
 - **COMMON:** Title, URL (GitHub API dispatch URL), Schedule.
 - **ADVANCED:** Method = POST, Headers (Authorization with your PAT, Accept, X-GitHub-Api-Version, Content-Type), Body = `{"ref":"main"}` (or your branch).

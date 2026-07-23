@@ -17,6 +17,7 @@ These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/hor
 | **pull-races.ts** | 1) DB: Competitions where tomorrow ∈ [festival_start_date, festival_end_date]; get their **course** (one per competition). 2) API: One call GET /racecards for tomorrow; filter by those courses. 3) API: One call per race GET /race/{id} for runners (with delay). Each race gets an extra **FAV** option (SP favourite). 4) DB: One bulk upload – upsert race_days, insert races, insert horses, upsert competition_race_days. | **5pm, 6pm UK** – cron `0 17,18 * * *` UTC (5/6 GMT; 6/7 BST). Second run is backup. Competitions for the following day must be created **before 8pm UK** to get races that night. |
 | **update-race-results.ts** | Gets races where `scheduled_time_utc` + 15 min < now and `is_finished = false`. Calls GET /race/{id}. Updates **horses** (position, sp, is_fav, etc.), **races.is_finished**. Replaces non-runner selections with FAV via RPC. FAV backfill (missing selections after deadline) is done by Supabase cron (migration 030). | **30 min after each race**; cron every 10–12 min. |
 | **remove-old-races.ts** | Deletes **race_days** where `race_date` is older than **5 days** (cascade deletes `races` and `horses`). Keeps DB small. | Daily, e.g. **18:00 UTC** – cron `0 18 * * *`. |
+| **sync-lms-football.ts** | Syncs Premier League **teams (incl. crest URLs) + fixtures/results** from [football-data.org](https://www.football-data.org/) into `lms_teams` / `lms_gameweeks` / `lms_fixtures`, then auto-settles finished gameweeks via `lms_settle_gameweek_internal`. Crests are cached on `lms_teams.crest_url` for in-app identification only. Uses 2 API calls per run. | Every 6 hours (GitHub Action) or on demand. |
 
 ## Database tables (migrations 010–011)
 
@@ -36,6 +37,7 @@ These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/hor
 
 - **SUPABASE_URL**, **SUPABASE_SERVICE_KEY** (or SUPABASE_SERVICE_ROLE_KEY)
 - **RAPIDAPI_KEY** (for pull-races and update-race-results)
+- **Football_API** – football-data.org token for **sync-lms-football.ts** (GitHub Secret name: `Football_API`)
 - **RACE_FETCH_DELAY_MS** (optional) – delay in ms between each GET /race/{id} in pull-races. Default 6000 (6s = 10/min, fastest). Increase if you hit rate limits.
 - **COURSE_FILTER** – ignored; courses are taken from active competitions in the DB (one course per competition).
 - **RESEND_API_KEY** (optional) – if set with **PULL_RACES_NOTIFICATION_EMAIL**, pull-races will email a short report after each run (includes **API calls made**; success: courses and races added; skipped: already had data; errors: message). Same key can be used for update-race-results if **UPDATE_RESULTS_NOTIFICATION_EMAIL** is set. Sign up at [resend.com](https://resend.com), create an API key, and add to your env or GitHub Secrets. Emails are sent from `onboarding@resend.dev` (Resend’s test sender). With the test sender, the recipient must be the same email you used to sign up at resend.com; for other addresses, verify a domain in Resend and set the `from` address in the script.
