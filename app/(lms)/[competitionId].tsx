@@ -242,6 +242,15 @@ export default function LmsCompetitionDashboard() {
     return map;
   }, [pickGwFixtures, competitionTeams, playingTeamIds]);
 
+  const opponentByTeamId = useMemo(() => {
+    const map = new Map<string, LmsTeam>();
+    for (const f of pickGwFixtures) {
+      if (f.away_team) map.set(f.home_team_id, f.away_team);
+      if (f.home_team) map.set(f.away_team_id, f.home_team);
+    }
+    return map;
+  }, [pickGwFixtures]);
+
   /** Unused competition-pool teams shown on Selection (pickable + greyed). */
   const selectionTeams = useMemo(() => {
     const used = new Set(usedIds);
@@ -820,14 +829,26 @@ export default function LmsCompetitionDashboard() {
         teamTileDisabled: {
           opacity: 0.45,
         },
+        teamTileTextCol: {
+          flex: 1,
+          flexShrink: 1,
+          gap: 2,
+        },
         teamTileName: {
           fontFamily: theme.fontFamily.baiMedium,
           fontSize: 13,
           color: theme.colors.text,
-          flex: 1,
           flexShrink: 1,
         },
         teamTileNameSelected: { fontFamily: theme.fontFamily.baiSemiBold, color: theme.colors.accent },
+        teamTileVs: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textSecondary,
+        },
+        teamTileVsSelected: {
+          color: theme.colors.accentDim,
+        },
         primaryBtn: {
           backgroundColor: theme.colors.accent,
           borderRadius: theme.radius.md,
@@ -989,11 +1010,6 @@ export default function LmsCompetitionDashboard() {
           fontSize: 10,
           color: theme.colors.textMuted,
           marginTop: 2,
-        },
-        teamTileCol: {
-          flex: 1,
-          flexShrink: 1,
-          gap: 2,
         },
         adminRow: {
           flexDirection: 'row',
@@ -1461,6 +1477,9 @@ export default function LmsCompetitionDashboard() {
                         const selected = selectedTeamId === t.id;
                         const pickable = playingTeamIds.has(t.id);
                         const note = unavailableNoteByTeamId.get(t.id);
+                        const opponent = opponentByTeamId.get(t.id);
+                        const opponentLabel =
+                          opponent?.short_name || opponent?.name || null;
                         return (
                           <Pressable
                             key={t.id}
@@ -1477,13 +1496,15 @@ export default function LmsCompetitionDashboard() {
                             accessibilityRole="button"
                             accessibilityState={{ disabled: !pickable, selected }}
                             accessibilityLabel={
-                              pickable
-                                ? `Select ${t.name}`
-                                : `${t.name} unavailable: ${note ?? 'No game'}`
+                              !pickable
+                                ? `${t.name} unavailable: ${note ?? 'No game'}`
+                                : opponentLabel
+                                  ? `Select ${t.name} versus ${opponentLabel}`
+                                  : `Select ${t.name}`
                             }
                           >
                             <TeamCrest uri={t.crest_url} label={t.name} size={28} />
-                            <View style={styles.teamTileCol}>
+                            <View style={styles.teamTileTextCol}>
                               <Text
                                 style={[
                                   styles.teamTileName,
@@ -1493,6 +1514,17 @@ export default function LmsCompetitionDashboard() {
                               >
                                 {t.name}
                               </Text>
+                              {opponentLabel ? (
+                                <Text
+                                  style={[
+                                    styles.teamTileVs,
+                                    selected && pickable && styles.teamTileVsSelected,
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  vs {opponentLabel}
+                                </Text>
+                              ) : null}
                               {!pickable && note ? (
                                 <Text style={styles.teamTileNote} numberOfLines={2}>
                                   {note}
