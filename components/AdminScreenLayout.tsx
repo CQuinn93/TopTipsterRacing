@@ -5,7 +5,6 @@ import {
   StyleSheet,
   Pressable,
   useWindowDimensions,
-  useColorScheme,
   Platform,
   ActivityIndicator,
 } from 'react-native';
@@ -77,7 +76,7 @@ export function AdminScreenLayout({
   loading,
 }: AdminScreenLayoutProps) {
   const theme = useTheme();
-  const isDark = useColorScheme() === 'dark';
+  const isDark = true;
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const admin = getAdminAccent(!!isDark);
@@ -275,6 +274,6 @@ export function AdminScreenLayout({
 }
 
 export function useAdminAccent() {
-  const isDark = useColorScheme() === 'dark';
+  const isDark = true;
   return getAdminAccent(!!isDark);
 }

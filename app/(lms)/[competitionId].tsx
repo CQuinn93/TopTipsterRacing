@@ -8,6 +8,8 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
+  TextInput,
+  Platform,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,11 +20,16 @@ import { TeamCrest } from '@/components/lms/TeamCrest';
 import { TeamFormDots } from '@/components/lms/TeamFormDots';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import {
+  lmsAdminSetCompetitionTeam,
+  lmsAdminSetFixtureExcluded,
+  lmsAdminDeleteCompetition,
   lmsGetCompetition,
   lmsGetCompetitionCurrentGameweek,
   lmsGetMyParticipant,
   lmsGetMyPick,
+  lmsIsProfileAdmin,
   lmsListCompetitionGameweeks,
+  lmsListCompetitionTeamIds,
   lmsListCompletedPicks,
   lmsListFixturesForGameweek,
   lmsListParticipants,
@@ -40,7 +47,7 @@ import {
   type LmsTeam,
 } from '@/lib/lms/api';
 
-type TabKey = 'gameweeks' | 'selection' | 'leaderboard';
+type TabKey = 'gameweeks' | 'selection' | 'leaderboard' | 'admin';
 
 export default function LmsCompetitionDashboard() {
   const theme = useTheme();
@@ -73,19 +80,28 @@ export default function LmsCompetitionDashboard() {
   const [leaderboard, setLeaderboard] = useState<LmsParticipant[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [poolTeamIds, setPoolTeamIds] = useState<string[]>([]);
+  const [adminGwId, setAdminGwId] = useState<string | null>(null);
+  const [adminBusy, setAdminBusy] = useState(false);
+  const [adminSubTab, setAdminSubTab] = useState<'pool' | 'exclusions'>('pool');
+  const [excludeReasons, setExcludeReasons] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     if (!competitionId || !userId) return;
     try {
-      const [comp, participant, gwInfo, allTeams, parts, gws, history] = await Promise.all([
-        lmsGetCompetition(competitionId),
-        lmsGetMyParticipant(competitionId, userId),
-        lmsGetCompetitionCurrentGameweek(competitionId),
-        lmsListTeams(),
-        lmsListParticipants(competitionId),
-        lmsListCompetitionGameweeks(competitionId),
-        lmsListCompletedPicks(competitionId),
-      ]);
+      const [comp, participant, gwInfo, allTeams, parts, gws, history, poolIds, admin] =
+        await Promise.all([
+          lmsGetCompetition(competitionId),
+          lmsGetMyParticipant(competitionId, userId),
+          lmsGetCompetitionCurrentGameweek(competitionId),
+          lmsListTeams(),
+          lmsListParticipants(competitionId),
+          lmsListCompetitionGameweeks(competitionId),
+          lmsListCompletedPicks(competitionId),
+          lmsListCompetitionTeamIds(competitionId),
+          lmsIsProfileAdmin(userId),
+        ]);
       const gw = gwInfo.gameweek;
       setName(comp?.name ?? 'Competition');
       setCompStatus(comp?.status ?? '');
@@ -96,10 +112,22 @@ export default function LmsCompetitionDashboard() {
       setLeaderboard(parts);
       setGameweeks(gws);
       setHistoryPicks(history);
+      setPoolTeamIds(poolIds);
+      setIsAdmin(admin);
+      setAdminGwId((prev) => prev ?? gw?.id ?? gws[0]?.id ?? null);
 
       const season = comp?.season ?? '2026/27';
       const allFx = await lmsListSeasonFixtures(season);
       setSeasonFixtures(allFx);
+      setExcludeReasons((prev) => {
+        const next = { ...prev };
+        for (const f of allFx) {
+          if (f.excluded_from_lms && f.excluded_reason && next[f.id] === undefined) {
+            next[f.id] = f.excluded_reason;
+          }
+        }
+        return next;
+      });
 
       if (gw) {
         const [pickFx, used, myPick, picks] = await Promise.all([
@@ -177,30 +205,87 @@ export default function LmsCompetitionDashboard() {
     return groups;
   }, [filteredFixtures, gameweeks]);
 
+  const poolTeamIdSet = useMemo(() => new Set(poolTeamIds), [poolTeamIds]);
+
+  const competitionTeams = useMemo(
+    () => teams.filter((t) => poolTeamIdSet.has(t.id)),
+    [teams, poolTeamIdSet]
+  );
+
+  /** Teams playing a non-excluded fixture this pick gameweek. */
   const playingTeamIds = useMemo(() => {
     const ids = new Set<string>();
     for (const f of pickGwFixtures) {
+      if (f.excluded_from_lms) continue;
       ids.add(f.home_team_id);
       ids.add(f.away_team_id);
     }
     return ids;
   }, [pickGwFixtures]);
 
-  const remainingTeams = useMemo(() => {
+  /** Reasons why a pool team cannot be picked this GW (excluded fixture or no game). */
+  const unavailableNoteByTeamId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const f of pickGwFixtures) {
+      if (!f.excluded_from_lms) continue;
+      const note = f.excluded_reason?.trim() || 'No game this week';
+      map.set(f.home_team_id, note);
+      map.set(f.away_team_id, note);
+    }
+    for (const t of competitionTeams) {
+      if (playingTeamIds.has(t.id) || map.has(t.id)) continue;
+      const hasAnyFixture = pickGwFixtures.some(
+        (f) => f.home_team_id === t.id || f.away_team_id === t.id
+      );
+      if (!hasAnyFixture) map.set(t.id, 'No game this week');
+    }
+    return map;
+  }, [pickGwFixtures, competitionTeams, playingTeamIds]);
+
+  /** Unused competition-pool teams shown on Selection (pickable + greyed). */
+  const selectionTeams = useMemo(() => {
     const used = new Set(usedIds);
     if (pick?.team_id) used.delete(pick.team_id);
-    return teams.filter((t) => !used.has(t.id) && playingTeamIds.has(t.id));
-  }, [teams, usedIds, playingTeamIds, pick?.team_id]);
+    return competitionTeams
+      .filter((t) => !used.has(t.id))
+      .sort((a, b) =>
+        (a.short_name || a.name).localeCompare(b.short_name || b.name, undefined, {
+          sensitivity: 'base',
+        })
+      );
+  }, [competitionTeams, usedIds, pick?.team_id]);
+
+  const remainingTeams = useMemo(
+    () => selectionTeams.filter((t) => playingTeamIds.has(t.id)),
+    [selectionTeams, playingTeamIds]
+  );
 
   const poolTeams = useMemo(() => {
     const used = new Set(usedIds);
     return {
-      available: teams.filter((t) => !used.has(t.id)),
-      used: teams.filter((t) => used.has(t.id)),
+      available: competitionTeams.filter((t) => !used.has(t.id)),
+      used: competitionTeams.filter((t) => used.has(t.id)),
     };
-  }, [teams, usedIds]);
+  }, [competitionTeams, usedIds]);
 
   const teamsAlphabetical = useMemo(
+    () =>
+      [...competitionTeams].sort((a, b) =>
+        (a.short_name || a.name).localeCompare(b.short_name || b.name, undefined, {
+          sensitivity: 'base',
+        })
+      ),
+    [competitionTeams]
+  );
+
+  const adminFixtures = useMemo(() => {
+    if (!adminGwId) return [];
+    return seasonFixtures
+      .filter((f) => f.gameweek_id === adminGwId)
+      .sort((a, b) => new Date(a.kickoff_at).getTime() - new Date(b.kickoff_at).getTime());
+  }, [seasonFixtures, adminGwId]);
+
+  const allTeamsAlphabetical = useMemo(
     () =>
       [...teams].sort((a, b) =>
         (a.short_name || a.name).localeCompare(b.short_name || b.name, undefined, {
@@ -302,6 +387,150 @@ export default function LmsCompetitionDashboard() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const confirmDestructive = (
+    title: string,
+    message: string,
+    confirmLabel: string,
+    onConfirm: () => void
+  ) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      if (window.confirm(`${title}\n\n${message}`)) onConfirm();
+      return;
+    }
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: confirmLabel, style: 'destructive', onPress: onConfirm },
+    ]);
+  };
+
+  const onTogglePoolTeam = (team: LmsTeam, enabled: boolean) => {
+    const apply = async () => {
+      setAdminBusy(true);
+      try {
+        const res = await lmsAdminSetCompetitionTeam(competitionId, team.id, enabled);
+        if (!res.success) {
+          Alert.alert('Could not update pool', res.error ?? 'Unknown error');
+          return;
+        }
+        await load();
+      } catch (e) {
+        Alert.alert('Error', e instanceof Error ? e.message : 'Could not update team pool');
+      } finally {
+        setAdminBusy(false);
+      }
+    };
+
+    if (!enabled) {
+      confirmDestructive(
+        'Remove from pool?',
+        `${team.name} will leave this competition’s team pool. Pending picks using that club will be cleared.`,
+        'Remove',
+        () => void apply()
+      );
+      return;
+    }
+    void apply();
+  };
+
+  const applyFixtureExclude = async (fixture: LmsFixture, excluded: boolean, reason?: string) => {
+    setAdminBusy(true);
+    try {
+      const res = await lmsAdminSetFixtureExcluded(
+        fixture.id,
+        excluded,
+        excluded ? reason ?? excludeReasons[fixture.id] ?? null : null
+      );
+      if (!res.success) {
+        Alert.alert('Could not update fixture', res.error ?? 'Unknown error');
+        return;
+      }
+      await load();
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not update fixture');
+    } finally {
+      setAdminBusy(false);
+    }
+  };
+
+  const onToggleFixtureExcluded = (fixture: LmsFixture) => {
+    if (fixture.excluded_from_lms) {
+      confirmDestructive(
+        'Restore fixture?',
+        'Players will be able to pick either side for this gameweek again.',
+        'Restore',
+        () => void applyFixtureExclude(fixture, false)
+      );
+      return;
+    }
+
+    const reason =
+      Platform.OS === 'ios'
+        ? excludeReasons[fixture.id] ?? fixture.excluded_reason ?? ''
+        : (excludeReasons[fixture.id] ?? '').trim();
+
+    const runExclude = (finalReason: string) => {
+      confirmDestructive(
+        'Exclude fixture?',
+        'Neither side can be picked in any LMS competition for this gameweek. Pending picks on these teams will be cleared.',
+        'Exclude',
+        () => void applyFixtureExclude(fixture, true, finalReason)
+      );
+    };
+
+    if (Platform.OS === 'ios') {
+      Alert.prompt(
+        'Exclude fixture',
+        'Optional reason (shown on Selection), e.g. Postponed',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Continue',
+            onPress: (value?: string) => {
+              const next = (value ?? '').trim();
+              if (next) {
+                setExcludeReasons((prev) => ({ ...prev, [fixture.id]: next }));
+              }
+              runExclude(next);
+            },
+          },
+        ],
+        'plain-text',
+        reason
+      );
+      return;
+    }
+
+    runExclude(reason);
+  };
+
+  const onDeleteCompetition = () => {
+    confirmDestructive(
+      'Delete competition?',
+      `“${name}” will be permanently deleted, including all players, picks, and access codes. This cannot be undone.`,
+      'Delete',
+      () => {
+        void (async () => {
+          setAdminBusy(true);
+          try {
+            const res = await lmsAdminDeleteCompetition(competitionId);
+            if (!res.success) {
+              Alert.alert('Could not delete', res.error ?? 'Unknown error');
+              return;
+            }
+            router.replace('/(lms)');
+          } catch (e) {
+            Alert.alert(
+              'Error',
+              e instanceof Error ? e.message : 'Could not delete competition'
+            );
+          } finally {
+            setAdminBusy(false);
+          }
+        })();
+      }
+    );
   };
 
   const formatKickoff = (iso: string) => {
@@ -412,7 +641,7 @@ export default function LmsCompetitionDashboard() {
         },
         tabText: {
           fontFamily: theme.fontFamily.baiSemiBold,
-          fontSize: 13,
+          fontSize: isAdmin ? 12 : 13,
           color: theme.colors.textMuted,
         },
         tabTextActive: {
@@ -747,6 +976,129 @@ export default function LmsCompetitionDashboard() {
           color: theme.colors.textMuted,
           fontStyle: 'italic',
         },
+        fixtureExcludedNote: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          textAlign: 'center',
+          marginTop: 4,
+          fontStyle: 'italic',
+        },
+        teamTileNote: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 10,
+          color: theme.colors.textMuted,
+          marginTop: 2,
+        },
+        teamTileCol: {
+          flex: 1,
+          flexShrink: 1,
+          gap: 2,
+        },
+        adminRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          paddingVertical: 10,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+        },
+        adminRowBody: { flex: 1, gap: 2 },
+        adminRowTitle: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 14,
+          color: theme.colors.text,
+        },
+        adminRowMeta: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+        },
+        adminToggle: {
+          paddingVertical: 6,
+          paddingHorizontal: 10,
+          borderRadius: theme.radius.sm,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        adminToggleOn: {
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+        },
+        adminToggleOff: {
+          opacity: 0.85,
+        },
+        adminToggleText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          color: theme.colors.textSecondary,
+        },
+        adminToggleTextOn: {
+          color: theme.colors.accent,
+        },
+        adminReasonInput: {
+          marginTop: 6,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.sm,
+          paddingHorizontal: 10,
+          paddingVertical: 8,
+          fontFamily: theme.fontFamily.bai,
+          fontSize: 13,
+          color: theme.colors.text,
+          backgroundColor: theme.colors.surface,
+        },
+        adminSubTabs: {
+          flexDirection: 'row',
+          gap: 8,
+        },
+        adminSubTab: {
+          flex: 1,
+          paddingVertical: 10,
+          paddingHorizontal: 8,
+          alignItems: 'center',
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+        },
+        adminSubTabActive: {
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+        },
+        adminSubTabText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          textAlign: 'center',
+        },
+        adminSubTabTextActive: {
+          color: theme.colors.accent,
+        },
+        dangerZone: {
+          marginTop: theme.spacing.md,
+          paddingTop: theme.spacing.lg,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.colors.border,
+          gap: theme.spacing.sm,
+        },
+        dangerBtn: {
+          borderRadius: theme.radius.md,
+          paddingVertical: 14,
+          alignItems: 'center',
+          borderWidth: 1,
+          borderColor: theme.colors.error,
+          backgroundColor: 'transparent',
+        },
+        dangerBtnDisabled: {
+          opacity: 0.45,
+        },
+        dangerBtnText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 14,
+          color: theme.colors.error,
+        },
         lbStatus: {
           fontFamily: theme.fontFamily.baiBold,
           fontSize: 12,
@@ -756,52 +1108,66 @@ export default function LmsCompetitionDashboard() {
           textAlign: 'right',
         },
       }),
-    [theme, insets.top, insets.bottom]
+    [theme, insets.top, insets.bottom, isAdmin]
   );
 
   const renderFixtureRow = (f: LmsFixture, i: number, list: LmsFixture[]) => {
     const finished = f.status === 'finished';
+    const excluded = !!f.excluded_from_lms;
     const homeForm = formByTeamId.get(f.home_team_id) ?? [null, null, null, null, null];
     const awayForm = formByTeamId.get(f.away_team_id) ?? [null, null, null, null, null];
     return (
       <View
         key={f.id}
-        style={[styles.fixtureRow, i === list.length - 1 && { borderBottomWidth: 0 }]}
+        style={[
+          styles.fixtureRow,
+          i === list.length - 1 && { borderBottomWidth: 0 },
+          excluded && { opacity: 0.55 },
+        ]}
       >
-        <View style={styles.fixtureTeam}>
-          <View style={styles.fixtureTeamMain}>
-            <TeamCrest uri={f.home_team?.crest_url} label={f.home_team?.name} size={24} />
-            <Text style={styles.fixtureName} numberOfLines={1}>
-              {f.home_team?.short_name ?? f.home_team?.name ?? 'H'}
-            </Text>
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View style={styles.fixtureTeam}>
+              <View style={styles.fixtureTeamMain}>
+                <TeamCrest uri={f.home_team?.crest_url} label={f.home_team?.name} size={24} />
+                <Text style={styles.fixtureName} numberOfLines={1}>
+                  {f.home_team?.short_name ?? f.home_team?.name ?? 'H'}
+                </Text>
+              </View>
+              <TeamFormDots results={homeForm} />
+            </View>
+            <View style={styles.scoreBox}>
+              {finished ? (
+                <Text style={styles.scoreText}>
+                  {f.home_goals ?? 0}–{f.away_goals ?? 0}
+                </Text>
+              ) : (
+                <>
+                  <Text style={styles.vsText}>vs</Text>
+                  <Text style={styles.kickoffUnder}>
+                    {new Date(f.kickoff_at).toLocaleTimeString(undefined, {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </Text>
+                </>
+              )}
+            </View>
+            <View style={[styles.fixtureTeam, styles.fixtureTeamAway]}>
+              <View style={[styles.fixtureTeamMain, styles.fixtureTeamMainAway]}>
+                <TeamCrest uri={f.away_team?.crest_url} label={f.away_team?.name} size={24} />
+                <Text style={[styles.fixtureName, styles.fixtureNameAway]} numberOfLines={1}>
+                  {f.away_team?.short_name ?? f.away_team?.name ?? 'A'}
+                </Text>
+              </View>
+              <TeamFormDots results={awayForm} />
+            </View>
           </View>
-          <TeamFormDots results={homeForm} />
-        </View>
-        <View style={styles.scoreBox}>
-          {finished ? (
-            <Text style={styles.scoreText}>
-              {f.home_goals ?? 0}–{f.away_goals ?? 0}
+          {excluded ? (
+            <Text style={styles.fixtureExcludedNote}>
+              {f.excluded_reason?.trim() || 'Excluded from LMS'}
             </Text>
-          ) : (
-            <>
-              <Text style={styles.vsText}>vs</Text>
-              <Text style={styles.kickoffUnder}>
-                {new Date(f.kickoff_at).toLocaleTimeString(undefined, {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })}
-              </Text>
-            </>
-          )}
-        </View>
-        <View style={[styles.fixtureTeam, styles.fixtureTeamAway]}>
-          <View style={[styles.fixtureTeamMain, styles.fixtureTeamMainAway]}>
-            <TeamCrest uri={f.away_team?.crest_url} label={f.away_team?.name} size={24} />
-            <Text style={[styles.fixtureName, styles.fixtureNameAway]} numberOfLines={1}>
-              {f.away_team?.short_name ?? f.away_team?.name ?? 'A'}
-            </Text>
-          </View>
-          <TeamFormDots results={awayForm} />
+          ) : null}
         </View>
       </View>
     );
@@ -853,7 +1219,8 @@ export default function LmsCompetitionDashboard() {
                 { key: 'gameweeks' as const, label: 'Gameweeks' },
                 { key: 'selection' as const, label: 'Selection' },
                 { key: 'leaderboard' as const, label: 'Leaderboard' },
-              ] as const
+                ...(isAdmin ? [{ key: 'admin' as const, label: 'Admin' }] : []),
+              ] as { key: TabKey; label: string }[]
             ).map((t) => {
               const active = tab === t.key;
               return (
@@ -1080,9 +1447,9 @@ export default function LmsCompetitionDashboard() {
                       ? 'Picks are locked for this gameweek. Come back after settlement for the next round.'
                       : 'Picks are closed for this gameweek.'}
                   </Text>
-                ) : remainingTeams.length === 0 ? (
+                ) : selectionTeams.length === 0 ? (
                   <Text style={styles.muted}>
-                    No eligible unused teams are playing in this gameweek.
+                    No unused teams left in this competition’s pool for this gameweek.
                   </Text>
                 ) : (
                   <>
@@ -1090,27 +1457,49 @@ export default function LmsCompetitionDashboard() {
                       Choose a winner · GW{currentGw.number}
                     </Text>
                     <View style={styles.teamGrid}>
-                      {remainingTeams.map((t) => {
+                      {selectionTeams.map((t) => {
                         const selected = selectedTeamId === t.id;
+                        const pickable = playingTeamIds.has(t.id);
+                        const note = unavailableNoteByTeamId.get(t.id);
                         return (
                           <Pressable
                             key={t.id}
-                            style={[styles.teamTile, selected && styles.teamTileSelected]}
-                            onPress={() => setSelectedTeamId(t.id)}
+                            style={[
+                              styles.teamTile,
+                              selected && pickable && styles.teamTileSelected,
+                              !pickable && styles.teamTileDisabled,
+                            ]}
+                            onPress={() => {
+                              if (!pickable) return;
+                              setSelectedTeamId(t.id);
+                            }}
+                            disabled={!pickable}
                             accessibilityRole="button"
-                            accessibilityLabel={`Select ${t.name}`}
+                            accessibilityState={{ disabled: !pickable, selected }}
+                            accessibilityLabel={
+                              pickable
+                                ? `Select ${t.name}`
+                                : `${t.name} unavailable: ${note ?? 'No game'}`
+                            }
                           >
                             <TeamCrest uri={t.crest_url} label={t.name} size={28} />
-                            <Text
-                              style={[
-                                styles.teamTileName,
-                                selected && styles.teamTileNameSelected,
-                              ]}
-                              numberOfLines={2}
-                            >
-                              {t.name}
-                            </Text>
-                            {selected ? (
+                            <View style={styles.teamTileCol}>
+                              <Text
+                                style={[
+                                  styles.teamTileName,
+                                  selected && pickable && styles.teamTileNameSelected,
+                                ]}
+                                numberOfLines={2}
+                              >
+                                {t.name}
+                              </Text>
+                              {!pickable && note ? (
+                                <Text style={styles.teamTileNote} numberOfLines={2}>
+                                  {note}
+                                </Text>
+                              ) : null}
+                            </View>
+                            {selected && pickable ? (
                               <Ionicons
                                 name="checkmark-circle"
                                 size={18}
@@ -1121,22 +1510,36 @@ export default function LmsCompetitionDashboard() {
                         );
                       })}
                     </View>
-                    <Pressable
-                      style={[
-                        styles.primaryBtn,
-                        (!selectedTeamId || saving) && styles.primaryBtnDisabled,
-                      ]}
-                      disabled={!selectedTeamId || saving}
-                      onPress={() => void onSavePick()}
-                    >
-                      {saving ? (
-                        <ActivityIndicator color={theme.colors.white} />
-                      ) : (
-                        <Text style={styles.primaryBtnText}>
-                          {pick ? 'Update pick' : 'Lock in pick'}
-                        </Text>
-                      )}
-                    </Pressable>
+                    {remainingTeams.length === 0 ? (
+                      <Text style={styles.muted}>
+                        Every remaining pool team is unavailable this gameweek (excluded fixture or
+                        no game).
+                      </Text>
+                    ) : (
+                      <Pressable
+                        style={[
+                          styles.primaryBtn,
+                          (!selectedTeamId ||
+                            saving ||
+                            !playingTeamIds.has(selectedTeamId)) &&
+                            styles.primaryBtnDisabled,
+                        ]}
+                        disabled={
+                          !selectedTeamId ||
+                          saving ||
+                          !playingTeamIds.has(selectedTeamId)
+                        }
+                        onPress={() => void onSavePick()}
+                      >
+                        {saving ? (
+                          <ActivityIndicator color={theme.colors.white} />
+                        ) : (
+                          <Text style={styles.primaryBtnText}>
+                            {pick ? 'Update pick' : 'Lock in pick'}
+                          </Text>
+                        )}
+                      </Pressable>
+                    )}
                   </>
                 )}
 
@@ -1274,6 +1677,194 @@ export default function LmsCompetitionDashboard() {
                     );
                   })
                 )}
+              </>
+            ) : null}
+
+            {tab === 'admin' && isAdmin ? (
+              <>
+                <View style={styles.adminSubTabs}>
+                  {(
+                    [
+                      { key: 'pool' as const, label: 'Team pool' },
+                      { key: 'exclusions' as const, label: 'Fixture exclusions' },
+                    ] as const
+                  ).map((t) => {
+                    const active = adminSubTab === t.key;
+                    return (
+                      <Pressable
+                        key={t.key}
+                        style={[styles.adminSubTab, active && styles.adminSubTabActive]}
+                        onPress={() => setAdminSubTab(t.key)}
+                        accessibilityRole="tab"
+                        accessibilityState={{ selected: active }}
+                      >
+                        <Text
+                          style={[
+                            styles.adminSubTabText,
+                            active && styles.adminSubTabTextActive,
+                          ]}
+                        >
+                          {t.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {adminSubTab === 'pool' ? (
+                  <>
+                    <Text style={styles.sectionIntro}>
+                      Choose which clubs are eligible in this competition. Late-start or small
+                      leagues can run with a reduced pool.
+                    </Text>
+                    <Text style={styles.poolTitle}>
+                      Team pool · {poolTeamIds.length}/{teams.length} enabled
+                    </Text>
+                    {allTeamsAlphabetical.map((t) => {
+                      const enabled = poolTeamIdSet.has(t.id);
+                      return (
+                        <View key={t.id} style={styles.adminRow}>
+                          <TeamCrest uri={t.crest_url} label={t.name} size={24} />
+                          <View style={styles.adminRowBody}>
+                            <Text style={styles.adminRowTitle}>{t.name}</Text>
+                            <Text style={styles.adminRowMeta}>
+                              {enabled ? 'In pool' : 'Not in this competition'}
+                            </Text>
+                          </View>
+                          <Pressable
+                            style={[
+                              styles.adminToggle,
+                              enabled ? styles.adminToggleOn : styles.adminToggleOff,
+                            ]}
+                            disabled={adminBusy}
+                            onPress={() => onTogglePoolTeam(t, !enabled)}
+                            accessibilityRole="switch"
+                            accessibilityState={{ checked: enabled, disabled: adminBusy }}
+                          >
+                            <Text
+                              style={[
+                                styles.adminToggleText,
+                                enabled && styles.adminToggleTextOn,
+                              ]}
+                            >
+                              {enabled ? 'In pool' : 'Add'}
+                            </Text>
+                          </Pressable>
+                        </View>
+                      );
+                    })}
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.sectionIntro}>
+                      Exclude postponed or unavailable fixtures from LMS picks. This applies to
+                      every competition using the shared calendar.
+                    </Text>
+                    <Text style={styles.poolTitle}>Fixture exclusions</Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={styles.filterScroll}
+                      contentContainerStyle={styles.filterRow}
+                      nestedScrollEnabled
+                    >
+                      {gameweeks.map((g) => {
+                        const active = adminGwId === g.id;
+                        return (
+                          <Pressable
+                            key={g.id}
+                            style={[styles.filterChip, active && styles.filterChipActive]}
+                            onPress={() => setAdminGwId(g.id)}
+                          >
+                            <Text
+                              style={[
+                                styles.filterChipText,
+                                active && styles.filterChipTextActive,
+                              ]}
+                            >
+                              GW{g.number}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </ScrollView>
+
+                    {adminFixtures.length === 0 ? (
+                      <Text style={styles.muted}>No fixtures for this gameweek.</Text>
+                    ) : (
+                      adminFixtures.map((f) => {
+                        const excluded = !!f.excluded_from_lms;
+                        const home = f.home_team?.short_name ?? f.home_team?.name ?? 'Home';
+                        const away = f.away_team?.short_name ?? f.away_team?.name ?? 'Away';
+                        return (
+                          <View key={f.id} style={styles.adminRow}>
+                            <View style={styles.adminRowBody}>
+                              <Text style={styles.adminRowTitle}>
+                                {home} vs {away}
+                              </Text>
+                              <Text style={styles.adminRowMeta}>
+                                {formatKickoff(f.kickoff_at)}
+                                {excluded
+                                  ? ` · ${f.excluded_reason?.trim() || 'Excluded'}`
+                                  : ''}
+                              </Text>
+                              {Platform.OS !== 'ios' && !excluded ? (
+                                <TextInput
+                                  style={styles.adminReasonInput}
+                                  placeholder="Reason (optional)"
+                                  placeholderTextColor={theme.colors.textMuted}
+                                  value={excludeReasons[f.id] ?? ''}
+                                  onChangeText={(text) =>
+                                    setExcludeReasons((prev) => ({ ...prev, [f.id]: text }))
+                                  }
+                                />
+                              ) : null}
+                            </View>
+                            <Pressable
+                              style={[
+                                styles.adminToggle,
+                                excluded ? styles.adminToggleOn : styles.adminToggleOff,
+                              ]}
+                              disabled={adminBusy}
+                              onPress={() => onToggleFixtureExcluded(f)}
+                              accessibilityRole="switch"
+                              accessibilityState={{ checked: excluded, disabled: adminBusy }}
+                            >
+                              <Text
+                                style={[
+                                  styles.adminToggleText,
+                                  excluded && styles.adminToggleTextOn,
+                                ]}
+                              >
+                                {excluded ? 'Restore' : 'Exclude'}
+                              </Text>
+                            </Pressable>
+                          </View>
+                        );
+                      })
+                    )}
+                  </>
+                )}
+
+                <View style={styles.dangerZone}>
+                  <Text style={styles.poolTitle}>Danger zone</Text>
+                  <Text style={styles.muted}>
+                    Permanently delete this competition and all related picks, players, and codes.
+                  </Text>
+                  <Pressable
+                    style={[styles.dangerBtn, adminBusy && styles.dangerBtnDisabled]}
+                    disabled={adminBusy}
+                    onPress={onDeleteCompetition}
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete competition"
+                  >
+                    {adminBusy ? (
+                      <ActivityIndicator color={theme.colors.error} />
+                    ) : (
+                      <Text style={styles.dangerBtnText}>Delete competition</Text>
+                    )}
+                  </Pressable>
+                </View>
               </>
             ) : null}
 

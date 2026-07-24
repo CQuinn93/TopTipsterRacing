@@ -7,11 +7,10 @@ import {
   ScrollView,
   useWindowDimensions,
   Platform,
-  Linking,
-  useColorScheme,
   Animated,
   ActivityIndicator,
   Alert,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -52,7 +51,7 @@ type ModeRowProps = {
 
 function ModeRow({ item, accent, isLast }: ModeRowProps) {
   const theme = useTheme();
-  const isDark = useColorScheme() === 'dark';
+  const isDark = true;
 
   const styles = useMemo(
     () =>
@@ -180,7 +179,7 @@ function ContourDecor({ color, compact }: { color: string; compact: boolean }) {
 
 export default function CompetitionHubScreen() {
   const theme = useTheme();
-  const isDark = useColorScheme() === 'dark';
+  const isDark = true;
   const insets = useSafeAreaInsets();
   const { userId, signOut } = useAuth();
   const { width, height } = useWindowDimensions();

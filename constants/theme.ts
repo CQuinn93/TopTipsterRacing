@@ -1,7 +1,7 @@
 /**
  * Theme: black, white, greys, green only.
  * Fonts: Laraz (racing), Bai Jamjuree (LMS), Swish / Polygon accents.
- * Supports light and dark mode based on system preference.
+ * App always uses darkTheme (black backgrounds).
  */
 
 const spacing = {

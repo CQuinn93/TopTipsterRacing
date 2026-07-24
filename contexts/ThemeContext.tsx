@@ -1,17 +1,16 @@
 import React, { createContext, useContext, useMemo } from 'react';
-import { Platform, useColorScheme } from 'react-native';
-import { darkTheme, lightTheme, type Theme } from '@/constants/theme';
+import { Platform } from 'react-native';
+import { darkTheme, type Theme } from '@/constants/theme';
 
 const ThemeContext = createContext<Theme | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const colorScheme = useColorScheme();
-  const baseTheme = colorScheme === 'dark' ? darkTheme : lightTheme;
+  // Always dark/black to match the sign-in screen (no system light mode).
   const theme = useMemo<Theme>(() => {
-    if (Platform.OS !== 'web') return baseTheme;
+    if (Platform.OS !== 'web') return darkTheme;
     // Web tends to feel oversized compared with native; slightly tighten spacing.
     return {
-      ...baseTheme,
+      ...darkTheme,
       spacing: {
         xs: 3,
         sm: 7,
@@ -21,7 +20,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         xxl: 42,
       },
     };
-  }, [baseTheme]);
+  }, []);
 
   return (
     <ThemeContext.Provider value={theme}>

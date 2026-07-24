@@ -51,6 +51,8 @@ export type LmsFixture = {
   home_team?: LmsTeam;
   away_team?: LmsTeam;
   gameweek_number?: number;
+  excluded_from_lms?: boolean;
+  excluded_reason?: string | null;
 };
 
 export type LmsParticipant = {
@@ -247,6 +249,67 @@ export async function lmsListUsedTeamIds(competitionId: string, userId: string):
     .eq('user_id', userId);
   if (error) throw error;
   return ((data ?? []) as { team_id: string }[]).map((r) => r.team_id);
+}
+
+export async function lmsListCompetitionTeamIds(competitionId: string): Promise<string[]> {
+  const { data, error } = await db
+    .from('lms_competition_teams')
+    .select('team_id')
+    .eq('competition_id', competitionId);
+  if (error) throw error;
+  return ((data ?? []) as { team_id: string }[]).map((r) => r.team_id);
+}
+
+export async function lmsIsProfileAdmin(userId: string): Promise<boolean> {
+  const { data, error } = await db
+    .from('profiles')
+    .select('role')
+    .eq('id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { role?: string | null } | null)?.role === 'Admin';
+}
+
+export async function lmsAdminSetCompetitionTeam(
+  competitionId: string,
+  teamId: string,
+  enabled: boolean
+): Promise<{ success: boolean; error?: string }> {
+  const { data, error } = await db.rpc('lms_admin_set_competition_team', {
+    p_competition_id: competitionId,
+    p_team_id: teamId,
+    p_enabled: enabled,
+  });
+  if (error) throw error;
+  return (data ?? { success: false, error: 'unknown' }) as { success: boolean; error?: string };
+}
+
+export async function lmsAdminSetFixtureExcluded(
+  fixtureId: string,
+  excluded: boolean,
+  reason?: string | null
+): Promise<{ success: boolean; error?: string }> {
+  const { data, error } = await db.rpc('lms_admin_set_fixture_excluded', {
+    p_fixture_id: fixtureId,
+    p_excluded: excluded,
+    p_reason: reason ?? null,
+  });
+  if (error) throw error;
+  return (data ?? { success: false, error: 'unknown' }) as { success: boolean; error?: string };
+}
+
+export async function lmsAdminDeleteCompetition(
+  competitionId: string
+): Promise<{ success: boolean; error?: string; name?: string }> {
+  const { data, error } = await db.rpc('lms_admin_delete_competition', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  return (data ?? { success: false, error: 'unknown' }) as {
+    success: boolean;
+    error?: string;
+    name?: string;
+  };
 }
 
 /** Picks from completed gameweeks for the whole competition (for leaderboard history drawers). */
@@ -576,7 +639,9 @@ export function lmsPickErrorMessage(code?: string): string {
     case 'team_already_used':
       return 'You have already used that team in this competition.';
     case 'team_not_playing':
-      return 'That team is not playing in this gameweek.';
+      return 'That team is not available to pick this gameweek.';
+    case 'team_not_in_pool':
+      return 'That team is not in this competition’s team pool.';
     case 'not_active':
       return 'You are not an active participant.';
     case 'pick_locked':

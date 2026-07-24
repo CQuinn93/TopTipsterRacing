@@ -340,6 +340,8 @@ async function main() {
     const awayGoals = status === 'finished' ? m.score?.fullTime?.away ?? null : null;
 
     const row = {
+      // Intentionally omit excluded_from_lms / excluded_reason / excluded_at / excluded_by
+      // so admin exclusions survive sync upserts.
       gameweek_id: gw.id,
       home_team_id: homeId,
       away_team_id: awayId,
@@ -418,7 +420,8 @@ async function main() {
     const { count, error: cntErr } = await supabase
       .from('lms_fixtures')
       .select('id', { count: 'exact', head: true })
-      .eq('gameweek_id', gw.id);
+      .eq('gameweek_id', gw.id)
+      .eq('excluded_from_lms', false);
     if (cntErr) throw cntErr;
     if (!count || count < 1) continue;
 
@@ -426,6 +429,7 @@ async function main() {
       .from('lms_fixtures')
       .select('id', { count: 'exact', head: true })
       .eq('gameweek_id', gw.id)
+      .eq('excluded_from_lms', false)
       .neq('status', 'finished');
     if (unfinishedErr) throw unfinishedErr;
     if ((unfinished ?? 0) > 0) continue;
