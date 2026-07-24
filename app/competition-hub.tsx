@@ -37,92 +37,77 @@ type HubTab = 'football' | 'racing' | 'admin';
 type ModeItem = {
   key: string;
   title: string;
-  description: string;
   status?: string;
   unavailable?: boolean;
   onPress?: () => void;
 };
 
-type ModeRowProps = {
+type ModeTileProps = {
   item: ModeItem;
   accent: string;
-  isLast: boolean;
 };
 
-function ModeRow({ item, accent, isLast }: ModeRowProps) {
+function ModeTile({ item, accent }: ModeTileProps) {
   const theme = useTheme();
-  const isDark = true;
 
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        row: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.spacing.md,
-          paddingVertical: theme.spacing.md + 2,
-          borderBottomWidth: isLast ? 0 : StyleSheet.hairlineWidth,
-          borderBottomColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+        tile: {
+          width: '47%',
+          flexGrow: 0,
+          flexBasis: '47%',
+          maxWidth: '48.5%',
+          minHeight: 88,
+          paddingVertical: 16,
+          paddingHorizontal: 14,
+          borderRadius: theme.radius.md,
+          borderWidth: 1.5,
+          borderColor: item.unavailable ? theme.colors.border : `${accent}66`,
+          backgroundColor: item.unavailable
+            ? theme.colors.surface
+            : theme.colors.surfaceElevated,
+          justifyContent: 'center',
+          gap: 6,
         },
         pressed: {
-          opacity: 0.7,
+          opacity: 0.75,
+          transform: [{ scale: 0.98 }],
         },
         unavailable: {
-          opacity: 0.42,
-        },
-        copy: {
-          flex: 1,
-          minWidth: 0,
-          gap: 4,
+          opacity: 0.48,
         },
         title: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          fontWeight: '600',
+          fontSize: 15,
+          fontWeight: '700',
           color: theme.colors.text,
           letterSpacing: -0.2,
-        },
-        description: {
-          fontFamily: theme.fontFamily.light,
-          fontSize: 13,
-          color: theme.colors.textSecondary,
-          lineHeight: 18,
-        },
-        meta: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          flexShrink: 0,
+          lineHeight: 20,
         },
         status: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
+          fontSize: 11,
+          fontWeight: '700',
+          letterSpacing: 0.8,
+          textTransform: 'uppercase',
           color: item.unavailable ? theme.colors.textMuted : accent,
-          fontWeight: '600',
         },
       }),
-    [theme, isDark, isLast, accent, item.unavailable]
+    [theme, accent, item.unavailable]
   );
 
   const body = (
     <>
-      <View style={styles.copy}>
-        <Text style={styles.title}>{item.title}</Text>
-        <Text style={styles.description}>{item.description}</Text>
-      </View>
-      <View style={styles.meta}>
-        {item.status ? <Text style={styles.status}>{item.status}</Text> : null}
-        {!item.unavailable ? (
-          <Ionicons name="chevron-forward" size={16} color={theme.colors.textMuted} />
-        ) : null}
-      </View>
+      <Text style={styles.title}>{item.title}</Text>
+      {item.status ? <Text style={styles.status}>{item.status}</Text> : null}
     </>
   );
 
   if (item.unavailable || !item.onPress) {
     return (
       <View
-        style={[styles.row, styles.unavailable]}
+        style={[styles.tile, styles.unavailable]}
         accessibilityState={{ disabled: true }}
         accessibilityLabel={`${item.title}, ${item.status ?? 'unavailable'}`}
       >
@@ -136,7 +121,7 @@ function ModeRow({ item, accent, isLast }: ModeRowProps) {
       onPress={item.onPress}
       accessibilityRole="button"
       accessibilityLabel={item.title}
-      style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.tile, pressed && styles.pressed]}
     >
       {body}
     </Pressable>
@@ -398,13 +383,24 @@ export default function CompetitionHubScreen() {
       ? [
           {
             key: 'lms',
-            title: 'TopTipsters Last Man Standing',
-            description: 'One pick each round. Miss and you’re out.',
+            title: 'Last Man Standing',
             status: 'Open',
             onPress: () => {
               void setLastRoute('/(lms)');
               router.push('/(lms)' as any);
             },
+          },
+          {
+            key: 'first2-twenty',
+            title: 'First2 Twenty',
+            status: 'Coming soon',
+            unavailable: true,
+          },
+          {
+            key: 'first2-6',
+            title: 'First2 6',
+            status: 'Coming soon',
+            unavailable: true,
           },
         ]
       : tab === 'racing'
@@ -412,7 +408,6 @@ export default function CompetitionHubScreen() {
             {
               key: 'pat-nutter',
               title: 'The Pat Nutter',
-              description: 'Cheltenham Festival tipping and leaderboards.',
               status: 'Season ended',
               unavailable: true,
             },
@@ -421,14 +416,12 @@ export default function CompetitionHubScreen() {
             {
               key: 'racing-admin',
               title: 'Racing',
-              description: 'Join requests, competitions, and selection edits.',
               status: 'Open',
               onPress: openAdminPanel,
             },
             {
               key: 'football-admin',
               title: 'Football',
-              description: 'Create competitions and verify player sign-ups.',
               status: 'Open',
               onPress: openLmsAdmin,
             },
@@ -590,16 +583,21 @@ export default function CompetitionHubScreen() {
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderColor: isDark ? `${activeAccent}40` : `${activeAccent}33`,
           paddingTop: theme.spacing.md,
-          paddingBottom: theme.spacing.sm,
+          paddingBottom: theme.spacing.md,
         },
         panelLabel: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 11,
           fontWeight: '700',
           color: activeAccent,
-          letterSpacing: 1.2,
+          letterSpacing: 1.4,
           textTransform: 'uppercase',
-          marginBottom: theme.spacing.xs,
+          marginBottom: theme.spacing.md,
+        },
+        modeGrid: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 10,
         },
         footer: {
           paddingTop: theme.spacing.sm,
@@ -750,14 +748,11 @@ export default function CompetitionHubScreen() {
               <Text style={styles.panelLabel}>
                 {tab === 'admin' ? 'Choose a sport' : 'Select a mode'}
               </Text>
-              {modes.map((item, index) => (
-                <ModeRow
-                  key={item.key}
-                  item={item}
-                  accent={activeAccent}
-                  isLast={index === modes.length - 1}
-                />
-              ))}
+              <View style={styles.modeGrid}>
+                {modes.map((item) => (
+                  <ModeTile key={item.key} item={item} accent={activeAccent} />
+                ))}
+              </View>
             </View>
           </Animated.View>
         </Animated.View>

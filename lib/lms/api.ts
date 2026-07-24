@@ -495,7 +495,58 @@ export async function lmsGetMyPick(
     .eq('gameweek_id', gameweekId)
     .maybeSingle();
   if (error) throw error;
-  return data as LmsPick | null;
+  const pick = data as LmsPick | null;
+  if (!pick) return null;
+
+  const { data: team } = await db.from('lms_teams').select('*').eq('id', pick.team_id).maybeSingle();
+  return { ...pick, team: (team as LmsTeam | null) ?? undefined };
+}
+
+export type LmsCompetitionHomeSummary = LmsCompetitionRow & {
+  aliveCount: number;
+  totalCount: number;
+  currentGameweekNumber: number | null;
+  pickTeam: LmsTeam | null;
+  pickAvailable: boolean;
+};
+
+/** Enrich my competitions with alive counts and current-GW pick status. */
+export async function lmsListMyCompetitionSummaries(
+  userId: string
+): Promise<LmsCompetitionHomeSummary[]> {
+  const comps = await lmsListMyCompetitions();
+  if (!comps.length) return [];
+
+  return Promise.all(
+    comps.map(async (c) => {
+      const [parts, gwInfo] = await Promise.all([
+        lmsListParticipants(c.competition_id),
+        lmsGetCompetitionCurrentGameweek(c.competition_id),
+      ]);
+      const totalCount = parts.length;
+      const aliveCount = parts.filter(
+        (p) => p.status === 'active' || p.status === 'winner'
+      ).length;
+
+      let pickTeam: LmsTeam | null = null;
+      let pickAvailable = false;
+      const gw = gwInfo.gameweek;
+      if (c.participant_status === 'active' && gw) {
+        const pick = await lmsGetMyPick(c.competition_id, userId, gw.id);
+        pickTeam = pick?.team ?? null;
+        pickAvailable = !pick;
+      }
+
+      return {
+        ...c,
+        aliveCount,
+        totalCount,
+        currentGameweekNumber: gw?.number ?? null,
+        pickTeam,
+        pickAvailable,
+      };
+    })
+  );
 }
 
 /** All picks for a competition gameweek (same-comp members can read via RLS). */

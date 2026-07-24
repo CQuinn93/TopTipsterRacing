@@ -14,14 +14,15 @@ import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   lmsGetCurrentGameweek,
   lmsJoinErrorMessage,
   lmsListFixturesForGameweek,
-  lmsListMyCompetitions,
+  lmsListMyCompetitionSummaries,
   lmsListMyPendingJoins,
   lmsRequestJoin,
-  type LmsCompetitionRow,
+  type LmsCompetitionHomeSummary,
   type LmsFixture,
   type LmsGameweek,
   type LmsPendingJoin,
@@ -36,7 +37,8 @@ const FIXTURE_CYCLE_MS = 3500;
 export default function LmsHomeScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const [comps, setComps] = useState<LmsCompetitionRow[]>([]);
+  const { userId } = useAuth();
+  const [comps, setComps] = useState<LmsCompetitionHomeSummary[]>([]);
   const [pending, setPending] = useState<LmsPendingJoin[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -48,14 +50,15 @@ export default function LmsHomeScreen() {
   const [fxIndex, setFxIndex] = useState(0);
 
   const upcomingFixtures = useMemo(() => {
-    const open = fixtures.filter((f) => f.status !== 'finished');
-    return open.length ? open : fixtures;
+    const open = fixtures.filter((f) => f.status !== 'finished' && !f.excluded_from_lms);
+    return open.length ? open : fixtures.filter((f) => !f.excluded_from_lms);
   }, [fixtures]);
 
   const load = useCallback(async () => {
+    if (!userId) return;
     try {
       const [c, p, currentGw] = await Promise.all([
-        lmsListMyCompetitions(),
+        lmsListMyCompetitionSummaries(userId),
         lmsListMyPendingJoins(),
         lmsGetCurrentGameweek('2026/27'),
       ]);
@@ -81,7 +84,7 @@ export default function LmsHomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -90,12 +93,12 @@ export default function LmsHomeScreen() {
   );
 
   useEffect(() => {
-    if (tab !== 'competitions' || upcomingFixtures.length < 2) return;
+    if (upcomingFixtures.length < 2) return;
     const id = setInterval(() => {
       setFxIndex((i) => (i + 1) % upcomingFixtures.length);
     }, FIXTURE_CYCLE_MS);
     return () => clearInterval(id);
-  }, [tab, upcomingFixtures.length]);
+  }, [upcomingFixtures.length]);
 
   useEffect(() => {
     if (fxIndex >= upcomingFixtures.length) setFxIndex(0);
@@ -129,6 +132,13 @@ export default function LmsHomeScreen() {
 
   const activeFixture = upcomingFixtures[fxIndex] ?? null;
 
+  const statusLabel = (status: string) => {
+    if (status === 'active') return 'Still standing';
+    if (status === 'winner') return 'Champion';
+    if (status === 'eliminated') return 'Eliminated';
+    return status;
+  };
+
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -153,6 +163,97 @@ export default function LmsHomeScreen() {
           fontSize: 13,
           color: theme.colors.accent,
           marginTop: 2,
+        },
+        spotlightWrap: {
+          paddingHorizontal: theme.spacing.lg,
+          paddingBottom: theme.spacing.md,
+        },
+        spotlight: {
+          backgroundColor: theme.colors.surfaceElevated,
+          borderRadius: theme.radius.lg,
+          borderWidth: 1.5,
+          borderColor: theme.colors.accent,
+          paddingVertical: 16,
+          paddingHorizontal: 16,
+          gap: 12,
+          shadowColor: theme.colors.accent,
+          shadowOpacity: 0.18,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: 0 },
+          elevation: 4,
+        },
+        spotlightHead: {
+          flexDirection: 'row',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 8,
+        },
+        spotlightTitle: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 12,
+          letterSpacing: 1.2,
+          textTransform: 'uppercase',
+          color: theme.colors.accent,
+        },
+        spotlightMeta: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          flexShrink: 1,
+          textAlign: 'right',
+        },
+        cardTap: {
+          paddingVertical: 6,
+        },
+        cardRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+        },
+        cardSide: {
+          flex: 1,
+          alignItems: 'center',
+          gap: 6,
+        },
+        cardName: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.text,
+          textAlign: 'center',
+        },
+        cardMid: {
+          alignItems: 'center',
+          minWidth: 64,
+          gap: 4,
+        },
+        cardVs: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        cardTime: {
+          fontFamily: theme.fontFamily.baiExtraLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          textAlign: 'center',
+        },
+        dots: {
+          flexDirection: 'row',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: 5,
+          paddingTop: 2,
+        },
+        dot: {
+          width: 5,
+          height: 5,
+          borderRadius: 2.5,
+          backgroundColor: theme.colors.borderLight,
+        },
+        dotActive: {
+          backgroundColor: theme.colors.accent,
+          width: 14,
+          borderRadius: 3,
         },
         tabs: {
           flexDirection: 'row',
@@ -236,12 +337,12 @@ export default function LmsHomeScreen() {
           flexDirection: 'row',
           alignItems: 'center',
           gap: theme.spacing.md,
-          paddingVertical: 12,
+          paddingVertical: 14,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: theme.colors.border,
         },
         rowLast: { borderBottomWidth: 0 },
-        rowCopy: { flex: 1, minWidth: 0 },
+        rowCopy: { flex: 1, minWidth: 0, gap: 3 },
         rowTitle: {
           fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: 15,
@@ -251,7 +352,23 @@ export default function LmsHomeScreen() {
           fontFamily: theme.fontFamily.baiLight,
           fontSize: 12,
           color: theme.colors.textSecondary,
+        },
+        rowPickHint: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.accent,
           marginTop: 2,
+        },
+        pickCol: {
+          alignItems: 'center',
+          minWidth: 52,
+          gap: 3,
+        },
+        pickAbbr: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 10,
+          color: theme.colors.textSecondary,
+          textTransform: 'uppercase',
         },
         empty: {
           fontFamily: theme.fontFamily.baiLight,
@@ -265,96 +382,91 @@ export default function LmsHomeScreen() {
           color: theme.colors.statusAccent,
           textTransform: 'uppercase',
         },
-        divider: {
-          height: StyleSheet.hairlineWidth,
-          backgroundColor: theme.colors.border,
-          marginVertical: 4,
-        },
-        spotlight: {
-          backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.md,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.colors.border,
-          paddingVertical: 12,
-          paddingHorizontal: 14,
-          gap: 10,
-        },
-        spotlightHead: {
-          flexDirection: 'row',
-          alignItems: 'baseline',
-          justifyContent: 'space-between',
-          gap: 8,
-        },
-        spotlightTitle: {
-          fontFamily: theme.fontFamily.baiSemiBold,
-          fontSize: 11,
-          letterSpacing: 1,
-          textTransform: 'uppercase',
-          color: theme.colors.accent,
-        },
-        spotlightMeta: {
-          fontFamily: theme.fontFamily.baiLight,
-          fontSize: 11,
-          color: theme.colors.textMuted,
-          flexShrink: 1,
-          textAlign: 'right',
-        },
-        cardTap: {
-          paddingVertical: 4,
-        },
-        cardRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 10,
-        },
-        cardSide: {
-          flex: 1,
-          alignItems: 'center',
-          gap: 4,
-        },
-        cardName: {
-          fontFamily: theme.fontFamily.baiMedium,
-          fontSize: 12,
-          color: theme.colors.text,
-          textAlign: 'center',
-        },
-        cardMid: {
-          alignItems: 'center',
-          minWidth: 56,
-          gap: 2,
-        },
-        cardVs: {
-          fontFamily: theme.fontFamily.baiLight,
-          fontSize: 11,
-          color: theme.colors.textMuted,
-        },
-        cardTime: {
-          fontFamily: theme.fontFamily.baiExtraLight,
-          fontSize: 10,
-          color: theme.colors.textMuted,
-          textAlign: 'center',
-        },
-        dots: {
-          flexDirection: 'row',
-          justifyContent: 'center',
-          alignItems: 'center',
-          gap: 5,
-          paddingTop: 2,
-        },
-        dot: {
-          width: 5,
-          height: 5,
-          borderRadius: 2.5,
-          backgroundColor: theme.colors.borderLight,
-        },
-        dotActive: {
-          backgroundColor: theme.colors.accent,
-          width: 14,
-          borderRadius: 3,
-        },
       }),
     [theme, insets.top, insets.bottom]
   );
+
+  const renderNextUp = () => {
+    if (!gw) return null;
+    return (
+      <View style={styles.spotlightWrap}>
+        <View style={styles.spotlight}>
+          <View style={styles.spotlightHead}>
+            <Text style={styles.spotlightTitle}>Next up · GW{gw.number}</Text>
+            <Text style={styles.spotlightMeta} numberOfLines={1}>
+              {upcomingFixtures.length
+                ? `${fxIndex + 1}/${upcomingFixtures.length}`
+                : 'No fixtures'}
+            </Text>
+          </View>
+
+          {activeFixture ? (
+            <Pressable
+              style={styles.cardTap}
+              onPress={() =>
+                setFxIndex((i) =>
+                  upcomingFixtures.length ? (i + 1) % upcomingFixtures.length : 0
+                )
+              }
+              accessibilityRole="button"
+              accessibilityLabel="Next fixture"
+            >
+              <View style={styles.cardRow}>
+                <View style={styles.cardSide}>
+                  <TeamCrest
+                    uri={activeFixture.home_team?.crest_url}
+                    label={activeFixture.home_team?.name}
+                    size={44}
+                  />
+                  <Text style={styles.cardName} numberOfLines={1}>
+                    {activeFixture.home_team?.short_name ?? 'H'}
+                  </Text>
+                </View>
+                <View style={styles.cardMid}>
+                  <Text style={styles.cardVs}>vs</Text>
+                  <Text style={styles.cardTime}>
+                    {new Date(activeFixture.kickoff_at).toLocaleString(undefined, {
+                      weekday: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </Text>
+                </View>
+                <View style={styles.cardSide}>
+                  <TeamCrest
+                    uri={activeFixture.away_team?.crest_url}
+                    label={activeFixture.away_team?.name}
+                    size={44}
+                  />
+                  <Text style={styles.cardName} numberOfLines={1}>
+                    {activeFixture.away_team?.short_name ?? 'A'}
+                  </Text>
+                </View>
+              </View>
+            </Pressable>
+          ) : (
+            <Text style={styles.empty}>Fixtures not loaded yet.</Text>
+          )}
+
+          {upcomingFixtures.length > 1 ? (
+            <View style={styles.dots}>
+              {upcomingFixtures.map((f, i) => (
+                <Pressable
+                  key={f.id}
+                  onPress={() => setFxIndex(i)}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Show fixture ${i + 1}`}
+                >
+                  <View style={[styles.dot, i === fxIndex && styles.dotActive]} />
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      </View>
+    );
+  };
 
   return (
     <View style={styles.root}>
@@ -378,6 +490,8 @@ export default function LmsHomeScreen() {
         <ActivityIndicator style={{ marginTop: 40 }} color={theme.colors.accent} />
       ) : (
         <>
+          {renderNextUp()}
+
           <View style={styles.tabs}>
             {(
               [
@@ -443,112 +557,52 @@ export default function LmsHomeScreen() {
                     </Text>
                   ) : (
                     <View style={styles.list}>
-                      {comps.map((c, i) => (
-                        <Pressable
-                          key={c.competition_id}
-                          style={[styles.row, i === comps.length - 1 && styles.rowLast]}
-                          onPress={() => router.push(`/(lms)/${c.competition_id}` as any)}
-                        >
-                          <View style={styles.rowCopy}>
-                            <Text style={styles.rowTitle}>{c.name}</Text>
-                            <Text style={styles.rowMeta}>
-                              {c.season}
-                              {c.start_gameweek_number != null
-                                ? ` · starts GW${c.start_gameweek_number}`
-                                : ''}
-                              {` · ${c.participant_status}`}
-                            </Text>
-                          </View>
-                          <Ionicons
-                            name="chevron-forward"
-                            size={16}
-                            color={theme.colors.textMuted}
-                          />
-                        </Pressable>
-                      ))}
+                      {comps.map((c, i) => {
+                        const remainLabel =
+                          c.totalCount > 0
+                            ? `${c.aliveCount} of ${c.totalCount} remain`
+                            : statusLabel(c.participant_status);
+                        return (
+                          <Pressable
+                            key={c.competition_id}
+                            style={[styles.row, i === comps.length - 1 && styles.rowLast]}
+                            onPress={() => router.push(`/(lms)/${c.competition_id}` as any)}
+                          >
+                            <View style={styles.rowCopy}>
+                              <Text style={styles.rowTitle}>{c.name}</Text>
+                              <Text style={styles.rowMeta}>{remainLabel}</Text>
+                              {c.participant_status === 'active' && c.pickAvailable ? (
+                                <Text style={styles.rowPickHint}>Pick available</Text>
+                              ) : c.participant_status !== 'active' ? (
+                                <Text style={styles.rowMeta}>
+                                  {statusLabel(c.participant_status)}
+                                </Text>
+                              ) : null}
+                            </View>
+                            {c.pickTeam ? (
+                              <View style={styles.pickCol}>
+                                <TeamCrest
+                                  uri={c.pickTeam.crest_url}
+                                  label={c.pickTeam.name}
+                                  size={28}
+                                />
+                                <Text style={styles.pickAbbr} numberOfLines={1}>
+                                  {c.pickTeam.short_name || c.pickTeam.name.slice(0, 3)}
+                                </Text>
+                              </View>
+                            ) : (
+                              <Ionicons
+                                name="chevron-forward"
+                                size={16}
+                                color={theme.colors.textMuted}
+                              />
+                            )}
+                          </Pressable>
+                        );
+                      })}
                     </View>
                   )}
                 </View>
-
-                {gw ? (
-                  <>
-                    <View style={styles.divider} />
-                    <View style={styles.spotlight}>
-                      <View style={styles.spotlightHead}>
-                        <Text style={styles.spotlightTitle}>Next up · GW{gw.number}</Text>
-                        <Text style={styles.spotlightMeta} numberOfLines={1}>
-                          {upcomingFixtures.length
-                            ? `${fxIndex + 1}/${upcomingFixtures.length}`
-                            : 'No fixtures'}
-                        </Text>
-                      </View>
-
-                      {activeFixture ? (
-                        <Pressable
-                          style={styles.cardTap}
-                          onPress={() =>
-                            setFxIndex((i) =>
-                              upcomingFixtures.length ? (i + 1) % upcomingFixtures.length : 0
-                            )
-                          }
-                          accessibilityRole="button"
-                          accessibilityLabel="Next fixture"
-                        >
-                          <View style={styles.cardRow}>
-                            <View style={styles.cardSide}>
-                              <TeamCrest
-                                uri={activeFixture.home_team?.crest_url}
-                                label={activeFixture.home_team?.name}
-                                size={28}
-                              />
-                              <Text style={styles.cardName} numberOfLines={1}>
-                                {activeFixture.home_team?.short_name ?? 'H'}
-                              </Text>
-                            </View>
-                            <View style={styles.cardMid}>
-                              <Text style={styles.cardVs}>vs</Text>
-                              <Text style={styles.cardTime}>
-                                {new Date(activeFixture.kickoff_at).toLocaleString(undefined, {
-                                  weekday: 'short',
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
-                              </Text>
-                            </View>
-                            <View style={styles.cardSide}>
-                              <TeamCrest
-                                uri={activeFixture.away_team?.crest_url}
-                                label={activeFixture.away_team?.name}
-                                size={28}
-                              />
-                              <Text style={styles.cardName} numberOfLines={1}>
-                                {activeFixture.away_team?.short_name ?? 'A'}
-                              </Text>
-                            </View>
-                          </View>
-                        </Pressable>
-                      ) : (
-                        <Text style={styles.empty}>Fixtures not loaded yet.</Text>
-                      )}
-
-                      {upcomingFixtures.length > 1 ? (
-                        <View style={styles.dots}>
-                          {upcomingFixtures.map((f, i) => (
-                            <Pressable
-                              key={f.id}
-                              onPress={() => setFxIndex(i)}
-                              hitSlop={6}
-                              accessibilityRole="button"
-                              accessibilityLabel={`Show fixture ${i + 1}`}
-                            >
-                              <View style={[styles.dot, i === fxIndex && styles.dotActive]} />
-                            </Pressable>
-                          ))}
-                        </View>
-                      ) : null}
-                    </View>
-                  </>
-                ) : null}
               </>
             ) : null}
 
