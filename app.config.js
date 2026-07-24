@@ -39,7 +39,8 @@ module.exports = {
     },
     web: {
       bundler: 'metro',
-      output: 'static',
+      // SPA: dynamic routes like /[competitionId] must not require prebuilt HTML per id
+      output: 'single',
       favicon: './assets/TT Logo.png',
     },
     plugins: [

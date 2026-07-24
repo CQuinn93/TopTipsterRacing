@@ -15,6 +15,7 @@ on:
       - 'constants/**'
       - 'assets/**'
       - 'scripts/inject-csp-meta.js'
+      - 'scripts/spa-github-pages-fallback.js'
       - 'app.json'
       - 'package.json'
       - 'package-lock.json'
@@ -52,9 +53,6 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           EXPO_PUBLIC_WEB_BASE_URL: ''
-
-      - name: Inject CSP (allow unsafe-eval for bundled code)
-        run: node scripts/inject-csp-meta.js
 
       - name: Add .nojekyll (required so _expo folder is served)
         run: touch dist/.nojekyll
