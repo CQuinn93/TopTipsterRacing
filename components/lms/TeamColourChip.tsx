@@ -1,5 +1,6 @@
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Image } from 'react-native';
 import { lmsTeamChipColours, lmsTeamCode } from '@/lib/lms/teamColours';
+import { lmsTeamIconSource } from '@/lib/lms/teamIcons';
 
 type Props = {
   shortName?: string | null;
@@ -9,12 +10,26 @@ type Props = {
 };
 
 /**
- * Colour + TLA chip used to identify clubs without loading trademarked crest artwork.
+ * Team identifier: local kit icon when available, otherwise colour + TLA chip.
+ * Icons live in assets/Icons/{TLA}.png (not official club crests).
  */
 export function TeamColourChip({ shortName, name, slug, size = 28 }: Props) {
-  const colours = lmsTeamChipColours({ slug, shortName });
+  const icon = lmsTeamIconSource({ shortName, name, slug });
   const code = lmsTeamCode({ shortName, name });
-  // Keep TLA fully visible inside the circle (avoid “…”).
+  const label = name ? `${name} kit` : `${code} kit`;
+
+  if (icon) {
+    return (
+      <Image
+        source={icon}
+        style={{ width: size, height: size }}
+        resizeMode="contain"
+        accessibilityLabel={label}
+      />
+    );
+  }
+
+  const colours = lmsTeamChipColours({ slug, shortName });
   const fontSize = Math.max(8, Math.round(size * 0.28));
   const border = Math.max(2, Math.round(size * 0.08));
 

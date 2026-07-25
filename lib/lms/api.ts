@@ -689,43 +689,70 @@ export type LmsCompetitionHomeSummary = LmsCompetitionRow & {
   pickAvailable: boolean;
 };
 
-/** Enrich my competitions with alive counts and current-GW pick status. */
-export async function lmsListMyCompetitionSummaries(
-  userId: string
-): Promise<LmsCompetitionHomeSummary[]> {
-  const comps = await lmsListMyCompetitions();
-  if (!comps.length) return [];
+export type LmsHomePayload = {
+  competitions: LmsCompetitionHomeSummary[];
+  pending: LmsPendingJoin[];
+  nextUp: {
+    gameweek: LmsGameweek | null;
+    fixtures: LmsFixture[];
+  };
+};
 
-  return Promise.all(
-    comps.map(async (c) => {
-      const [parts, gwInfo] = await Promise.all([
-        lmsListParticipants(c.competition_id),
-        lmsGetCompetitionCurrentGameweek(c.competition_id),
-      ]);
-      const totalCount = parts.length;
-      const aliveCount = parts.filter(
-        (p) => p.status === 'active' || p.status === 'winner'
-      ).length;
+/** Single RPC for LMS home: leagues + pending + next-up fixtures. */
+export async function lmsGetHome(season = '2026/27'): Promise<LmsHomePayload> {
+  const { data, error } = await db.rpc('lms_get_home', { p_season: season });
+  if (error) throw error;
 
-      let pickTeam: LmsTeam | null = null;
-      let pickAvailable = false;
-      const gw = gwInfo.gameweek;
-      if (c.participant_status === 'active' && gw) {
-        const pick = await lmsGetMyPick(c.competition_id, userId, gw.id);
-        pickTeam = pick?.team ?? null;
-        pickAvailable = !pick;
+  const raw = (data ?? {}) as {
+    competitions?: Array<
+      LmsCompetitionRow & {
+        alive_count?: number;
+        total_count?: number;
+        current_gameweek_number?: number | null;
+        pick_team?: LmsTeam | null;
+        pick_available?: boolean;
       }
+    >;
+    pending?: LmsPendingJoin[];
+    next_up?: {
+      gameweek?: LmsGameweek | null;
+      fixtures?: LmsFixture[];
+    };
+  };
 
-      return {
-        ...c,
-        aliveCount,
-        totalCount,
-        currentGameweekNumber: gw?.number ?? null,
-        pickTeam,
-        pickAvailable,
-      };
-    })
-  );
+  const competitions: LmsCompetitionHomeSummary[] = (raw.competitions ?? []).map((c) => ({
+    competition_id: c.competition_id,
+    name: c.name,
+    season: c.season,
+    competition_status: c.competition_status,
+    participant_status: c.participant_status,
+    joined_at: c.joined_at,
+    rollover_count: c.rollover_count,
+    start_gameweek_id: c.start_gameweek_id,
+    start_gameweek_number: c.start_gameweek_number,
+    aliveCount: Number(c.alive_count ?? 0),
+    totalCount: Number(c.total_count ?? 0),
+    currentGameweekNumber: c.current_gameweek_number ?? null,
+    pickTeam: c.pick_team ?? null,
+    pickAvailable: !!c.pick_available,
+  }));
+
+  return {
+    competitions,
+    pending: raw.pending ?? [],
+    nextUp: {
+      gameweek: raw.next_up?.gameweek ?? null,
+      fixtures: raw.next_up?.fixtures ?? [],
+    },
+  };
+}
+
+/** @deprecated Prefer lmsGetHome — kept for callers that only need competition cards. */
+export async function lmsListMyCompetitionSummaries(
+  _userId: string
+): Promise<LmsCompetitionHomeSummary[]> {
+  const home = await lmsGetHome();
+  return home.competitions;
 }
 
 /** All picks for a competition gameweek (same-comp members can read via RLS). */

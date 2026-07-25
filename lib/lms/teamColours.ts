@@ -41,6 +41,7 @@ const BY_SLUG: Record<string, TeamChipColours> = {
 const BY_CODE: Record<string, TeamChipColours> = {
   ARS: BY_SLUG.arsenal,
   AVL: BY_SLUG['aston-villa'],
+  AST: BY_SLUG['aston-villa'],
   BOU: BY_SLUG.bournemouth,
   BRE: BY_SLUG.brentford,
   BHA: BY_SLUG.brighton,

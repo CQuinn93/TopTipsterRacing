@@ -16,11 +16,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  lmsGetCurrentGameweek,
+  lmsGetHome,
   lmsJoinErrorMessage,
-  lmsListFixturesForGameweek,
-  lmsListMyCompetitionSummaries,
-  lmsListMyPendingJoins,
   lmsRequestJoin,
   type LmsCompetitionHomeSummary,
   type LmsFixture,
@@ -59,25 +56,17 @@ export default function LmsHomeScreen() {
   const load = useCallback(async () => {
     if (!userId) return;
     try {
-      const [c, p, currentGw] = await Promise.all([
-        lmsListMyCompetitionSummaries(userId),
-        lmsListMyPendingJoins(),
-        lmsGetCurrentGameweek('2026/27'),
-      ]);
-      setComps(c);
-      setPending(p);
-      setGw(currentGw);
-      if (currentGw) {
-        const fx = await lmsListFixturesForGameweek(currentGw.id);
-        setFixtures(fx);
-        setFxIndex(0);
-      } else {
-        setFixtures([]);
-        setFxIndex(0);
-      }
+      const home = await lmsGetHome('2026/27');
+      setComps(home.competitions);
+      setPending(home.pending);
+      setGw(home.nextUp.gameweek);
+      setFixtures(home.nextUp.fixtures);
+      setFxIndex(0);
       setTab((prev) => {
         if (prev === 'join') return prev;
-        return c.length === 0 && p.length === 0 ? 'join' : 'competitions';
+        return home.competitions.length === 0 && home.pending.length === 0
+          ? 'join'
+          : 'competitions';
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load competitions';
