@@ -1698,7 +1698,7 @@ export default function LmsCompetitionDashboard() {
                               used && styles.filterChipTextUsed,
                             ]}
                           >
-                            {t.short_name || t.name}
+                            {t.short_name || lmsDisplayTeamName(t.name)}
                           </Text>
                         </Pressable>
                       );
@@ -1995,7 +1995,8 @@ export default function LmsCompetitionDashboard() {
                                   size={22}
                                 />
                                 <Text style={styles.lbPickName} numberOfLines={1}>
-                                  {userPick.team.short_name || userPick.team.name}
+                                  {userPick.team.short_name ||
+                                    lmsDisplayTeamName(userPick.team.name)}
                                 </Text>
                               </View>
                             ) : (
