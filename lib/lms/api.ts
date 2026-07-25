@@ -526,16 +526,32 @@ export async function lmsListGameweeks(season = '2026/27'): Promise<LmsGameweek[
 }
 
 export async function lmsListFixturesForGameweek(gameweekId: string): Promise<LmsFixture[]> {
+  const { data: gwMeta, error: gwMetaErr } = await supabase
+    .from('lms_gameweeks')
+    .select('number')
+    .eq('id', gameweekId)
+    .maybeSingle();
+  if (gwMetaErr) throw gwMetaErr;
+  const gameweekNumber = (gwMeta as { number?: number } | null)?.number;
+
+  const stamp = (fixtures: LmsFixture[]): LmsFixture[] =>
+    fixtures.map((f) => ({
+      ...f,
+      gameweek_number: f.gameweek_number ?? gameweekNumber,
+    }));
+
   const embedded = await db
     .from('lms_fixtures')
     .select(
-      '*, home_team:lms_teams!home_team_id(*), away_team:lms_teams!away_team_id(*)'
+      '*, home_team:lms_teams!home_team_id(*), away_team:lms_teams!away_team_id(*), gameweek:lms_gameweeks(number)'
     )
     .eq('gameweek_id', gameweekId)
     .order('kickoff_at', { ascending: true });
 
   if (!embedded.error) {
-    return ((embedded.data ?? []) as Record<string, unknown>[]).map(mapFixtureWithTeams);
+    return stamp(
+      ((embedded.data ?? []) as Record<string, unknown>[]).map(mapFixtureWithTeams)
+    );
   }
 
   // Fallback if relationship hints are unavailable in this schema cache.
@@ -553,11 +569,13 @@ export async function lmsListFixturesForGameweek(gameweekId: string): Promise<Lm
   );
   const { data: teams } = await db.from('lms_teams').select('*').in('id', teamIds);
   const byId = new Map(((teams ?? []) as LmsTeam[]).map((t) => [t.id, t]));
-  return fixtures.map((f) => ({
-    ...f,
-    home_team: byId.get(f.home_team_id),
-    away_team: byId.get(f.away_team_id),
-  }));
+  return stamp(
+    fixtures.map((f) => ({
+      ...f,
+      home_team: byId.get(f.home_team_id),
+      away_team: byId.get(f.away_team_id),
+    }))
+  );
 }
 
 /** All fixtures for a season, with team + gameweek number attached. */

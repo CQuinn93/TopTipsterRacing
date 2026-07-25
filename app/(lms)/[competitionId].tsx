@@ -157,13 +157,27 @@ export default function LmsCompetitionDashboard() {
 
   const ensureGameweekFixtures = useCallback(
     async (gwId: string, opts?: { force?: boolean }) => {
+      const localNumber =
+        gameweeks.find((g) => g.id === gwId)?.number ??
+        (currentGw?.id === gwId ? currentGw.number : undefined);
+
+      const withNumber = (list: LmsFixture[]) =>
+        localNumber == null
+          ? list
+          : list.map((f) => ({
+              ...f,
+              gameweek_number: f.gameweek_number ?? localNumber,
+            }));
+
       if (!opts?.force && lmsSessionHasFixtures(gwId)) {
+        const cached = withNumber(lmsSessionGetFixtures(gwId) ?? []);
+        lmsSessionSetFixtures(gwId, cached);
         syncSeasonFixturesFromCache();
-        return lmsSessionGetFixtures(gwId) ?? [];
+        return cached;
       }
       setFixturesLoadingGwId(gwId);
       try {
-        const fx = await lmsListFixturesForGameweek(gwId);
+        const fx = withNumber(await lmsListFixturesForGameweek(gwId));
         lmsSessionSetFixtures(gwId, fx);
         syncSeasonFixturesFromCache();
         return fx;
@@ -171,7 +185,7 @@ export default function LmsCompetitionDashboard() {
         setFixturesLoadingGwId((prev) => (prev === gwId ? null : prev));
       }
     },
-    [syncSeasonFixturesFromCache]
+    [syncSeasonFixturesFromCache, gameweeks, currentGw]
   );
 
   const ensureFormFixtures = useCallback(
@@ -478,8 +492,9 @@ export default function LmsCompetitionDashboard() {
   const fixturesByGameweek = useMemo(() => {
     const groups: { gw: LmsGameweek | null; number: number; fixtures: LmsFixture[] }[] = [];
     const byNumber = new Map<number, LmsFixture[]>();
+    const numberByGwId = new Map(gameweeks.map((g) => [g.id, g.number]));
     for (const f of filteredFixtures) {
-      const n = f.gameweek_number ?? 0;
+      const n = f.gameweek_number ?? numberByGwId.get(f.gameweek_id) ?? 0;
       if (!byNumber.has(n)) byNumber.set(n, []);
       byNumber.get(n)!.push(f);
     }
