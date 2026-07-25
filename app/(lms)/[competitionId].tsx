@@ -50,6 +50,7 @@ import {
   type LmsPick,
   type LmsTeam,
 } from '@/lib/lms/api';
+import { lmsDisplayTeamName } from '@/lib/lms/teamColours';
 import {
   lmsSessionGetFixtures,
   lmsSessionGetFormFixtures,
@@ -748,7 +749,7 @@ export default function LmsCompetitionDashboard() {
     if (!enabled) {
       confirmDestructive(
         'Remove from pool?',
-        `${team.name} will leave this competition’s team pool. Pending picks using that club will be cleared.`,
+        `${lmsDisplayTeamName(team.name)} will leave this competition’s team pool. Pending picks using that club will be cleared.`,
         'Remove',
         () => void apply()
       );
@@ -1784,7 +1785,9 @@ export default function LmsCompetitionDashboard() {
                       <Text style={styles.pickBannerTitle}>
                         {canPick ? 'Your current pick' : 'Locked pick'}
                       </Text>
-                      <Text style={styles.pickBannerName}>{currentPickTeam.name}</Text>
+                      <Text style={styles.pickBannerName}>
+                        {lmsDisplayTeamName(currentPickTeam.name)}
+                      </Text>
                     </View>
                   </View>
                 ) : null}
@@ -1841,10 +1844,10 @@ export default function LmsCompetitionDashboard() {
                             accessibilityState={{ disabled: !pickable, selected }}
                             accessibilityLabel={
                               !pickable
-                                ? `${t.name} unavailable: ${note ?? 'No game'}`
+                                ? `${lmsDisplayTeamName(t.name)} unavailable: ${note ?? 'No game'}`
                                 : opponentLabel
-                                  ? `Select ${t.name} versus ${opponentLabel}`
-                                  : `Select ${t.name}`
+                                  ? `Select ${lmsDisplayTeamName(t.name)} versus ${opponentLabel}`
+                                  : `Select ${lmsDisplayTeamName(t.name)}`
                             }
                           >
                             <TeamColourChip shortName={t.short_name} name={t.name} slug={t.slug} size={28} />
@@ -1856,7 +1859,7 @@ export default function LmsCompetitionDashboard() {
                                 ]}
                                 numberOfLines={2}
                               >
-                                {t.name}
+                                {lmsDisplayTeamName(t.name)}
                               </Text>
                               {opponentLabel ? (
                                 <Text
@@ -1927,7 +1930,7 @@ export default function LmsCompetitionDashboard() {
                         <View key={t.id} style={[styles.teamTile, styles.teamTileDisabled]}>
                           <TeamColourChip shortName={t.short_name} name={t.name} slug={t.slug} size={28} />
                           <Text style={styles.teamTileName} numberOfLines={2}>
-                            {t.name}
+                            {lmsDisplayTeamName(t.name)}
                           </Text>
                         </View>
                       ))}
@@ -2028,7 +2031,7 @@ export default function LmsCompetitionDashboard() {
                                     size={20}
                                   />
                                   <Text style={styles.lbHistoryName} numberOfLines={1}>
-                                    {h.team?.name ?? 'Unknown team'}
+                                    {lmsDisplayTeamName(h.team?.name) || 'Unknown team'}
                                   </Text>
                                   <Text
                                     style={[
@@ -2107,7 +2110,7 @@ export default function LmsCompetitionDashboard() {
                         <View key={t.id} style={styles.adminRow}>
                           <TeamColourChip shortName={t.short_name} name={t.name} slug={t.slug} size={24} />
                           <View style={styles.adminRowBody}>
-                            <Text style={styles.adminRowTitle}>{t.name}</Text>
+                            <Text style={styles.adminRowTitle}>{lmsDisplayTeamName(t.name)}</Text>
                             <Text style={styles.adminRowMeta}>
                               {enabled ? 'In pool' : 'Not in this competition'}
                             </Text>

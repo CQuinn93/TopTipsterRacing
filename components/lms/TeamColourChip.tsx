@@ -14,7 +14,8 @@ type Props = {
 export function TeamColourChip({ shortName, name, slug, size = 28 }: Props) {
   const colours = lmsTeamChipColours({ slug, shortName });
   const code = lmsTeamCode({ shortName, name });
-  const fontSize = Math.max(9, Math.round(size * 0.36));
+  // Keep TLA fully visible inside the circle (avoid “…”).
+  const fontSize = Math.max(8, Math.round(size * 0.28));
   const border = Math.max(2, Math.round(size * 0.08));
 
   return (
@@ -38,10 +39,13 @@ export function TeamColourChip({ shortName, name, slug, size = 28 }: Props) {
           {
             fontSize,
             color: colours.text,
-            lineHeight: fontSize + 2,
+            lineHeight: fontSize + 1,
           },
         ]}
         numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.55}
+        allowFontScaling={false}
       >
         {code}
       </Text>
@@ -54,9 +58,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+    paddingHorizontal: 1,
   },
   code: {
     fontWeight: '700',
-    letterSpacing: 0.2,
+    letterSpacing: 0,
+    textAlign: 'center',
+    includeFontPadding: false,
   },
 });

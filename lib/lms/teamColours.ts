@@ -85,3 +85,13 @@ export function lmsTeamCode(opts: {
   if (name) return name.slice(0, 3).toUpperCase();
   return '?';
 }
+
+/**
+ * User-facing club name without a trailing FC / AFC suffix.
+ * Keeps leading "AFC" in names like "AFC Bournemouth".
+ */
+export function lmsDisplayTeamName(name?: string | null): string {
+  const raw = name?.trim() ?? '';
+  if (!raw) return '';
+  return raw.replace(/\s+A?\.?F\.?C\.?$/i, '').trim() || raw;
+}
