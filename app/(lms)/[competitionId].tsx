@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -30,7 +30,7 @@ import {
   lmsIsProfileAdmin,
   lmsListCompetitionGameweeks,
   lmsListCompetitionTeamIds,
-  lmsListCompletedPicks,
+  lmsListCompletedPicksForUser,
   lmsListFixturesForGameweek,
   lmsListParticipants,
   lmsListPicksForGameweek,
@@ -40,6 +40,8 @@ import {
   lmsPickErrorMessage,
   lmsSubmitPick,
   lmsTeamFormFromFixtures,
+  type LmsCompetition,
+  type LmsCompletedPick,
   type LmsFixture,
   type LmsGameweek,
   type LmsParticipant,
@@ -58,6 +60,8 @@ export default function LmsCompetitionDashboard() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectionLoading, setSelectionLoading] = useState(false);
+  const [gameweeksLoading, setGameweeksLoading] = useState(false);
   const [tab, setTab] = useState<TabKey>('leaderboard');
   const [name, setName] = useState('');
   const [compStatus, setCompStatus] = useState('');
@@ -73,9 +77,7 @@ export default function LmsCompetitionDashboard() {
   const [usedIds, setUsedIds] = useState<string[]>([]);
   const [pick, setPick] = useState<LmsPick | null>(null);
   const [gwPicks, setGwPicks] = useState<LmsPick[]>([]);
-  const [historyPicks, setHistoryPicks] = useState<
-    Awaited<ReturnType<typeof lmsListCompletedPicks>>
-  >([]);
+  const [historyPicks, setHistoryPicks] = useState<LmsCompletedPick[]>([]);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [leaderboard, setLeaderboard] = useState<LmsParticipant[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
@@ -86,81 +88,249 @@ export default function LmsCompetitionDashboard() {
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminSubTab, setAdminSubTab] = useState<'pool' | 'exclusions'>('pool');
   const [excludeReasons, setExcludeReasons] = useState<Record<string, string>>({});
+  const [historyLoadingUserId, setHistoryLoadingUserId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    if (!competitionId || !userId) return;
-    try {
-      const [comp, participant, gwInfo, allTeams, parts, gws, history, poolIds, admin] =
-        await Promise.all([
-          lmsGetCompetition(competitionId),
-          lmsGetMyParticipant(competitionId, userId),
-          lmsGetCompetitionCurrentGameweek(competitionId),
+  const competitionRef = useRef<LmsCompetition | null>(null);
+  const currentGwIdRef = useRef<string | null>(null);
+  const loadedRef = useRef({
+    leaderboardExtras: false,
+    selection: false,
+    gameweeks: false,
+    pickGwFixtures: false,
+  });
+  const historyLoadedUsersRef = useRef(new Set<string>());
+  const tabRef = useRef<TabKey>(tab);
+  tabRef.current = tab;
+
+  const mergeTeams = useCallback((incoming: LmsTeam[]) => {
+    if (!incoming.length) return;
+    setTeams((prev) => {
+      if (!prev.length) return incoming;
+      const byId = new Map(prev.map((t) => [t.id, t]));
+      for (const t of incoming) byId.set(t.id, t);
+      return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+    });
+  }, []);
+
+  const ensurePickGwFixtures = useCallback(
+    async (gwId: string) => {
+      if (loadedRef.current.pickGwFixtures && currentGwIdRef.current === gwId) {
+        return;
+      }
+      const pickFx = await lmsListFixturesForGameweek(gwId);
+      setPickGwFixtures(pickFx);
+      loadedRef.current.pickGwFixtures = true;
+      currentGwIdRef.current = gwId;
+    },
+    []
+  );
+
+  const loadLeaderboardExtras = useCallback(
+    async (gw: LmsGameweek | null, opts?: { force?: boolean }) => {
+      if (!competitionId) return;
+      if (!opts?.force && loadedRef.current.leaderboardExtras) return;
+      if (!gw) {
+        setGwPicks([]);
+        setPickGwFixtures([]);
+        loadedRef.current.leaderboardExtras = true;
+        loadedRef.current.pickGwFixtures = false;
+        currentGwIdRef.current = null;
+        return;
+      }
+      const [pickFx, picks] = await Promise.all([
+        lmsListFixturesForGameweek(gw.id),
+        lmsListPicksForGameweek(competitionId, gw.id),
+      ]);
+      setPickGwFixtures(pickFx);
+      setGwPicks(picks);
+      loadedRef.current.leaderboardExtras = true;
+      loadedRef.current.pickGwFixtures = true;
+      currentGwIdRef.current = gw.id;
+    },
+    [competitionId]
+  );
+
+  const loadSelectionSlice = useCallback(
+    async (opts?: { force?: boolean }) => {
+      if (!competitionId || !userId) return;
+      if (!opts?.force && loadedRef.current.selection) return;
+      setSelectionLoading(true);
+      try {
+        const comp = competitionRef.current;
+        const gwId = currentGwIdRef.current;
+
+        const base = await Promise.all([
           lmsListTeams(),
-          lmsListParticipants(competitionId),
-          lmsListCompetitionGameweeks(competitionId),
-          lmsListCompletedPicks(competitionId),
           lmsListCompetitionTeamIds(competitionId),
-          lmsIsProfileAdmin(userId),
-        ]);
-      const gw = gwInfo.gameweek;
-      setName(comp?.name ?? 'Competition');
-      setCompStatus(comp?.status ?? '');
-      setStartGwNumber(gwInfo.startGameweekNumber);
-      setMe(participant);
-      setCurrentGw(gw);
-      setTeams(allTeams);
-      setLeaderboard(parts);
-      setGameweeks(gws);
-      setHistoryPicks(history);
-      setPoolTeamIds(poolIds);
-      setIsAdmin(admin);
-      setAdminGwId((prev) => prev ?? gw?.id ?? gws[0]?.id ?? null);
-
-      const season = comp?.season ?? '2026/27';
-      const allFx = await lmsListSeasonFixtures(season);
-      setSeasonFixtures(allFx);
-      setExcludeReasons((prev) => {
-        const next = { ...prev };
-        for (const f of allFx) {
-          if (f.excluded_from_lms && f.excluded_reason && next[f.id] === undefined) {
-            next[f.id] = f.excluded_reason;
-          }
-        }
-        return next;
-      });
-
-      if (gw) {
-        const [pickFx, used, myPick, picks] = await Promise.all([
-          lmsListFixturesForGameweek(gw.id),
           lmsListUsedTeamIds(competitionId, userId),
-          lmsGetMyPick(competitionId, userId, gw.id),
-          lmsListPicksForGameweek(competitionId, gw.id),
+          lmsListCompletedPicksForUser(competitionId, userId, comp),
+          gwId ? lmsGetMyPick(competitionId, userId, gwId) : Promise.resolve(null),
+          gwId && (!loadedRef.current.pickGwFixtures || opts?.force)
+            ? ensurePickGwFixtures(gwId)
+            : Promise.resolve(),
         ]);
-        setPickGwFixtures(pickFx);
+
+        const allTeams = base[0];
+        const poolIds = base[1];
+        const used = base[2];
+        const myHistory = base[3];
+        const myPick = base[4];
+
+        mergeTeams(allTeams);
+        setPoolTeamIds(poolIds);
         setUsedIds(used);
         setPick(myPick);
-        setGwPicks(picks);
         setSelectedTeamId(myPick?.team_id ?? null);
-      } else {
-        setPickGwFixtures([]);
-        setUsedIds([]);
-        setPick(null);
-        setGwPicks([]);
-        setSelectedTeamId(null);
+        if (myPick?.team) mergeTeams([myPick.team]);
+
+        setHistoryPicks((prev) => {
+          const others = prev.filter((h) => h.user_id !== userId);
+          return [...others, ...myHistory];
+        });
+        historyLoadedUsersRef.current.add(userId);
+        loadedRef.current.selection = true;
+      } finally {
+        setSelectionLoading(false);
       }
+    },
+    [competitionId, userId, ensurePickGwFixtures, mergeTeams]
+  );
+
+  const loadGameweeksSlice = useCallback(
+    async (opts?: { force?: boolean }) => {
+      if (!competitionId) return;
+      if (!opts?.force && loadedRef.current.gameweeks) return;
+      setGameweeksLoading(true);
+      try {
+        const comp = competitionRef.current ?? (await lmsGetCompetition(competitionId));
+        if (comp) competitionRef.current = comp;
+        const season = comp?.season ?? '2026/27';
+        const [gws, allFx, allTeams] = await Promise.all([
+          lmsListCompetitionGameweeks(competitionId, comp),
+          lmsListSeasonFixtures(season),
+          loadedRef.current.selection && !opts?.force ? Promise.resolve(null) : lmsListTeams(),
+        ]);
+        setGameweeks(gws);
+        setSeasonFixtures(allFx);
+        setExcludeReasons((prev) => {
+          const next = { ...prev };
+          for (const f of allFx) {
+            if (f.excluded_from_lms && f.excluded_reason && next[f.id] === undefined) {
+              next[f.id] = f.excluded_reason;
+            }
+          }
+          return next;
+        });
+        if (allTeams) mergeTeams(allTeams);
+        setAdminGwId((prev) => prev ?? currentGwIdRef.current ?? gws[0]?.id ?? null);
+        if (!loadedRef.current.selection) {
+          // Admin pool needs team ids even if Selection was never opened.
+          const poolIds = await lmsListCompetitionTeamIds(competitionId);
+          setPoolTeamIds(poolIds);
+        }
+        loadedRef.current.gameweeks = true;
+      } finally {
+        setGameweeksLoading(false);
+      }
+    },
+    [competitionId, mergeTeams]
+  );
+
+  const loadHistoryForUser = useCallback(
+    async (targetUserId: string) => {
+      if (!competitionId || historyLoadedUsersRef.current.has(targetUserId)) return;
+      setHistoryLoadingUserId(targetUserId);
+      try {
+        const rows = await lmsListCompletedPicksForUser(
+          competitionId,
+          targetUserId,
+          competitionRef.current
+        );
+        historyLoadedUsersRef.current.add(targetUserId);
+        setHistoryPicks((prev) => {
+          const others = prev.filter((h) => h.user_id !== targetUserId);
+          return [...others, ...rows];
+        });
+      } finally {
+        setHistoryLoadingUserId((prev) => (prev === targetUserId ? null : prev));
+      }
+    },
+    [competitionId]
+  );
+
+  const loadShell = useCallback(async () => {
+    if (!competitionId || !userId) return;
+    const [comp, participant, parts, admin] = await Promise.all([
+      lmsGetCompetition(competitionId),
+      lmsGetMyParticipant(competitionId, userId),
+      lmsListParticipants(competitionId),
+      lmsIsProfileAdmin(userId),
+    ]);
+    competitionRef.current = comp;
+    const gwInfo = await lmsGetCompetitionCurrentGameweek(competitionId, comp);
+    const gw = gwInfo.gameweek;
+
+    setName(comp?.name ?? 'Competition');
+    setCompStatus(comp?.status ?? '');
+    setStartGwNumber(gwInfo.startGameweekNumber);
+    setMe(participant);
+    setCurrentGw(gw);
+    setLeaderboard(parts);
+    setIsAdmin(admin);
+    currentGwIdRef.current = gw?.id ?? null;
+
+    // Reset dependent slices when shell reloads (focus / pull-to-refresh).
+    loadedRef.current.leaderboardExtras = false;
+    loadedRef.current.selection = false;
+    loadedRef.current.gameweeks = false;
+    loadedRef.current.pickGwFixtures = false;
+    historyLoadedUsersRef.current = new Set();
+    setHistoryPicks([]);
+    setExpandedUserId(null);
+
+    await loadLeaderboardExtras(gw, { force: true });
+  }, [competitionId, userId, loadLeaderboardExtras]);
+
+  const reloadVisible = useCallback(async () => {
+    if (!competitionId || !userId) return;
+    try {
+      await loadShell();
+      const t = tabRef.current;
+      const tasks: Promise<unknown>[] = [];
+      if (t === 'selection') tasks.push(loadSelectionSlice({ force: true }));
+      if (t === 'gameweeks' || t === 'admin') tasks.push(loadGameweeksSlice({ force: true }));
+      await Promise.all(tasks);
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load dashboard');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [competitionId, userId]);
+  }, [competitionId, userId, loadShell, loadSelectionSlice, loadGameweeksSlice]);
 
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load])
+      void reloadVisible();
+    }, [reloadVisible])
   );
+
+  useEffect(() => {
+    if (tab === 'selection') void loadSelectionSlice().catch((e) => {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load selection');
+    });
+    if (tab === 'gameweeks' || tab === 'admin') {
+      void loadGameweeksSlice().catch((e) => {
+        Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load fixtures');
+      });
+    }
+  }, [tab, loadSelectionSlice, loadGameweeksSlice]);
+
+  useEffect(() => {
+    if (!expandedUserId) return;
+    void loadHistoryForUser(expandedUserId).catch(() => {
+      // Non-fatal: drawer shows empty until retry.
+    });
+  }, [expandedUserId, loadHistoryForUser]);
 
   const formByTeamId = useMemo(() => {
     const map = new Map<string, ReturnType<typeof lmsTeamFormFromFixtures>>();
@@ -377,7 +547,7 @@ export default function LmsCompetitionDashboard() {
   }, [historyByUserId, userId, pick, currentGw, currentPickTeam]);
 
   const onSavePick = async () => {
-    if (!selectedTeamId || !currentGw) return;
+    if (!selectedTeamId || !currentGw || !userId) return;
     setSaving(true);
     try {
       const res = await lmsSubmitPick({
@@ -389,8 +559,34 @@ export default function LmsCompetitionDashboard() {
         Alert.alert('Pick not saved', lmsPickErrorMessage(res.error));
         return;
       }
+
+      const team =
+        teams.find((t) => t.id === selectedTeamId) ??
+        competitionTeams.find((t) => t.id === selectedTeamId) ??
+        null;
+      const nextPick: LmsPick = {
+        id: pick?.id ?? `local-${selectedTeamId}`,
+        competition_id: competitionId,
+        user_id: userId,
+        gameweek_id: currentGw.id,
+        team_id: selectedTeamId,
+        result: pick?.result ?? 'pending',
+        team: team ?? undefined,
+      };
+      setPick(nextPick);
+      setSelectedTeamId(selectedTeamId);
+      setUsedIds((prev) => {
+        const withoutOld = pick?.team_id ? prev.filter((id) => id !== pick.team_id) : prev;
+        return withoutOld.includes(selectedTeamId)
+          ? withoutOld
+          : [...withoutOld, selectedTeamId];
+      });
+      setGwPicks((prev) => {
+        const others = prev.filter((p) => p.user_id !== userId);
+        return [...others, nextPick];
+      });
+
       Alert.alert('Saved', 'Your gameweek pick is locked in until the deadline.');
-      await load();
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not save pick');
     } finally {
@@ -423,7 +619,7 @@ export default function LmsCompetitionDashboard() {
           Alert.alert('Could not update pool', res.error ?? 'Unknown error');
           return;
         }
-        await load();
+        await reloadVisible();
       } catch (e) {
         Alert.alert('Error', e instanceof Error ? e.message : 'Could not update team pool');
       } finally {
@@ -455,7 +651,7 @@ export default function LmsCompetitionDashboard() {
         Alert.alert('Could not update fixture', res.error ?? 'Unknown error');
         return;
       }
-      await load();
+      await reloadVisible();
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Could not update fixture');
     } finally {
@@ -1260,13 +1456,16 @@ export default function LmsCompetitionDashboard() {
                 refreshing={refreshing}
                 onRefresh={() => {
                   setRefreshing(true);
-                  void load();
+                  void reloadVisible();
                 }}
                 tintColor={theme.colors.accent}
               />
             }
           >
             {tab === 'gameweeks' ? (
+              gameweeksLoading && !seasonFixtures.length ? (
+                <ActivityIndicator style={{ marginTop: 24 }} color={theme.colors.accent} />
+              ) : (
               <>
                 <Text style={styles.sectionIntro}>
                   Fixtures grouped by gameweek. Filter by week or team to plan your pick. Form dots
@@ -1399,9 +1598,13 @@ export default function LmsCompetitionDashboard() {
                   ))
                 )}
               </>
+              )
             ) : null}
 
             {tab === 'selection' ? (
+              selectionLoading && poolTeamIds.length === 0 ? (
+                <ActivityIndicator style={{ marginTop: 24 }} color={theme.colors.accent} />
+              ) : (
               <>
                 <Text style={styles.sectionIntro}>
                   Pick one unused team that must win this gameweek. Draws eliminate you. Each club
@@ -1591,6 +1794,7 @@ export default function LmsCompetitionDashboard() {
                   </View>
                 ) : null}
               </>
+              )
             ) : null}
 
             {tab === 'leaderboard' ? (
@@ -1665,7 +1869,9 @@ export default function LmsCompetitionDashboard() {
                         </Pressable>
                         {expanded ? (
                           <View style={styles.lbDrawer}>
-                            {history.length === 0 ? (
+                            {historyLoadingUserId === p.user_id ? (
+                              <ActivityIndicator color={theme.colors.accent} />
+                            ) : history.length === 0 ? (
                               <Text style={styles.lbDrawerEmpty}>
                                 No completed gameweek picks yet.
                               </Text>

@@ -127,44 +127,61 @@ export async function lmsSubmitPick(params: {
   return (data ?? { success: false, error: 'unknown' }) as { success: boolean; error?: string };
 }
 
-export async function lmsGetCompetition(competitionId: string) {
+export type LmsCompetition = {
+  id: string;
+  name: string;
+  season: string;
+  status: string;
+  created_at: string;
+  start_gameweek_id: string | null;
+};
+
+export type LmsCompletedPick = {
+  user_id: string;
+  gameweek_id: string;
+  gameweek_number: number;
+  team_id: string;
+  result: string;
+  team?: LmsTeam;
+};
+
+export async function lmsGetCompetition(competitionId: string): Promise<LmsCompetition | null> {
   const { data, error } = await db
     .from('lms_competitions')
     .select('id, name, season, status, created_at, start_gameweek_id')
     .eq('id', competitionId)
     .maybeSingle();
   if (error) throw error;
-  return data as {
-    id: string;
-    name: string;
-    season: string;
-    status: string;
-    created_at: string;
-    start_gameweek_id: string | null;
-  } | null;
+  return data as LmsCompetition | null;
+}
+
+async function resolveStartGameweekMeta(
+  startGameweekId: string | null | undefined
+): Promise<{ minNumber: number; startsAt: string | null }> {
+  if (!startGameweekId) return { minNumber: 1, startsAt: null };
+  const { data: startGw, error: startErr } = await supabase
+    .from('lms_gameweeks')
+    .select('number, starts_at')
+    .eq('id', startGameweekId)
+    .maybeSingle();
+  if (startErr) throw startErr;
+  if (!startGw) return { minNumber: 1, startsAt: null };
+  return {
+    minNumber: (startGw as { number: number }).number,
+    startsAt: (startGw as { starts_at: string }).starts_at,
+  };
 }
 
 /** First incomplete gameweek at or after the competition start week. */
 export async function lmsGetCompetitionCurrentGameweek(
-  competitionId: string
+  competitionId: string,
+  /** Pass a preloaded competition to avoid a duplicate REST fetch. */
+  preloadedCompetition?: LmsCompetition | null
 ): Promise<{ gameweek: LmsGameweek | null; startGameweekNumber: number | null; startsAt: string | null }> {
-  const comp = await lmsGetCompetition(competitionId);
+  const comp = preloadedCompetition ?? (await lmsGetCompetition(competitionId));
   if (!comp) return { gameweek: null, startGameweekNumber: null, startsAt: null };
 
-  let minNumber = 1;
-  let startsAt: string | null = null;
-  if (comp.start_gameweek_id) {
-    const { data: startGw, error: startErr } = await supabase
-      .from('lms_gameweeks')
-      .select('number, starts_at')
-      .eq('id', comp.start_gameweek_id)
-      .maybeSingle();
-    if (startErr) throw startErr;
-    if (startGw) {
-      minNumber = (startGw as { number: number }).number;
-      startsAt = (startGw as { starts_at: string }).starts_at;
-    }
-  }
+  const { minNumber, startsAt } = await resolveStartGameweekMeta(comp.start_gameweek_id);
 
   const { data, error } = await supabase
     .from('lms_gameweeks')
@@ -183,20 +200,14 @@ export async function lmsGetCompetitionCurrentGameweek(
   };
 }
 
-export async function lmsListCompetitionGameweeks(competitionId: string): Promise<LmsGameweek[]> {
-  const comp = await lmsGetCompetition(competitionId);
+export async function lmsListCompetitionGameweeks(
+  competitionId: string,
+  preloadedCompetition?: LmsCompetition | null
+): Promise<LmsGameweek[]> {
+  const comp = preloadedCompetition ?? (await lmsGetCompetition(competitionId));
   if (!comp) return [];
 
-  let minNumber = 1;
-  if (comp.start_gameweek_id) {
-    const { data: startGw, error: startErr } = await supabase
-      .from('lms_gameweeks')
-      .select('number')
-      .eq('id', comp.start_gameweek_id)
-      .maybeSingle();
-    if (startErr) throw startErr;
-    if (startGw) minNumber = (startGw as { number: number }).number;
-  }
+  const { minNumber } = await resolveStartGameweekMeta(comp.start_gameweek_id);
 
   const { data, error } = await supabase
     .from('lms_gameweeks')
@@ -206,6 +217,24 @@ export async function lmsListCompetitionGameweeks(competitionId: string): Promis
     .order('number', { ascending: true });
   if (error) throw error;
   return (data ?? []) as LmsGameweek[];
+}
+
+function mapEmbeddedTeam(row: unknown): LmsTeam | undefined {
+  if (!row || typeof row !== 'object') return undefined;
+  return row as LmsTeam;
+}
+
+function mapFixtureWithTeams(row: Record<string, unknown>): LmsFixture {
+  const home = mapEmbeddedTeam(row.home_team);
+  const away = mapEmbeddedTeam(row.away_team);
+  const gw = row.gameweek as { number?: number } | null | undefined;
+  const { home_team: _h, away_team: _a, gameweek: _g, ...rest } = row;
+  return {
+    ...(rest as unknown as LmsFixture),
+    home_team: home,
+    away_team: away,
+    gameweek_number: gw?.number ?? (rest as { gameweek_number?: number }).gameweek_number,
+  };
 }
 
 export async function lmsGetMyParticipant(competitionId: string, userId: string) {
@@ -231,7 +260,9 @@ export async function lmsListParticipants(competitionId: string): Promise<LmsPar
 
   const userIds = rows.map((r) => r.user_id);
   const { data: profiles } = await db.from('profiles').select('id, username').in('id', userIds);
-  const nameById = new Map((profiles ?? []).map((p: { id: string; username: string | null }) => [p.id, p.username]));
+  const nameById = new Map<string, string | null>(
+    ((profiles ?? []) as { id: string; username: string | null }[]).map((p) => [p.id, p.username])
+  );
   return rows.map((r) => ({ ...r, username: nameById.get(r.user_id) ?? null }));
 }
 
@@ -313,17 +344,11 @@ export async function lmsAdminDeleteCompetition(
 }
 
 /** Picks from completed gameweeks for the whole competition (for leaderboard history drawers). */
-export async function lmsListCompletedPicks(competitionId: string): Promise<
-  {
-    user_id: string;
-    gameweek_id: string;
-    gameweek_number: number;
-    team_id: string;
-    result: string;
-    team?: LmsTeam;
-  }[]
-> {
-  const comp = await lmsGetCompetition(competitionId);
+export async function lmsListCompletedPicks(
+  competitionId: string,
+  preloadedCompetition?: LmsCompetition | null
+): Promise<LmsCompletedPick[]> {
+  const comp = preloadedCompetition ?? (await lmsGetCompetition(competitionId));
   if (!comp) return [];
 
   const { data: completeGws, error: gwErr } = await supabase
@@ -341,7 +366,7 @@ export async function lmsListCompletedPicks(competitionId: string): Promise<
 
   const { data, error } = await db
     .from('lms_picks')
-    .select('user_id, gameweek_id, team_id, result')
+    .select('user_id, gameweek_id, team_id, result, team:lms_teams(*)')
     .eq('competition_id', competitionId)
     .in('gameweek_id', gwIds);
   if (error) throw error;
@@ -350,12 +375,9 @@ export async function lmsListCompletedPicks(competitionId: string): Promise<
     gameweek_id: string;
     team_id: string;
     result: string;
+    team?: LmsTeam | null;
   }[];
   if (!rows.length) return [];
-
-  const teamIds = [...new Set(rows.map((r) => r.team_id))];
-  const { data: teams } = await db.from('lms_teams').select('*').in('id', teamIds);
-  const byId = new Map(((teams ?? []) as LmsTeam[]).map((t) => [t.id, t]));
 
   return rows
     .map((r) => ({
@@ -364,7 +386,57 @@ export async function lmsListCompletedPicks(competitionId: string): Promise<
       gameweek_number: numberById.get(r.gameweek_id) ?? 0,
       team_id: r.team_id,
       result: r.result,
-      team: byId.get(r.team_id),
+      team: r.team ?? undefined,
+    }))
+    .sort((a, b) => a.gameweek_number - b.gameweek_number);
+}
+
+/** Completed-gameweek picks for one player (Selection previous chips / lazy leaderboard drawer). */
+export async function lmsListCompletedPicksForUser(
+  competitionId: string,
+  userId: string,
+  preloadedCompetition?: LmsCompetition | null
+): Promise<LmsCompletedPick[]> {
+  const comp = preloadedCompetition ?? (await lmsGetCompetition(competitionId));
+  if (!comp) return [];
+
+  const { data: completeGws, error: gwErr } = await supabase
+    .from('lms_gameweeks')
+    .select('id, number')
+    .eq('season', comp.season)
+    .eq('status', 'complete')
+    .order('number', { ascending: true });
+  if (gwErr) throw gwErr;
+  const gws = (completeGws ?? []) as { id: string; number: number }[];
+  if (!gws.length) return [];
+
+  const gwIds = gws.map((g) => g.id);
+  const numberById = new Map(gws.map((g) => [g.id, g.number]));
+
+  const { data, error } = await db
+    .from('lms_picks')
+    .select('user_id, gameweek_id, team_id, result, team:lms_teams(*)')
+    .eq('competition_id', competitionId)
+    .eq('user_id', userId)
+    .in('gameweek_id', gwIds);
+  if (error) throw error;
+
+  const rows = (data ?? []) as {
+    user_id: string;
+    gameweek_id: string;
+    team_id: string;
+    result: string;
+    team?: LmsTeam | null;
+  }[];
+
+  return rows
+    .map((r) => ({
+      user_id: r.user_id,
+      gameweek_id: r.gameweek_id,
+      gameweek_number: numberById.get(r.gameweek_id) ?? 0,
+      team_id: r.team_id,
+      result: r.result,
+      team: r.team ?? undefined,
     }))
     .sort((a, b) => a.gameweek_number - b.gameweek_number);
 }
@@ -394,6 +466,19 @@ export async function lmsListGameweeks(season = '2026/27'): Promise<LmsGameweek[
 }
 
 export async function lmsListFixturesForGameweek(gameweekId: string): Promise<LmsFixture[]> {
+  const embedded = await db
+    .from('lms_fixtures')
+    .select(
+      '*, home_team:lms_teams!home_team_id(*), away_team:lms_teams!away_team_id(*)'
+    )
+    .eq('gameweek_id', gameweekId)
+    .order('kickoff_at', { ascending: true });
+
+  if (!embedded.error) {
+    return ((embedded.data ?? []) as Record<string, unknown>[]).map(mapFixtureWithTeams);
+  }
+
+  // Fallback if relationship hints are unavailable in this schema cache.
   const { data, error } = await supabase
     .from('lms_fixtures')
     .select('*')
@@ -429,13 +514,31 @@ export async function lmsListSeasonFixtures(season = '2026/27'): Promise<LmsFixt
   const gwIds = gameweeks.map((g) => g.id);
   const numberById = new Map(gameweeks.map((g) => [g.id, g.number]));
 
-  const { data, error } = await supabase
+  const { data, error } = await db
+    .from('lms_fixtures')
+    .select(
+      '*, home_team:lms_teams!home_team_id(*), away_team:lms_teams!away_team_id(*)'
+    )
+    .in('gameweek_id', gwIds)
+    .order('kickoff_at', { ascending: true });
+
+  if (!error) {
+    return ((data ?? []) as Record<string, unknown>[]).map((row) => {
+      const mapped = mapFixtureWithTeams(row);
+      return {
+        ...mapped,
+        gameweek_number: numberById.get(mapped.gameweek_id) ?? mapped.gameweek_number,
+      };
+    });
+  }
+
+  const { data: plain, error: plainErr } = await supabase
     .from('lms_fixtures')
     .select('*')
     .in('gameweek_id', gwIds)
     .order('kickoff_at', { ascending: true });
-  if (error) throw error;
-  const fixtures = (data ?? []) as LmsFixture[];
+  if (plainErr) throw plainErr;
+  const fixtures = (plain ?? []) as LmsFixture[];
   if (!fixtures.length) return [];
 
   const teamIds = Array.from(
@@ -469,13 +572,13 @@ export function lmsTeamFormFromFixtures(
     )
     .sort((a, b) => new Date(a.kickoff_at).getTime() - new Date(b.kickoff_at).getTime());
 
-  const lastFive = finished.slice(-5).map((f) => {
+  const lastFive: FormResult[] = finished.slice(-5).map((f) => {
     const home = f.home_team_id === teamId;
     const hg = f.home_goals as number;
     const ag = f.away_goals as number;
-    if (hg === ag) return 'D' as const;
+    if (hg === ag) return 'D';
     const won = home ? hg > ag : ag > hg;
-    return won ? ('W' as const) : ('L' as const);
+    return won ? 'W' : 'L';
   });
 
   while (lastFive.length < 5) lastFive.unshift(null);
@@ -487,19 +590,17 @@ export async function lmsGetMyPick(
   userId: string,
   gameweekId: string
 ): Promise<LmsPick | null> {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('lms_picks')
-    .select('*')
+    .select('*, team:lms_teams(*)')
     .eq('competition_id', competitionId)
     .eq('user_id', userId)
     .eq('gameweek_id', gameweekId)
     .maybeSingle();
   if (error) throw error;
-  const pick = data as LmsPick | null;
-  if (!pick) return null;
-
-  const { data: team } = await db.from('lms_teams').select('*').eq('id', pick.team_id).maybeSingle();
-  return { ...pick, team: (team as LmsTeam | null) ?? undefined };
+  if (!data) return null;
+  const row = data as LmsPick & { team?: LmsTeam | null };
+  return { ...row, team: row.team ?? undefined };
 }
 
 export type LmsCompetitionHomeSummary = LmsCompetitionRow & {
@@ -556,17 +657,12 @@ export async function lmsListPicksForGameweek(
 ): Promise<LmsPick[]> {
   const { data, error } = await db
     .from('lms_picks')
-    .select('id, competition_id, user_id, gameweek_id, team_id, result')
+    .select('id, competition_id, user_id, gameweek_id, team_id, result, team:lms_teams(*)')
     .eq('competition_id', competitionId)
     .eq('gameweek_id', gameweekId);
   if (error) throw error;
-  const rows = (data ?? []) as LmsPick[];
-  if (!rows.length) return [];
-
-  const teamIds = [...new Set(rows.map((r) => r.team_id))];
-  const { data: teams } = await db.from('lms_teams').select('*').in('id', teamIds);
-  const byId = new Map(((teams ?? []) as LmsTeam[]).map((t) => [t.id, t]));
-  return rows.map((r) => ({ ...r, team: byId.get(r.team_id) }));
+  const rows = (data ?? []) as (LmsPick & { team?: LmsTeam | null })[];
+  return rows.map((r) => ({ ...r, team: r.team ?? undefined }));
 }
 
 export async function lmsAdminCreateCompetition(
