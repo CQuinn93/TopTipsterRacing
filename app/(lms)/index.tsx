@@ -16,17 +16,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import {
+  lmsGetGameweekPickStats,
   lmsGetHome,
   lmsJoinErrorMessage,
   lmsRequestJoin,
   type LmsCompetitionHomeSummary,
   type LmsFixture,
   type LmsGameweek,
+  type LmsGameweekPickStats,
   type LmsPendingJoin,
+  type LmsPickStatOutcome,
 } from '@/lib/lms/api';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
-// Crest images disabled — restore TeamCrest if logo rights obtained.
-// import { TeamCrest } from '@/components/lms/TeamCrest';
+import { lmsDisplayTeamName } from '@/lib/lms/teamColours';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 
 type HomeTab = 'competitions' | 'join';
@@ -47,6 +49,7 @@ export default function LmsHomeScreen() {
   const [gw, setGw] = useState<LmsGameweek | null>(null);
   const [fixtures, setFixtures] = useState<LmsFixture[]>([]);
   const [fxIndex, setFxIndex] = useState(0);
+  const [pickStats, setPickStats] = useState<LmsGameweekPickStats | null>(null);
 
   const upcomingFixtures = useMemo(() => {
     const open = fixtures.filter((f) => f.status !== 'finished' && !f.excluded_from_lms);
@@ -68,6 +71,13 @@ export default function LmsHomeScreen() {
           ? 'join'
           : 'competitions';
       });
+
+      if (home.nextUp.gameweek?.id) {
+        const stats = await lmsGetGameweekPickStats(home.nextUp.gameweek.id);
+        setPickStats(stats.revealed ? stats : null);
+      } else {
+        setPickStats(null);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load competitions';
       Alert.alert('Error', msg);
@@ -128,6 +138,36 @@ export default function LmsHomeScreen() {
     if (status === 'winner') return 'Champion';
     if (status === 'eliminated') return 'Eliminated';
     return status;
+  };
+
+  const outcomeLabel = (outcome: LmsPickStatOutcome) => {
+    switch (outcome) {
+      case 'won':
+        return 'W';
+      case 'lost':
+        return 'L';
+      case 'draw':
+        return 'D';
+      case 'pending':
+        return '—';
+      case 'excluded':
+        return 'X';
+      default:
+        return '—';
+    }
+  };
+
+  const outcomeColor = (outcome: LmsPickStatOutcome) => {
+    switch (outcome) {
+      case 'won':
+        return theme.colors.accent;
+      case 'lost':
+        return theme.colors.error;
+      case 'draw':
+        return theme.colors.textMuted;
+      default:
+        return theme.colors.textMuted;
+    }
   };
 
   const styles = useMemo(
@@ -373,6 +413,75 @@ export default function LmsHomeScreen() {
           color: theme.colors.statusAccent,
           textTransform: 'uppercase',
         },
+        pickStatsCard: {
+          marginTop: 10,
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          paddingVertical: 12,
+          paddingHorizontal: 12,
+          gap: 8,
+        },
+        pickStatsHead: {
+          flexDirection: 'row',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 8,
+        },
+        pickStatsTitle: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 11,
+          letterSpacing: 1.1,
+          textTransform: 'uppercase',
+          color: theme.colors.textMuted,
+        },
+        pickStatsMeta: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+        },
+        pickStatsList: {
+          maxHeight: 220,
+        },
+        pickStatRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingVertical: 4,
+        },
+        pickStatName: {
+          width: 36,
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          color: theme.colors.textSecondary,
+        },
+        pickStatBarTrack: {
+          flex: 1,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: theme.colors.surfaceElevated,
+          overflow: 'hidden',
+        },
+        pickStatBarFill: {
+          height: '100%',
+          borderRadius: 4,
+          backgroundColor: theme.colors.accent,
+          minWidth: 0,
+        },
+        pickStatPct: {
+          width: 40,
+          textAlign: 'right',
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 11,
+          color: theme.colors.text,
+        },
+        pickStatOutcome: {
+          width: 16,
+          textAlign: 'center',
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 11,
+        },
       }),
     [theme, insets.top, insets.bottom]
   );
@@ -457,6 +566,60 @@ export default function LmsHomeScreen() {
             </View>
           ) : null}
         </View>
+
+        {pickStats?.revealed && pickStats.teams.length > 0 ? (
+          <View style={styles.pickStatsCard}>
+            <View style={styles.pickStatsHead}>
+              <Text style={styles.pickStatsTitle}>
+                GW{pickStats.gameweek_number ?? gw.number} picks
+              </Text>
+              <Text style={styles.pickStatsMeta}>
+                {pickStats.total_picks} pick{pickStats.total_picks === 1 ? '' : 's'} · all leagues
+              </Text>
+            </View>
+            <ScrollView
+              style={styles.pickStatsList}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
+            >
+              {pickStats.teams.map((t) => {
+                const widthPct = Math.min(100, Math.max(0, t.pick_pct));
+                return (
+                  <View key={t.team_id} style={styles.pickStatRow}>
+                    <TeamColourChip
+                      shortName={t.short_name}
+                      name={t.name}
+                      slug={t.slug}
+                      size={22}
+                    />
+                    <Text style={styles.pickStatName} numberOfLines={1}>
+                      {t.short_name || lmsDisplayTeamName(t.name).slice(0, 3)}
+                    </Text>
+                    <View style={styles.pickStatBarTrack}>
+                      <View
+                        style={[
+                          styles.pickStatBarFill,
+                          {
+                            width: `${widthPct}%`,
+                            opacity: t.pick_count > 0 ? 1 : 0.25,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.pickStatPct}>
+                      {t.pick_pct.toFixed(t.pick_pct % 1 === 0 ? 0 : 1)}%
+                    </Text>
+                    <Text
+                      style={[styles.pickStatOutcome, { color: outcomeColor(t.outcome) }]}
+                    >
+                      {outcomeLabel(t.outcome)}
+                    </Text>
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </View>
+        ) : null}
       </View>
     );
   };

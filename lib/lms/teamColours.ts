@@ -58,6 +58,7 @@ const BY_CODE: Record<string, TeamChipColours> = {
   MUN: BY_SLUG['manchester-united'],
   NEW: BY_SLUG.newcastle,
   NFO: BY_SLUG['nottingham-forest'],
+  NOT: BY_SLUG['nottingham-forest'],
   SUN: BY_SLUG.sunderland,
   TOT: BY_SLUG.tottenham,
   WOL: BY_SLUG.wolves,

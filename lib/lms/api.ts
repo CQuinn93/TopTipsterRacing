@@ -755,6 +755,58 @@ export async function lmsListMyCompetitionSummaries(
   return home.competitions;
 }
 
+export type LmsPickStatOutcome =
+  | 'won'
+  | 'lost'
+  | 'draw'
+  | 'pending'
+  | 'excluded'
+  | 'no_fixture';
+
+export type LmsGameweekPickStatTeam = {
+  team_id: string;
+  name: string;
+  short_name: string;
+  slug: string;
+  pick_count: number;
+  pick_pct: number;
+  outcome: LmsPickStatOutcome;
+};
+
+export type LmsGameweekPickStats = {
+  success: boolean;
+  revealed: boolean;
+  gameweek_id?: string;
+  gameweek_number?: number;
+  total_picks: number;
+  teams: LmsGameweekPickStatTeam[];
+  error?: string;
+};
+
+/** Aggregated pick share + fixture outcome for a gameweek (all competitions). */
+export async function lmsGetGameweekPickStats(
+  gameweekId: string
+): Promise<LmsGameweekPickStats> {
+  const { data, error } = await db.rpc('lms_get_gameweek_pick_stats', {
+    p_gameweek_id: gameweekId,
+  });
+  if (error) throw error;
+  const raw = (data ?? {}) as LmsGameweekPickStats;
+  return {
+    success: !!raw.success,
+    revealed: !!raw.revealed,
+    gameweek_id: raw.gameweek_id,
+    gameweek_number: raw.gameweek_number,
+    total_picks: Number(raw.total_picks ?? 0),
+    teams: (raw.teams ?? []).map((t) => ({
+      ...t,
+      pick_count: Number(t.pick_count ?? 0),
+      pick_pct: Number(t.pick_pct ?? 0),
+    })),
+    error: raw.error,
+  };
+}
+
 /** All picks for a competition gameweek (same-comp members can read via RLS). */
 export async function lmsListPicksForGameweek(
   competitionId: string,

@@ -26,6 +26,8 @@ const TEAM_ICON_BY_CODE: Record<string, ImageSourcePropType> = {
   MUN: require('../../assets/Icons/MUN.png'),
   NEW: require('../../assets/Icons/NEW.png'),
   NFO: require('../../assets/Icons/NFO.png'),
+  // Name fallback "Nottingham Forest".slice(0,3) → NOT
+  NOT: require('../../assets/Icons/NFO.png'),
   SUN: require('../../assets/Icons/SUN.png'),
   TOT: require('../../assets/Icons/TOT.png'),
 };
@@ -62,6 +64,11 @@ export function lmsTeamIconSource(opts: {
   if (slug && SLUG_TO_CODE[slug]) {
     const fromSlug = TEAM_ICON_BY_CODE[SLUG_TO_CODE[slug]];
     if (fromSlug) return fromSlug;
+  }
+
+  const nameLower = opts.name?.trim().toLowerCase() ?? '';
+  if (nameLower.includes('nottingham')) {
+    return TEAM_ICON_BY_CODE.NFO;
   }
 
   const code = lmsTeamCode({ shortName: opts.shortName, name: opts.name });
