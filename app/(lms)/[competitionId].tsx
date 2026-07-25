@@ -109,6 +109,8 @@ export default function LmsCompetitionDashboard() {
 
   const competitionRef = useRef<LmsCompetition | null>(null);
   const currentGwIdRef = useRef<string | null>(null);
+  const currentGwRef = useRef<LmsGameweek | null>(null);
+  const gameweeksRef = useRef<LmsGameweek[]>([]);
   const loadedRef = useRef({
     leaderboardExtras: false,
     selection: false,
@@ -122,6 +124,8 @@ export default function LmsCompetitionDashboard() {
   filterGwIdRef.current = filterGwId;
   const adminGwIdRef = useRef(adminGwId);
   adminGwIdRef.current = adminGwId;
+  currentGwRef.current = currentGw;
+  gameweeksRef.current = gameweeks;
 
   const mergeTeams = useCallback((incoming: LmsTeam[]) => {
     if (!incoming.length) return;
@@ -152,14 +156,28 @@ export default function LmsCompetitionDashboard() {
   );
 
   const syncSeasonFixturesFromCache = useCallback(() => {
-    setSeasonFixtures(lmsSessionListCachedFixtures());
+    const next = lmsSessionListCachedFixtures();
+    setSeasonFixtures((prev) => {
+      if (
+        prev.length === next.length &&
+        prev.every(
+          (f, i) =>
+            f.id === next[i]?.id &&
+            f.gameweek_number === next[i]?.gameweek_number &&
+            f.excluded_from_lms === next[i]?.excluded_from_lms
+        )
+      ) {
+        return prev;
+      }
+      return next;
+    });
   }, []);
 
   const ensureGameweekFixtures = useCallback(
     async (gwId: string, opts?: { force?: boolean }) => {
       const localNumber =
-        gameweeks.find((g) => g.id === gwId)?.number ??
-        (currentGw?.id === gwId ? currentGw.number : undefined);
+        gameweeksRef.current.find((g) => g.id === gwId)?.number ??
+        (currentGwRef.current?.id === gwId ? currentGwRef.current.number : undefined);
 
       const withNumber = (list: LmsFixture[]) =>
         localNumber == null
@@ -171,8 +189,16 @@ export default function LmsCompetitionDashboard() {
 
       if (!opts?.force && lmsSessionHasFixtures(gwId)) {
         const cached = withNumber(lmsSessionGetFixtures(gwId) ?? []);
-        lmsSessionSetFixtures(gwId, cached);
-        syncSeasonFixturesFromCache();
+        const prev = lmsSessionGetFixtures(gwId) ?? [];
+        const changed =
+          cached.length !== prev.length ||
+          cached.some(
+            (f, i) => f.id !== prev[i]?.id || f.gameweek_number !== prev[i]?.gameweek_number
+          );
+        if (changed) {
+          lmsSessionSetFixtures(gwId, cached);
+          syncSeasonFixturesFromCache();
+        }
         return cached;
       }
       setFixturesLoadingGwId(gwId);
@@ -185,7 +211,7 @@ export default function LmsCompetitionDashboard() {
         setFixturesLoadingGwId((prev) => (prev === gwId ? null : prev));
       }
     },
-    [syncSeasonFixturesFromCache, gameweeks, currentGw]
+    [syncSeasonFixturesFromCache]
   );
 
   const ensureFormFixtures = useCallback(
@@ -257,6 +283,11 @@ export default function LmsCompetitionDashboard() {
     },
     [competitionId, ensureGameweekFixtures]
   );
+
+  const loadLeaderboardExtrasRef = useRef(loadLeaderboardExtras);
+  loadLeaderboardExtrasRef.current = loadLeaderboardExtras;
+  const ensureGameweekFixturesRef = useRef(ensureGameweekFixtures);
+  ensureGameweekFixturesRef.current = ensureGameweekFixtures;
 
   const loadSelectionSlice = useCallback(
     async (opts?: { force?: boolean }) => {
@@ -387,8 +418,13 @@ export default function LmsCompetitionDashboard() {
     setHistoryPicks([]);
     setExpandedUserId(null);
 
-    await loadLeaderboardExtras(gw, { force: true });
-  }, [competitionId, userId, loadLeaderboardExtras]);
+    await loadLeaderboardExtrasRef.current(gw, { force: true });
+  }, [competitionId, userId]);
+
+  const loadSelectionSliceRef = useRef(loadSelectionSlice);
+  loadSelectionSliceRef.current = loadSelectionSlice;
+  const loadGameweeksSliceRef = useRef(loadGameweeksSlice);
+  loadGameweeksSliceRef.current = loadGameweeksSlice;
 
   const reloadVisible = useCallback(async () => {
     if (!competitionId || !userId) return;
@@ -396,13 +432,13 @@ export default function LmsCompetitionDashboard() {
       await loadShell();
       const t = tabRef.current;
       const tasks: Promise<unknown>[] = [];
-      if (t === 'selection') tasks.push(loadSelectionSlice({ force: true }));
+      if (t === 'selection') tasks.push(loadSelectionSliceRef.current({ force: true }));
       if (t === 'gameweeks' || t === 'admin') {
         const gwToRefresh = t === 'admin' ? adminGwIdRef.current : filterGwIdRef.current;
         if (gwToRefresh) lmsSessionInvalidateFixtures(gwToRefresh);
         tasks.push(
-          loadGameweeksSlice({ force: true }).then(async () => {
-            if (gwToRefresh) await ensureGameweekFixtures(gwToRefresh, { force: true });
+          loadGameweeksSliceRef.current({ force: true }).then(async () => {
+            if (gwToRefresh) await ensureGameweekFixturesRef.current(gwToRefresh, { force: true });
           })
         );
       }
@@ -413,24 +449,29 @@ export default function LmsCompetitionDashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [competitionId, userId, loadShell, loadSelectionSlice, loadGameweeksSlice, ensureGameweekFixtures]);
+  }, [competitionId, userId, loadShell]);
+
+  const reloadVisibleRef = useRef(reloadVisible);
+  reloadVisibleRef.current = reloadVisible;
 
   useFocusEffect(
     useCallback(() => {
-      void reloadVisible();
-    }, [reloadVisible])
+      void reloadVisibleRef.current();
+    }, [competitionId, userId])
   );
 
   useEffect(() => {
-    if (tab === 'selection') void loadSelectionSlice().catch((e) => {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load selection');
-    });
+    if (tab === 'selection') {
+      void loadSelectionSliceRef.current().catch((e) => {
+        Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load selection');
+      });
+    }
     if (tab === 'gameweeks' || tab === 'admin') {
-      void loadGameweeksSlice().catch((e) => {
+      void loadGameweeksSliceRef.current().catch((e) => {
         Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load fixtures');
       });
     }
-  }, [tab, loadSelectionSlice, loadGameweeksSlice]);
+  }, [tab]);
 
   useEffect(() => {
     if (tab !== 'gameweeks' && tab !== 'admin') return;
@@ -439,10 +480,10 @@ export default function LmsCompetitionDashboard() {
       syncSeasonFixturesFromCache();
       return;
     }
-    void ensureGameweekFixtures(targetId).catch((e) => {
+    void ensureGameweekFixturesRef.current(targetId).catch((e) => {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load gameweek fixtures');
     });
-  }, [tab, filterGwId, adminGwId, ensureGameweekFixtures, syncSeasonFixturesFromCache]);
+  }, [tab, filterGwId, adminGwId, syncSeasonFixturesFromCache]);
 
   useEffect(() => {
     setExcludeReasons((prev) => {
