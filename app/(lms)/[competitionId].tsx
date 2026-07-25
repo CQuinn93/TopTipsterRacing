@@ -34,7 +34,7 @@ import {
   lmsListFixturesForGameweek,
   lmsListParticipants,
   lmsListPicksForGameweek,
-  lmsListSeasonFixtures,
+  lmsListRecentFinishedFixtures,
   lmsListTeams,
   lmsListUsedTeamIds,
   lmsPickErrorMessage,
@@ -48,6 +48,18 @@ import {
   type LmsPick,
   type LmsTeam,
 } from '@/lib/lms/api';
+import {
+  lmsSessionGetFixtures,
+  lmsSessionGetFormFixtures,
+  lmsSessionGetTeams,
+  lmsSessionHasFixtures,
+  lmsSessionInvalidateFixtures,
+  lmsSessionListCachedFixtures,
+  lmsSessionPrefetchCrests,
+  lmsSessionSetFixtures,
+  lmsSessionSetFormFixtures,
+  lmsSessionSetTeams,
+} from '@/lib/lms/sessionCache';
 
 type TabKey = 'gameweeks' | 'selection' | 'leaderboard' | 'admin';
 
@@ -70,9 +82,11 @@ export default function LmsCompetitionDashboard() {
   const [currentGw, setCurrentGw] = useState<LmsGameweek | null>(null);
   const [gameweeks, setGameweeks] = useState<LmsGameweek[]>([]);
   const [seasonFixtures, setSeasonFixtures] = useState<LmsFixture[]>([]);
+  const [formFixtures, setFormFixtures] = useState<LmsFixture[]>([]);
   const [filterGwId, setFilterGwId] = useState<string | null>(null);
   const [filterTeamId, setFilterTeamId] = useState<string | null>(null);
   const [pickGwFixtures, setPickGwFixtures] = useState<LmsFixture[]>([]);
+  const [fixturesLoadingGwId, setFixturesLoadingGwId] = useState<string | null>(null);
   const [teams, setTeams] = useState<LmsTeam[]>([]);
   const [usedIds, setUsedIds] = useState<string[]>([]);
   const [pick, setPick] = useState<LmsPick | null>(null);
@@ -101,6 +115,10 @@ export default function LmsCompetitionDashboard() {
   const historyLoadedUsersRef = useRef(new Set<string>());
   const tabRef = useRef<TabKey>(tab);
   tabRef.current = tab;
+  const filterGwIdRef = useRef(filterGwId);
+  filterGwIdRef.current = filterGwId;
+  const adminGwIdRef = useRef(adminGwId);
+  adminGwIdRef.current = adminGwId;
 
   const mergeTeams = useCallback((incoming: LmsTeam[]) => {
     if (!incoming.length) return;
@@ -110,19 +128,92 @@ export default function LmsCompetitionDashboard() {
       for (const t of incoming) byId.set(t.id, t);
       return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
     });
+    void lmsSessionPrefetchCrests(incoming);
   }, []);
 
+  const loadTeamsCached = useCallback(
+    async (opts?: { force?: boolean }) => {
+      if (!opts?.force) {
+        const cached = lmsSessionGetTeams();
+        if (cached?.length) {
+          mergeTeams(cached);
+          return cached;
+        }
+      }
+      const allTeams = await lmsListTeams();
+      lmsSessionSetTeams(allTeams);
+      mergeTeams(allTeams);
+      return allTeams;
+    },
+    [mergeTeams]
+  );
+
+  const syncSeasonFixturesFromCache = useCallback(() => {
+    setSeasonFixtures(lmsSessionListCachedFixtures());
+  }, []);
+
+  const ensureGameweekFixtures = useCallback(
+    async (gwId: string, opts?: { force?: boolean }) => {
+      if (!opts?.force && lmsSessionHasFixtures(gwId)) {
+        syncSeasonFixturesFromCache();
+        return lmsSessionGetFixtures(gwId) ?? [];
+      }
+      setFixturesLoadingGwId(gwId);
+      try {
+        const fx = await lmsListFixturesForGameweek(gwId);
+        lmsSessionSetFixtures(gwId, fx);
+        syncSeasonFixturesFromCache();
+        return fx;
+      } finally {
+        setFixturesLoadingGwId((prev) => (prev === gwId ? null : prev));
+      }
+    },
+    [syncSeasonFixturesFromCache]
+  );
+
+  const ensureFormFixtures = useCallback(
+    async (season: string, opts?: { force?: boolean }) => {
+      if (!opts?.force) {
+        const cached = lmsSessionGetFormFixtures(season);
+        if (cached) {
+          setFormFixtures(cached);
+          return cached;
+        }
+      }
+      const fx = await lmsListRecentFinishedFixtures(season);
+      lmsSessionSetFormFixtures(season, fx);
+      // Seed per-GW cache so “All” can include recent weeks without extra fetches.
+      const byGw = new Map<string, LmsFixture[]>();
+      for (const f of fx) {
+        const list = byGw.get(f.gameweek_id) ?? [];
+        list.push(f);
+        byGw.set(f.gameweek_id, list);
+      }
+      for (const [gwId, list] of byGw) {
+        if (!lmsSessionHasFixtures(gwId)) lmsSessionSetFixtures(gwId, list);
+      }
+      syncSeasonFixturesFromCache();
+      setFormFixtures(fx);
+      return fx;
+    },
+    [syncSeasonFixturesFromCache]
+  );
+
   const ensurePickGwFixtures = useCallback(
-    async (gwId: string) => {
-      if (loadedRef.current.pickGwFixtures && currentGwIdRef.current === gwId) {
+    async (gwId: string, opts?: { force?: boolean }) => {
+      if (
+        !opts?.force &&
+        loadedRef.current.pickGwFixtures &&
+        currentGwIdRef.current === gwId
+      ) {
         return;
       }
-      const pickFx = await lmsListFixturesForGameweek(gwId);
+      const pickFx = await ensureGameweekFixtures(gwId, opts);
       setPickGwFixtures(pickFx);
       loadedRef.current.pickGwFixtures = true;
       currentGwIdRef.current = gwId;
     },
-    []
+    [ensureGameweekFixtures]
   );
 
   const loadLeaderboardExtras = useCallback(
@@ -138,7 +229,7 @@ export default function LmsCompetitionDashboard() {
         return;
       }
       const [pickFx, picks] = await Promise.all([
-        lmsListFixturesForGameweek(gw.id),
+        ensureGameweekFixtures(gw.id, opts),
         lmsListPicksForGameweek(competitionId, gw.id),
       ]);
       setPickGwFixtures(pickFx);
@@ -147,7 +238,7 @@ export default function LmsCompetitionDashboard() {
       loadedRef.current.pickGwFixtures = true;
       currentGwIdRef.current = gw.id;
     },
-    [competitionId]
+    [competitionId, ensureGameweekFixtures]
   );
 
   const loadSelectionSlice = useCallback(
@@ -160,23 +251,21 @@ export default function LmsCompetitionDashboard() {
         const gwId = currentGwIdRef.current;
 
         const base = await Promise.all([
-          lmsListTeams(),
+          loadTeamsCached(opts),
           lmsListCompetitionTeamIds(competitionId),
           lmsListUsedTeamIds(competitionId, userId),
           lmsListCompletedPicksForUser(competitionId, userId, comp),
           gwId ? lmsGetMyPick(competitionId, userId, gwId) : Promise.resolve(null),
           gwId && (!loadedRef.current.pickGwFixtures || opts?.force)
-            ? ensurePickGwFixtures(gwId)
+            ? ensurePickGwFixtures(gwId, opts)
             : Promise.resolve(),
         ]);
 
-        const allTeams = base[0];
-        const poolIds = base[1];
-        const used = base[2];
-        const myHistory = base[3];
-        const myPick = base[4];
+        const poolIds = base[1] as string[];
+        const used = base[2] as string[];
+        const myHistory = base[3] as LmsCompletedPick[];
+        const myPick = base[4] as LmsPick | null;
 
-        mergeTeams(allTeams);
         setPoolTeamIds(poolIds);
         setUsedIds(used);
         setPick(myPick);
@@ -193,7 +282,7 @@ export default function LmsCompetitionDashboard() {
         setSelectionLoading(false);
       }
     },
-    [competitionId, userId, ensurePickGwFixtures, mergeTeams]
+    [competitionId, userId, ensurePickGwFixtures, loadTeamsCached, mergeTeams]
   );
 
   const loadGameweeksSlice = useCallback(
@@ -205,35 +294,28 @@ export default function LmsCompetitionDashboard() {
         const comp = competitionRef.current ?? (await lmsGetCompetition(competitionId));
         if (comp) competitionRef.current = comp;
         const season = comp?.season ?? '2026/27';
-        const [gws, allFx, allTeams] = await Promise.all([
+        const [gws] = await Promise.all([
           lmsListCompetitionGameweeks(competitionId, comp),
-          lmsListSeasonFixtures(season),
-          loadedRef.current.selection && !opts?.force ? Promise.resolve(null) : lmsListTeams(),
+          loadTeamsCached(opts),
+          ensureFormFixtures(season, opts),
         ]);
         setGameweeks(gws);
-        setSeasonFixtures(allFx);
-        setExcludeReasons((prev) => {
-          const next = { ...prev };
-          for (const f of allFx) {
-            if (f.excluded_from_lms && f.excluded_reason && next[f.id] === undefined) {
-              next[f.id] = f.excluded_reason;
-            }
-          }
-          return next;
-        });
-        if (allTeams) mergeTeams(allTeams);
         setAdminGwId((prev) => prev ?? currentGwIdRef.current ?? gws[0]?.id ?? null);
+        setFilterGwId((prev) => {
+          if (prev) return prev;
+          return currentGwIdRef.current ?? gws.find((g) => g.status !== 'complete')?.id ?? gws[0]?.id ?? null;
+        });
         if (!loadedRef.current.selection) {
-          // Admin pool needs team ids even if Selection was never opened.
           const poolIds = await lmsListCompetitionTeamIds(competitionId);
           setPoolTeamIds(poolIds);
         }
+        syncSeasonFixturesFromCache();
         loadedRef.current.gameweeks = true;
       } finally {
         setGameweeksLoading(false);
       }
     },
-    [competitionId, mergeTeams]
+    [competitionId, loadTeamsCached, ensureFormFixtures, syncSeasonFixturesFromCache]
   );
 
   const loadHistoryForUser = useCallback(
@@ -298,7 +380,15 @@ export default function LmsCompetitionDashboard() {
       const t = tabRef.current;
       const tasks: Promise<unknown>[] = [];
       if (t === 'selection') tasks.push(loadSelectionSlice({ force: true }));
-      if (t === 'gameweeks' || t === 'admin') tasks.push(loadGameweeksSlice({ force: true }));
+      if (t === 'gameweeks' || t === 'admin') {
+        const gwToRefresh = t === 'admin' ? adminGwIdRef.current : filterGwIdRef.current;
+        if (gwToRefresh) lmsSessionInvalidateFixtures(gwToRefresh);
+        tasks.push(
+          loadGameweeksSlice({ force: true }).then(async () => {
+            if (gwToRefresh) await ensureGameweekFixtures(gwToRefresh, { force: true });
+          })
+        );
+      }
       await Promise.all(tasks);
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load dashboard');
@@ -306,7 +396,7 @@ export default function LmsCompetitionDashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [competitionId, userId, loadShell, loadSelectionSlice, loadGameweeksSlice]);
+  }, [competitionId, userId, loadShell, loadSelectionSlice, loadGameweeksSlice, ensureGameweekFixtures]);
 
   useFocusEffect(
     useCallback(() => {
@@ -326,6 +416,32 @@ export default function LmsCompetitionDashboard() {
   }, [tab, loadSelectionSlice, loadGameweeksSlice]);
 
   useEffect(() => {
+    if (tab !== 'gameweeks' && tab !== 'admin') return;
+    const targetId = tab === 'admin' ? adminGwId : filterGwId;
+    if (!targetId) {
+      syncSeasonFixturesFromCache();
+      return;
+    }
+    void ensureGameweekFixtures(targetId).catch((e) => {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load gameweek fixtures');
+    });
+  }, [tab, filterGwId, adminGwId, ensureGameweekFixtures, syncSeasonFixturesFromCache]);
+
+  useEffect(() => {
+    setExcludeReasons((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const f of seasonFixtures) {
+        if (f.excluded_from_lms && f.excluded_reason && next[f.id] === undefined) {
+          next[f.id] = f.excluded_reason;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [seasonFixtures]);
+
+  useEffect(() => {
     if (!expandedUserId) return;
     void loadHistoryForUser(expandedUserId).catch(() => {
       // Non-fatal: drawer shows empty until retry.
@@ -335,10 +451,10 @@ export default function LmsCompetitionDashboard() {
   const formByTeamId = useMemo(() => {
     const map = new Map<string, ReturnType<typeof lmsTeamFormFromFixtures>>();
     for (const t of teams) {
-      map.set(t.id, lmsTeamFormFromFixtures(seasonFixtures, t.id));
+      map.set(t.id, lmsTeamFormFromFixtures(formFixtures, t.id));
     }
     return map;
-  }, [teams, seasonFixtures]);
+  }, [teams, formFixtures]);
 
   const filteredFixtures = useMemo(() => {
     return seasonFixtures.filter((f) => {
@@ -648,16 +764,21 @@ export default function LmsCompetitionDashboard() {
         excluded ? reason ?? excludeReasons[fixture.id] ?? null : null
       );
       if (!res.success) {
-        Alert.alert('Could not update fixture', res.error ?? 'Unknown error');
-        return;
+          Alert.alert('Could not update fixture', res.error ?? 'Unknown error');
+          return;
+        }
+        lmsSessionInvalidateFixtures(fixture.gameweek_id);
+        await ensureGameweekFixtures(fixture.gameweek_id, { force: true });
+        if (pickGwFixtures.some((f) => f.id === fixture.id) || currentGwIdRef.current === fixture.gameweek_id) {
+          const next = lmsSessionGetFixtures(fixture.gameweek_id) ?? [];
+          setPickGwFixtures(next);
+        }
+      } catch (e) {
+        Alert.alert('Error', e instanceof Error ? e.message : 'Could not update fixture');
+      } finally {
+        setAdminBusy(false);
       }
-      await reloadVisible();
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not update fixture');
-    } finally {
-      setAdminBusy(false);
-    }
-  };
+    };
 
   const onToggleFixtureExcluded = (fixture: LmsFixture) => {
     if (fixture.excluded_from_lms) {
@@ -1463,13 +1584,13 @@ export default function LmsCompetitionDashboard() {
             }
           >
             {tab === 'gameweeks' ? (
-              gameweeksLoading && !seasonFixtures.length ? (
+              gameweeksLoading && !gameweeks.length ? (
                 <ActivityIndicator style={{ marginTop: 24 }} color={theme.colors.accent} />
               ) : (
               <>
                 <Text style={styles.sectionIntro}>
-                  Fixtures grouped by gameweek. Filter by week or team to plan your pick. Form dots
-                  under each club show their last five results (green / grey / red).
+                  Fixtures load per gameweek and stay cached while this tab is open. Form dots under
+                  each club show their last five results (green / grey / red).
                 </Text>
 
                 <View>
@@ -1491,7 +1612,7 @@ export default function LmsCompetitionDashboard() {
                           !filterGwId && styles.filterChipTextActive,
                         ]}
                       >
-                        All
+                        Opened
                       </Text>
                     </Pressable>
                     {gameweeks.map((g) => {
@@ -1500,7 +1621,7 @@ export default function LmsCompetitionDashboard() {
                         <Pressable
                           key={g.id}
                           style={[styles.filterChip, active && styles.filterChipActive]}
-                          onPress={() => setFilterGwId(active ? null : g.id)}
+                          onPress={() => setFilterGwId(g.id)}
                         >
                           <Text
                             style={[
@@ -1572,8 +1693,14 @@ export default function LmsCompetitionDashboard() {
                   </ScrollView>
                 </View>
 
-                {fixturesByGameweek.length === 0 ? (
-                  <Text style={styles.muted}>No fixtures match these filters.</Text>
+                {fixturesLoadingGwId && filterGwId === fixturesLoadingGwId ? (
+                  <ActivityIndicator style={{ marginVertical: 16 }} color={theme.colors.accent} />
+                ) : fixturesByGameweek.length === 0 ? (
+                  <Text style={styles.muted}>
+                    {!filterGwId
+                      ? 'No gameweeks opened yet this session. Pick a gameweek above to load fixtures.'
+                      : 'No fixtures match these filters.'}
+                  </Text>
                 ) : (
                   fixturesByGameweek.map((group) => (
                     <View key={group.number}>

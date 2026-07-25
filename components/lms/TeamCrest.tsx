@@ -33,6 +33,7 @@ export function TeamCrest({ uri, size = 28, label }: Props) {
       source={{ uri }}
       style={{ width: size, height: size }}
       contentFit="contain"
+      cachePolicy="memory-disk"
       recyclingKey={uri}
       accessibilityLabel={label ? `${label} badge` : 'Club badge'}
     />

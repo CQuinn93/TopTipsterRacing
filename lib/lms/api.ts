@@ -272,6 +272,65 @@ export async function lmsListTeams(): Promise<LmsTeam[]> {
   return (data ?? []) as LmsTeam[];
 }
 
+/** Finished fixtures from the last few completed gameweeks — enough for form dots. */
+export async function lmsListRecentFinishedFixtures(
+  season = '2026/27',
+  completeGameweekLimit = 6
+): Promise<LmsFixture[]> {
+  const { data: completeGws, error: gwErr } = await supabase
+    .from('lms_gameweeks')
+    .select('id, number')
+    .eq('season', season)
+    .eq('status', 'complete')
+    .order('number', { ascending: false })
+    .limit(completeGameweekLimit);
+  if (gwErr) throw gwErr;
+  const gws = (completeGws ?? []) as { id: string; number: number }[];
+  if (!gws.length) return [];
+
+  const gwIds = gws.map((g) => g.id);
+  const numberById = new Map(gws.map((g) => [g.id, g.number]));
+  const fixtures = await lmsListFixturesForGameweekIds(gwIds);
+  return fixtures.map((f) => ({
+    ...f,
+    gameweek_number: numberById.get(f.gameweek_id) ?? f.gameweek_number,
+  }));
+}
+
+async function lmsListFixturesForGameweekIds(gwIds: string[]): Promise<LmsFixture[]> {
+  if (!gwIds.length) return [];
+  const embedded = await db
+    .from('lms_fixtures')
+    .select(
+      '*, home_team:lms_teams!home_team_id(*), away_team:lms_teams!away_team_id(*)'
+    )
+    .in('gameweek_id', gwIds)
+    .order('kickoff_at', { ascending: true });
+
+  if (!embedded.error) {
+    return ((embedded.data ?? []) as Record<string, unknown>[]).map(mapFixtureWithTeams);
+  }
+
+  const { data, error } = await supabase
+    .from('lms_fixtures')
+    .select('*')
+    .in('gameweek_id', gwIds)
+    .order('kickoff_at', { ascending: true });
+  if (error) throw error;
+  const fixtures = (data ?? []) as LmsFixture[];
+  if (!fixtures.length) return [];
+  const teamIds = Array.from(
+    new Set(fixtures.flatMap((f) => [f.home_team_id, f.away_team_id]))
+  );
+  const { data: teams } = await db.from('lms_teams').select('*').in('id', teamIds);
+  const byId = new Map(((teams ?? []) as LmsTeam[]).map((t) => [t.id, t]));
+  return fixtures.map((f) => ({
+    ...f,
+    home_team: byId.get(f.home_team_id),
+    away_team: byId.get(f.away_team_id),
+  }));
+}
+
 export async function lmsListUsedTeamIds(competitionId: string, userId: string): Promise<string[]> {
   const { data, error } = await supabase
     .from('lms_used_teams')
