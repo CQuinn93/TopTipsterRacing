@@ -147,6 +147,7 @@ async function main() {
   for (const ft of fdTeams) {
     const slug = slugify(ft.shortName || ft.name);
     const shortName = (ft.tla || ft.shortName || ft.name).slice(0, 3).toUpperCase();
+    // Stored for a possible future crest restore; UI uses TeamColourChip (no crest display).
     const crestUrl = ft.crest?.trim() || null;
     const existing =
       byExternal.get(ft.id) ??

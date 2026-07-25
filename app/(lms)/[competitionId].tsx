@@ -16,7 +16,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { TeamCrest } from '@/components/lms/TeamCrest';
+import { TeamColourChip } from '@/components/lms/TeamColourChip';
+// Crest images disabled (trademark risk) — restore TeamCrest if logo rights obtained.
+// import { TeamCrest } from '@/components/lms/TeamCrest';
 import { TeamFormDots } from '@/components/lms/TeamFormDots';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import {
@@ -55,7 +57,7 @@ import {
   lmsSessionHasFixtures,
   lmsSessionInvalidateFixtures,
   lmsSessionListCachedFixtures,
-  lmsSessionPrefetchCrests,
+  // lmsSessionPrefetchCrests,
   lmsSessionSetFixtures,
   lmsSessionSetFormFixtures,
   lmsSessionSetTeams,
@@ -128,7 +130,7 @@ export default function LmsCompetitionDashboard() {
       for (const t of incoming) byId.set(t.id, t);
       return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
     });
-    void lmsSessionPrefetchCrests(incoming);
+    // void lmsSessionPrefetchCrests(incoming);
   }, []);
 
   const loadTeamsCached = useCallback(
@@ -1462,7 +1464,12 @@ export default function LmsCompetitionDashboard() {
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <View style={styles.fixtureTeam}>
               <View style={styles.fixtureTeamMain}>
-                <TeamCrest uri={f.home_team?.crest_url} label={f.home_team?.name} size={24} />
+                <TeamColourChip
+                  shortName={f.home_team?.short_name}
+                  name={f.home_team?.name}
+                  slug={f.home_team?.slug}
+                  size={24}
+                />
                 <Text style={styles.fixtureName} numberOfLines={1}>
                   {f.home_team?.short_name ?? f.home_team?.name ?? 'H'}
                 </Text>
@@ -1488,7 +1495,12 @@ export default function LmsCompetitionDashboard() {
             </View>
             <View style={[styles.fixtureTeam, styles.fixtureTeamAway]}>
               <View style={[styles.fixtureTeamMain, styles.fixtureTeamMainAway]}>
-                <TeamCrest uri={f.away_team?.crest_url} label={f.away_team?.name} size={24} />
+                <TeamColourChip
+                  shortName={f.away_team?.short_name}
+                  name={f.away_team?.name}
+                  slug={f.away_team?.slug}
+                  size={24}
+                />
                 <Text style={[styles.fixtureName, styles.fixtureNameAway]} numberOfLines={1}>
                   {f.away_team?.short_name ?? f.away_team?.name ?? 'A'}
                 </Text>
@@ -1748,9 +1760,10 @@ export default function LmsCompetitionDashboard() {
                       {myPreviousSelections.map((s) => (
                         <View key={`${s.gameweek_number}-${s.team_id}`} style={styles.prevChip}>
                           <Text style={styles.prevGw}>GW{s.gameweek_number}</Text>
-                          <TeamCrest
-                            uri={s.team?.crest_url}
-                            label={s.team?.name}
+                          <TeamColourChip
+                            shortName={s.team?.short_name}
+                            name={s.team?.name}
+                            slug={s.team?.slug}
                             size={18}
                           />
                         </View>
@@ -1761,9 +1774,10 @@ export default function LmsCompetitionDashboard() {
 
                 {currentPickTeam ? (
                   <View style={styles.pickBanner}>
-                    <TeamCrest
-                      uri={currentPickTeam.crest_url}
-                      label={currentPickTeam.name}
+                    <TeamColourChip
+                      shortName={currentPickTeam.short_name}
+                      name={currentPickTeam.name}
+                      slug={currentPickTeam.slug}
                       size={40}
                     />
                     <View style={{ flex: 1 }}>
@@ -1833,7 +1847,7 @@ export default function LmsCompetitionDashboard() {
                                   : `Select ${t.name}`
                             }
                           >
-                            <TeamCrest uri={t.crest_url} label={t.name} size={28} />
+                            <TeamColourChip shortName={t.short_name} name={t.name} slug={t.slug} size={28} />
                             <View style={styles.teamTileTextCol}>
                               <Text
                                 style={[
@@ -1911,7 +1925,7 @@ export default function LmsCompetitionDashboard() {
                     <View style={styles.teamGrid}>
                       {poolTeams.available.map((t) => (
                         <View key={t.id} style={[styles.teamTile, styles.teamTileDisabled]}>
-                          <TeamCrest uri={t.crest_url} label={t.name} size={28} />
+                          <TeamColourChip shortName={t.short_name} name={t.name} slug={t.slug} size={28} />
                           <Text style={styles.teamTileName} numberOfLines={2}>
                             {t.name}
                           </Text>
@@ -1971,9 +1985,10 @@ export default function LmsCompetitionDashboard() {
                           {currentGw ? (
                             picksRevealed && userPick?.team ? (
                               <View style={styles.lbPick}>
-                                <TeamCrest
-                                  uri={userPick.team.crest_url}
-                                  label={userPick.team.name}
+                                <TeamColourChip
+                                  shortName={userPick.team.short_name}
+                                  name={userPick.team.name}
+                                  slug={userPick.team.slug}
                                   size={22}
                                 />
                                 <Text style={styles.lbPickName} numberOfLines={1}>
@@ -2006,9 +2021,10 @@ export default function LmsCompetitionDashboard() {
                               history.map((h) => (
                                 <View key={`${h.gameweek_id}-${h.team_id}`} style={styles.lbHistoryRow}>
                                   <Text style={styles.lbHistoryGw}>GW{h.gameweek_number}</Text>
-                                  <TeamCrest
-                                    uri={h.team?.crest_url}
-                                    label={h.team?.name}
+                                  <TeamColourChip
+                                    shortName={h.team?.short_name}
+                                    name={h.team?.name}
+                                    slug={h.team?.slug}
                                     size={20}
                                   />
                                   <Text style={styles.lbHistoryName} numberOfLines={1}>
@@ -2089,7 +2105,7 @@ export default function LmsCompetitionDashboard() {
                       const enabled = poolTeamIdSet.has(t.id);
                       return (
                         <View key={t.id} style={styles.adminRow}>
-                          <TeamCrest uri={t.crest_url} label={t.name} size={24} />
+                          <TeamColourChip shortName={t.short_name} name={t.name} slug={t.slug} size={24} />
                           <View style={styles.adminRowBody}>
                             <Text style={styles.adminRowTitle}>{t.name}</Text>
                             <Text style={styles.adminRowMeta}>

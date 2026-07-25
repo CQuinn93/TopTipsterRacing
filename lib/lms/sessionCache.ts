@@ -1,4 +1,3 @@
-import { Image } from 'expo-image';
 import type { LmsFixture, LmsTeam } from '@/lib/lms/api';
 
 /** In-memory session caches — live until the web/app tab is closed. */
@@ -6,7 +5,6 @@ import type { LmsFixture, LmsTeam } from '@/lib/lms/api';
 let teamsCache: LmsTeam[] | null = null;
 const fixturesByGameweekId = new Map<string, LmsFixture[]>();
 let formFixturesCache: { season: string; fixtures: LmsFixture[] } | null = null;
-const crestPrefetched = new Set<string>();
 
 export function lmsSessionGetTeams(): LmsTeam[] | null {
   return teamsCache;
@@ -14,7 +12,8 @@ export function lmsSessionGetTeams(): LmsTeam[] | null {
 
 export function lmsSessionSetTeams(teams: LmsTeam[]): void {
   teamsCache = teams;
-  void lmsSessionPrefetchCrests(teams);
+  // Crest prefetch disabled — see lmsSessionPrefetchCrests no-op below.
+  // void lmsSessionPrefetchCrests(teams);
 }
 
 export function lmsSessionGetFixtures(gameweekId: string): LmsFixture[] | undefined {
@@ -29,7 +28,7 @@ export function lmsSessionSetFixtures(gameweekId: string, fixtures: LmsFixture[]
   fixturesByGameweekId.set(gameweekId, fixtures);
 }
 
-/** All fixtures loaded so far this session (for Gameweeks “All” view). */
+/** All fixtures loaded so far this session (for Gameweeks “Opened” view). */
 export function lmsSessionListCachedFixtures(): LmsFixture[] {
   const out: LmsFixture[] = [];
   for (const list of fixturesByGameweekId.values()) out.push(...list);
@@ -54,22 +53,19 @@ export function lmsSessionInvalidateFormFixtures(): void {
   formFixturesCache = null;
 }
 
-/** Prefetch crest URLs once per session so later tiles hit memory/disk cache. */
+/*
+ * Crest prefetch (restore with TeamCrest + expo-image if logo rights obtained):
+ *
+ * import { Image } from 'expo-image';
+ * const crestPrefetched = new Set<string>();
+ * export async function lmsSessionPrefetchCrests(teams: { crest_url?: string | null }[]) {
+ *   const urls = [...new Set(teams.map((t) => t.crest_url?.trim()).filter(Boolean))] as string[];
+ *   ...
+ *   await Image.prefetch(urls, 'memory-disk');
+ * }
+ */
 export async function lmsSessionPrefetchCrests(
-  teams: { crest_url?: string | null }[]
+  _teams: { crest_url?: string | null }[]
 ): Promise<void> {
-  const urls = [
-    ...new Set(
-      teams
-        .map((t) => t.crest_url?.trim())
-        .filter((u): u is string => !!u && !crestPrefetched.has(u))
-    ),
-  ];
-  if (!urls.length) return;
-  for (const u of urls) crestPrefetched.add(u);
-  try {
-    await Image.prefetch(urls, 'memory-disk');
-  } catch {
-    // Prefetch is best-effort; TeamCrest still loads with cachePolicy.
-  }
+  // no-op while crests are disabled
 }

@@ -27,7 +27,9 @@ import {
   type LmsGameweek,
   type LmsPendingJoin,
 } from '@/lib/lms/api';
-import { TeamCrest } from '@/components/lms/TeamCrest';
+import { TeamColourChip } from '@/components/lms/TeamColourChip';
+// Crest images disabled — restore TeamCrest if logo rights obtained.
+// import { TeamCrest } from '@/components/lms/TeamCrest';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 
 type HomeTab = 'competitions' | 'join';
@@ -413,9 +415,10 @@ export default function LmsHomeScreen() {
             >
               <View style={styles.cardRow}>
                 <View style={styles.cardSide}>
-                  <TeamCrest
-                    uri={activeFixture.home_team?.crest_url}
-                    label={activeFixture.home_team?.name}
+                  <TeamColourChip
+                    shortName={activeFixture.home_team?.short_name}
+                    name={activeFixture.home_team?.name}
+                    slug={activeFixture.home_team?.slug}
                     size={44}
                   />
                   <Text style={styles.cardName} numberOfLines={1}>
@@ -433,9 +436,10 @@ export default function LmsHomeScreen() {
                   </Text>
                 </View>
                 <View style={styles.cardSide}>
-                  <TeamCrest
-                    uri={activeFixture.away_team?.crest_url}
-                    label={activeFixture.away_team?.name}
+                  <TeamColourChip
+                    shortName={activeFixture.away_team?.short_name}
+                    name={activeFixture.away_team?.name}
+                    slug={activeFixture.away_team?.slug}
                     size={44}
                   />
                   <Text style={styles.cardName} numberOfLines={1}>
@@ -581,9 +585,10 @@ export default function LmsHomeScreen() {
                             </View>
                             {c.pickTeam ? (
                               <View style={styles.pickCol}>
-                                <TeamCrest
-                                  uri={c.pickTeam.crest_url}
-                                  label={c.pickTeam.name}
+                                <TeamColourChip
+                                  shortName={c.pickTeam.short_name}
+                                  name={c.pickTeam.name}
+                                  slug={c.pickTeam.slug}
                                   size={28}
                                 />
                                 <Text style={styles.pickAbbr} numberOfLines={1}>

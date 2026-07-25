@@ -27,6 +27,7 @@ export type LmsTeam = {
   name: string;
   short_name: string;
   slug: string;
+  /** @deprecated UI uses colour chips; kept for a possible future crest restore. */
   crest_url?: string | null;
 };
 

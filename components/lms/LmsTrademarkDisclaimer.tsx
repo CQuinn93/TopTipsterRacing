@@ -2,7 +2,9 @@ import { Text, StyleSheet } from 'react-native';
 import { useTheme } from '@/contexts/ThemeContext';
 
 export const LMS_TRADEMARK_DISCLAIMER =
-  'Club names, logos and trademarks are the property of their respective owners and are used for identification purposes only.';
+  'Club names are the property of their respective owners and are used for identification purposes only.';
+  // Previous (when crest images were shown):
+  // 'Club names, logos and trademarks are the property of their respective owners and are used for identification purposes only.';
 
 export function LmsTrademarkDisclaimer() {
   const theme = useTheme();
