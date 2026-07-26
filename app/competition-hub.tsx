@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/lib/supabase';
+import { supabase, getSupabaseUrl } from '@/lib/supabase';
 import { setLastRoute } from '@/lib/lastRoute';
 import { getOrCreateTabletCode, clearTabletCodeCache } from '@/lib/tabletCode';
 import { getAdminAccent } from '@/constants/adminUi';
@@ -32,7 +32,7 @@ const TERMS_OF_USE_URL =
 const PRIVACY_POLICY_URL =
   'https://doc-hosting.flycricket.io/top-tipster-racing-fantasy-sports-privacy-policy/98fbb3c4-4795-4774-bba7-c2ebb872eb92/privacy';
 
-type HubTab = 'football' | 'racing' | 'admin';
+type HubTab = 'football' | 'racing' | 'admin' | 'account';
 
 type ModeItem = {
   key: string;
@@ -172,6 +172,7 @@ export default function CompetitionHubScreen() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminCode, setAdminCode] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [tab, setTab] = useState<HubTab>('football');
 
   const isDesktop = width >= DESKTOP_BREAKPOINT;
@@ -311,12 +312,83 @@ export default function CompetitionHubScreen() {
     ]);
   };
 
+  const runDeleteAccount = async () => {
+    setDeletingAccount(true);
+    try {
+      const {
+        data: { session: s },
+      } = await supabase.auth.getSession();
+      const token = s?.access_token;
+      if (!token) {
+        const msg = 'Not signed in.';
+        if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(msg);
+        else Alert.alert('Error', msg);
+        return;
+      }
+      const url = `${getSupabaseUrl()}/functions/v1/delete-account`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg =
+          (body as { error?: string })?.error ?? 'Could not delete account. Try again later.';
+        if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(msg);
+        else Alert.alert('Error', msg);
+        return;
+      }
+      await clearTabletCodeCache();
+      await signOut();
+      router.replace('/(auth)/login');
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert('Your account has been permanently deleted.');
+      } else {
+        Alert.alert('Account deleted', 'Your account has been permanently deleted.');
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Something went wrong.';
+      if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(msg);
+      else Alert.alert('Error', msg);
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    const warning =
+      'This will permanently delete your account and all your data (selections, competition entries). You will not be able to sign in again with this email. This cannot be undone.';
+
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm(`${warning} Are you sure?`)) {
+        void runDeleteAccount();
+      }
+      return;
+    }
+
+    Alert.alert('Delete account', warning, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete account',
+        style: 'destructive',
+        onPress: () => {
+          void runDeleteAccount();
+        },
+      },
+    ]);
+  };
+
   const selectTab = (next: HubTab) => {
     if (next === tab) return;
     setTab(next);
 
     contentOpacity.setValue(0);
-    contentShift.setValue(next === 'racing' ? 12 : next === 'admin' ? 8 : -12);
+    contentShift.setValue(
+      next === 'racing' ? 12 : next === 'admin' ? 8 : next === 'account' ? 6 : -12
+    );
 
     const animations = [
       Animated.timing(contentOpacity, {
@@ -351,8 +423,15 @@ export default function CompetitionHubScreen() {
   const racingAccent = isDark ? '#c4a35a' : '#9a7b2f';
   const adminPalette = getAdminAccent(isDark);
   const adminAccent = adminPalette.accent;
+  const accountAccent = theme.colors.textSecondary;
   const activeAccent =
-    tab === 'racing' ? racingAccent : tab === 'admin' ? adminAccent : footballAccent;
+    tab === 'racing'
+      ? racingAccent
+      : tab === 'admin'
+        ? adminAccent
+        : tab === 'account'
+          ? accountAccent
+          : footballAccent;
 
   const footballBg = useMemo(
     () =>
@@ -406,26 +485,28 @@ export default function CompetitionHubScreen() {
       : tab === 'racing'
         ? [
             {
-              key: 'pat-nutter',
-              title: 'The Pat Nutter',
-              status: 'Season ended',
+              key: 'top-tipster-racing',
+              title: 'Top Tipster Racing',
+              status: 'Closed',
               unavailable: true,
             },
           ]
-        : [
-            {
-              key: 'racing-admin',
-              title: 'Racing',
-              status: 'Open',
-              onPress: openAdminPanel,
-            },
-            {
-              key: 'football-admin',
-              title: 'Football',
-              status: 'Open',
-              onPress: openLmsAdmin,
-            },
-          ];
+        : tab === 'admin'
+          ? [
+              {
+                key: 'racing-admin',
+                title: 'Racing',
+                status: 'Open',
+                onPress: openAdminPanel,
+              },
+              {
+                key: 'football-admin',
+                title: 'Football',
+                status: 'Open',
+                onPress: openLmsAdmin,
+              },
+            ]
+          : [];
 
   const styles = useMemo(
     () =>
@@ -599,6 +680,37 @@ export default function CompetitionHubScreen() {
           flexWrap: 'wrap',
           gap: 10,
         },
+        accountCard: {
+          width: '100%',
+          paddingVertical: theme.spacing.lg,
+          paddingHorizontal: theme.spacing.md,
+          gap: theme.spacing.md,
+        },
+        accountBlurb: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.textSecondary,
+          lineHeight: 20,
+          textAlign: 'center',
+        },
+        deleteBtn: {
+          alignSelf: 'center',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingVertical: 12,
+          paddingHorizontal: 18,
+          borderRadius: theme.radius.md,
+          borderWidth: 1.5,
+          borderColor: theme.colors.error,
+          backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : 'rgba(239,68,68,0.08)',
+        },
+        deleteBtnText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          fontWeight: '700',
+          color: theme.colors.error,
+        },
         footer: {
           paddingTop: theme.spacing.sm,
           paddingBottom: Math.max(insets.bottom, theme.spacing.md),
@@ -672,6 +784,7 @@ export default function CompetitionHubScreen() {
                 { key: 'football' as const, label: 'Football' },
                 { key: 'racing' as const, label: 'Racing' },
                 ...(isAdmin ? [{ key: 'admin' as const, label: 'Admin' }] : []),
+                { key: 'account' as const, label: 'Account' },
               ]).map((item) => {
                 const active = tab === item.key;
                 return (
@@ -741,18 +854,52 @@ export default function CompetitionHubScreen() {
             style={{ opacity: contentOpacity, transform: [{ translateY: contentShift }] }}
           >
             <Text style={styles.sectionTitle} accessibilityRole="header">
-              {tab === 'football' ? 'Football' : tab === 'racing' ? 'Racing' : 'Admin'}
+              {tab === 'football'
+                ? 'Football'
+                : tab === 'racing'
+                  ? 'Racing'
+                  : tab === 'admin'
+                    ? 'Admin'
+                    : 'Account'}
             </Text>
 
             <View style={styles.panel}>
-              <Text style={styles.panelLabel}>
-                {tab === 'admin' ? 'Choose a sport' : 'Select a mode'}
-              </Text>
-              <View style={styles.modeGrid}>
-                {modes.map((item) => (
-                  <ModeTile key={item.key} item={item} accent={activeAccent} />
-                ))}
-              </View>
+              {tab === 'account' ? (
+                <View style={styles.accountCard}>
+                  <Text style={styles.panelLabel}>Your account</Text>
+                  <Text style={styles.accountBlurb}>
+                    Delete your account permanently if you no longer want to use Top Tipster. This
+                    removes your profile and competition data and cannot be undone.
+                  </Text>
+                  <Pressable
+                    style={styles.deleteBtn}
+                    onPress={handleDeleteAccount}
+                    disabled={deletingAccount}
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete account"
+                  >
+                    {deletingAccount ? (
+                      <ActivityIndicator size="small" color={theme.colors.error} />
+                    ) : (
+                      <>
+                        <Ionicons name="trash-outline" size={18} color={theme.colors.error} />
+                        <Text style={styles.deleteBtnText}>Delete account</Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
+              ) : (
+                <>
+                  <Text style={styles.panelLabel}>
+                    {tab === 'admin' ? 'Choose a sport' : 'Select a mode'}
+                  </Text>
+                  <View style={styles.modeGrid}>
+                    {modes.map((item) => (
+                      <ModeTile key={item.key} item={item} accent={activeAccent} />
+                    ))}
+                  </View>
+                </>
+              )}
             </View>
           </Animated.View>
         </Animated.View>

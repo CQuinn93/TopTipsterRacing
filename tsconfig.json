@@ -2,7 +2,8 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
-    "baseUrl": ".",
+    "baseUrl": ".", // deprecated in TS 7.0
+    "ignoreDeprecations": "6.0", // to silence the deprecation warning
     "paths": {
       "@/*": ["./*"]
     }

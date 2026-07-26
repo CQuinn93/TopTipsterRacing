@@ -14,6 +14,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useSidebar } from '@/contexts/SidebarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   lmsGetGameweekPickStats,
@@ -37,6 +38,7 @@ const FIXTURE_CYCLE_MS = 3500;
 
 export default function LmsHomeScreen() {
   const theme = useTheme();
+  const { openSidebar } = useSidebar();
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
   const [comps, setComps] = useState<LmsCompetitionHomeSummary[]>([]);
@@ -629,12 +631,12 @@ export default function LmsHomeScreen() {
       <View style={styles.header}>
         <Pressable
           style={styles.back}
-          onPress={() => router.replace('/competition-hub')}
+          onPress={openSidebar}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel="Back to hub"
+          accessibilityLabel="Open menu"
         >
-          <Ionicons name="arrow-back" size={22} color={theme.colors.text} />
+          <Ionicons name="menu" size={24} color={theme.colors.text} />
         </Pressable>
         <View style={styles.titleBlock}>
           <Text style={styles.title}>Last Man Standing</Text>

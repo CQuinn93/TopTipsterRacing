@@ -1,14 +1,18 @@
-import { useEffect } from 'react';
-import { View, TouchableOpacity } from 'react-native';
+import { useEffect, useMemo } from 'react';
+import { TouchableOpacity } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useTheme } from '@/contexts/ThemeContext';
+import { useTheme, NestedThemeProvider } from '@/contexts/ThemeContext';
 import { lightTheme } from '@/constants/theme';
+import { withRacingAccent } from '@/constants/sportThemes';
 import { useAuth } from '@/contexts/AuthContext';
-import { useSidebar } from '@/contexts/SidebarContext';
+import { useSidebar, SidebarProvider } from '@/contexts/SidebarContext';
 import { AppSidebar } from '@/components/AppSidebar';
 import { AppUnlockScreen } from '@/components/AppUnlockScreen';
+import { RacingTabBar } from '@/components/RacingTabBar';
 import { setLastRoute } from '@/lib/lastRoute';
+import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
+import { AppLockProvider, useAppLock } from '@/contexts/AppLockContext';
 
 function MenuHeaderButton() {
   const theme = useTheme();
@@ -22,110 +26,37 @@ function MenuHeaderButton() {
   );
 }
 
-import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
-import { SidebarProvider } from '@/contexts/SidebarContext';
-import { AppLockProvider, useAppLock } from '@/contexts/AppLockContext';
-
 function AppTabs() {
   const theme = useTheme();
   const isLight = theme.colors.background === lightTheme.colors.background;
   return (
     <Tabs
+      tabBar={(props) => <RacingTabBar {...props} />}
       screenOptions={{
         headerStyle: { backgroundColor: isLight ? theme.colors.accent : theme.colors.background },
         headerTintColor: isLight ? theme.colors.white : theme.colors.text,
         headerTitleStyle: { fontFamily: theme.fontFamily.regular },
         headerLeft: () => <MenuHeaderButton />,
-        tabBarStyle: {
-          backgroundColor: theme.colors.accent,
-          borderTopWidth: 0,
-        },
-        tabBarBackground: () => <View style={{ flex: 1, backgroundColor: theme.colors.accent }} />,
-        tabBarActiveTintColor: theme.colors.white,
-        tabBarInactiveTintColor: 'rgba(255, 255, 255, 0.7)',
       }}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
-        }}
-      />
+      <Tabs.Screen name="index" options={{ title: 'Home', tabBarLabel: 'Home' }} />
       <Tabs.Screen
         name="selections"
-        options={{
-          title: 'My selections',
-          tabBarIcon: ({ color, size }) => <Ionicons name="list" size={size} color={color} />,
-        }}
+        options={{ title: 'My selections', tabBarLabel: 'Selections' }}
       />
       <Tabs.Screen
         name="competitions"
-        options={{
-          title: 'My Competitions',
-          tabBarIcon: ({ color, size }) => <Ionicons name="medal" size={size} color={color} />,
-        }}
+        options={{ title: 'My Competitions', tabBarLabel: 'Competitions' }}
       />
-      <Tabs.Screen
-        name="leaderboard"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="participant-selections"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="rules"
-        options={{
-          title: 'Rules',
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="points"
-        options={{
-          title: 'Points system',
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="results"
-        options={{
-          title: 'Results',
-          tabBarIcon: ({ color, size }) => <Ionicons name="trophy" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="account"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="change-password"
-        options={{
-          title: 'Change password',
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="reminders"
-        options={{
-          title: 'Reminders',
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="tutorial-sandbox"
-        options={{
-          title: 'Tutorial',
-          href: null,
-        }}
-      />
+      <Tabs.Screen name="leaderboard" options={{ href: null }} />
+      <Tabs.Screen name="participant-selections" options={{ href: null }} />
+      <Tabs.Screen name="rules" options={{ title: 'Rules', href: null }} />
+      <Tabs.Screen name="points" options={{ title: 'Points system', href: null }} />
+      <Tabs.Screen name="results" options={{ title: 'Results', tabBarLabel: 'Results' }} />
+      <Tabs.Screen name="account" options={{ href: null }} />
+      <Tabs.Screen name="change-password" options={{ title: 'Change password', href: null }} />
+      <Tabs.Screen name="reminders" options={{ title: 'Reminders', href: null }} />
+      <Tabs.Screen name="tutorial-sandbox" options={{ title: 'Tutorial', href: null }} />
     </Tabs>
   );
 }
@@ -133,24 +64,28 @@ function AppTabs() {
 function AppLayoutContent() {
   const { session } = useAuth();
   const { isLocked } = useAppLock();
+  const baseTheme = useTheme();
+  const racingTheme = useMemo(() => withRacingAccent(baseTheme), [baseTheme]);
 
   useEffect(() => {
     if (session) void setLastRoute('/(app)');
   }, [session?.user?.id]);
 
   return (
-    <ForceRefreshProvider>
-      <SidebarProvider>
-        {session && isLocked ? (
-          <AppUnlockScreen />
-        ) : (
-          <>
-            <AppTabs />
-            <AppSidebar />
-          </>
-        )}
-      </SidebarProvider>
-    </ForceRefreshProvider>
+    <NestedThemeProvider theme={racingTheme}>
+      <ForceRefreshProvider>
+        <SidebarProvider initialVariant="racing">
+          {session && isLocked ? (
+            <AppUnlockScreen />
+          ) : (
+            <>
+              <AppTabs />
+              <AppSidebar />
+            </>
+          )}
+        </SidebarProvider>
+      </ForceRefreshProvider>
+    </NestedThemeProvider>
   );
 }
 

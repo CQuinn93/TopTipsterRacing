@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo } from 'react';
+import React, { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { Platform } from 'react-native';
 import { darkTheme, type Theme } from '@/constants/theme';
 
@@ -22,11 +22,18 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  return (
-    <ThemeContext.Provider value={theme}>
-      {children}
-    </ThemeContext.Provider>
-  );
+  return <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>;
+}
+
+/** Override theme for a sport section (e.g. racing gold accent). */
+export function NestedThemeProvider({
+  theme,
+  children,
+}: {
+  theme: Theme;
+  children: ReactNode;
+}) {
+  return <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme(): Theme {

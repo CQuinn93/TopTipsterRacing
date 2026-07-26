@@ -15,6 +15,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useSidebar } from '@/contexts/SidebarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
 // Crest images disabled (trademark risk) — restore TeamCrest if logo rights obtained.
@@ -68,6 +69,7 @@ type TabKey = 'gameweeks' | 'selection' | 'leaderboard' | 'admin';
 
 export default function LmsCompetitionDashboard() {
   const theme = useTheme();
+  const { openSidebar } = useSidebar();
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
   const params = useLocalSearchParams<{ competitionId: string }>();
@@ -1578,7 +1580,10 @@ export default function LmsCompetitionDashboard() {
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={8} accessibilityRole="button">
+        <Pressable onPress={openSidebar} hitSlop={8} accessibilityRole="button" accessibilityLabel="Open menu">
+          <Ionicons name="menu" size={24} color={theme.colors.text} />
+        </Pressable>
+        <Pressable onPress={() => router.back()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back">
           <Ionicons name="arrow-back" size={22} color={theme.colors.text} />
         </Pressable>
         <View style={styles.titleBlock}>

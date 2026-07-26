@@ -21,7 +21,6 @@ import { lightTheme } from '@/constants/theme';
 import { getAvailableRacesForUser } from '@/lib/availableRacesCache';
 import { fetchHomeSummaryByComp, type HomeSummaryByComp } from '@/lib/homeSummary';
 import { useForceRefresh } from '@/contexts/ForceRefreshContext';
-import { useSidebar } from '@/contexts/SidebarContext';
 import type { ParticipationRow } from '@/lib/availableRacesCache';
 import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
 import { getCompetitionDisplayStatus } from '@/lib/appUtils';
@@ -32,7 +31,6 @@ import { HomeLeaderboardPanel } from '@/components/HomeLeaderboardPanel';
 import { HomeSelectionsAndResults } from '@/components/HomeSelectionsAndResults';
 export default function HomeScreen() {
   const theme = useTheme();
-  const { openSidebar } = useSidebar();
   const { userId, session } = useAuth();
   const [displayName, setDisplayName] = useState<string>('');
   const [participations, setParticipations] = useState<ParticipationRow[]>([]);
@@ -495,29 +493,27 @@ export default function HomeScreen() {
         compTabsRow: {
           flexDirection: 'row',
           width: '100%',
-          marginBottom: theme.spacing.sm,
-          gap: theme.spacing.xs,
+          marginBottom: theme.spacing.md,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
         },
         compTab: {
           flex: 1,
-          paddingVertical: compact ? theme.spacing.xs : theme.spacing.sm,
-          paddingHorizontal: theme.spacing.sm,
-          borderRadius: theme.radius.sm,
-          backgroundColor: theme.colors.surface,
+          paddingVertical: 11,
           alignItems: 'center',
-          justifyContent: 'center',
+          borderBottomWidth: 2,
+          borderBottomColor: 'transparent',
         },
         compTabActive: {
-          backgroundColor: theme.colors.accent,
+          borderBottomColor: theme.colors.accent,
         },
         compTabText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 11 : 13,
-          color: theme.colors.textSecondary,
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: compact ? 12 : 13,
+          color: theme.colors.textMuted,
         },
         compTabTextActive: {
-          color: '#ffffff',
-          fontWeight: '600',
+          color: theme.colors.accent,
         },
         homeCompHint: {
           fontFamily: theme.fontFamily.regular,
@@ -770,9 +766,6 @@ export default function HomeScreen() {
               <Text style={styles.headerWelcome}>Top Tipster Racing</Text>
               <Text style={styles.headerHello}>Hello {displayName || '…'}</Text>
             </View>
-            <TouchableOpacity style={styles.accountLink} onPress={openSidebar} activeOpacity={0.7}>
-              <Ionicons name="person-circle-outline" size={28} color={theme.colors.text} />
-            </TouchableOpacity>
           </View>
         </View>
 

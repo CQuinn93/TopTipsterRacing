@@ -1,52 +1,27 @@
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, useWindowDimensions, Platform, type ViewStyle, type DimensionValue } from 'react-native';
-import { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions, Platform, type ViewStyle, type DimensionValue } from 'react-native';
+import { useMemo } from 'react';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useTheme } from '@/contexts/ThemeContext';
+import { useTheme, NestedThemeProvider } from '@/contexts/ThemeContext';
 import { lightTheme } from '@/constants/theme';
+import { withRacingAccent } from '@/constants/sportThemes';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppLockProvider, useAppLock } from '@/contexts/AppLockContext';
 import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
 import { SidebarProvider, useSidebar } from '@/contexts/SidebarContext';
 import { AppSidebar } from '@/components/AppSidebar';
 import { AppUnlockScreen } from '@/components/AppUnlockScreen';
-import { clearTabletCodeCache, getOrCreateTabletCode } from '@/lib/tabletCode';
-import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
-import { clearLatestResultsCache } from '@/lib/latestResultsCache';
-import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
-import { supabase, getSupabaseUrl } from '@/lib/supabase';
 
 const SIDEBAR_WIDTH = 260;
 const MOBILE_BREAKPOINT = 768;
 
 const NAV_ITEMS = [
-  { href: '/(app)', label: 'Home', icon: 'home' as const },
-  { href: '/(app)/selections', label: 'My Selections', icon: 'list' as const },
-  { href: '/(app)/competitions', label: 'Competitions', icon: 'medal' as const },
-  { href: '/(app)/results', label: 'Results', icon: 'trophy' as const },
+  { href: '/(app)', label: 'Home' },
+  { href: '/(app)/selections', label: 'Selections' },
+  { href: '/(app)/competitions', label: 'Competitions' },
+  { href: '/(app)/results', label: 'Results' },
 ];
-
-const MENU_ITEMS = [
-  { href: '/(app)/rules', label: 'Rules', icon: 'document-text-outline' as const },
-  { href: '/(app)/points', label: 'Points System', icon: 'stats-chart-outline' as const },
-  { href: '/(app)/reminders', label: 'Reminders', icon: 'notifications-outline' as const },
-];
-
-async function doSignOut(
-  signOut: () => Promise<void>,
-  userId: string | null,
-  router: ReturnType<typeof useRouter>
-) {
-  await clearTabletCodeCache();
-  if (userId) {
-    await clearAvailableRacesCache(userId);
-    await clearLatestResultsCache(userId);
-    await clearSelectionsBulkCache(userId);
-  }
-  await signOut();
-  router.replace('/(auth)/login');
-}
 
 function WebSidebar() {
   const theme = useTheme();
@@ -119,6 +94,22 @@ function WebSidebar() {
       color: theme.colors.accent,
       fontWeight: '600',
     },
+    homeLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 'auto',
+      paddingVertical: 10,
+      paddingHorizontal: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border,
+    },
+    homeLinkText: {
+      fontFamily: theme.fontFamily.regular,
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.accent,
+    },
   });
 
   const isActive = (href: string) => {
@@ -130,308 +121,32 @@ function WebSidebar() {
   return (
     <View style={styles.sidebar}>
       <View style={{ flex: 1, minHeight: 0 }}>
-      <Text style={styles.logo}>Top Tipster Racing</Text>
-      <Text style={styles.tagline}>Fantasy racing tips</Text>
-      <View style={styles.navSection}>
-        <Text style={styles.navLabel}>Main</Text>
-        {NAV_ITEMS.map((item) => {
-          const active = isActive(item.href);
-          return (
-            <TouchableOpacity
-              key={item.href}
-              style={[styles.navItem, active && styles.navItemActive]}
-              onPress={() => router.push(item.href as any)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name={item.icon} size={18} color={active ? theme.colors.accent : theme.colors.textSecondary} />
-              <Text style={[styles.navItemText, active && styles.navItemTextActive]}>{item.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      <View style={styles.navSection}>
-        <Text style={styles.navLabel}>More</Text>
-        {MENU_ITEMS.map((item) => {
-          const active = isActive(item.href);
-          return (
-            <TouchableOpacity
-              key={item.href}
-              style={[styles.navItem, active && styles.navItemActive]}
-              onPress={() => router.push(item.href as any)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name={item.icon} size={18} color={active ? theme.colors.accent : theme.colors.textSecondary} />
-              <Text style={[styles.navItemText, active && styles.navItemTextActive]}>{item.label}</Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      </View>
-      <WebSidebarFooter />
-    </View>
-  );
-}
-
-function WebSidebarFooter() {
-  const theme = useTheme();
-  const router = useRouter();
-  const { session, signOut } = useAuth();
-  const { openSidebar } = useSidebar();
-  const userId = session?.user?.id ?? null;
-  const [accessCode, setAccessCode] = useState<string | null>(null);
-  const [role, setRole] = useState<'User' | 'Admin'>('User');
-  const [adminRequestPending, setAdminRequestPending] = useState(false);
-  const [adminRequestLoading, setAdminRequestLoading] = useState(false);
-  const [accountExpanded, setAccountExpanded] = useState(false);
-  const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
-
-  useEffect(() => {
-    if (!userId) {
-      setAccessCode(null);
-      return;
-    }
-    getOrCreateTabletCode(userId)
-      .then(setAccessCode)
-      .catch(() => setAccessCode(null));
-  }, [userId]);
-
-  useEffect(() => {
-    if (!userId) {
-      setRole('User');
-      setAdminRequestPending(false);
-      return;
-    }
-    (async () => {
-      const [{ data: profile }, { data: req }] = await Promise.all([
-        supabase.from('profiles').select('role').eq('id', userId).maybeSingle(),
-        supabase.from('admin_access_requests').select('status').eq('user_id', userId).maybeSingle(),
-      ]);
-      const profileRow = profile as { role?: string } | null;
-      const requestRow = req as { status?: string } | null;
-      setRole(profileRow?.role === 'Admin' ? 'Admin' : 'User');
-      setAdminRequestPending(requestRow?.status === 'pending');
-    })();
-  }, [userId]);
-
-  const handleRequestAdmin = async () => {
-    if (!userId || role === 'Admin') return;
-    setAdminRequestLoading(true);
-    try {
-      const { data, error } = await supabase.rpc('admin_request_access');
-      if (error) throw error;
-      const result = data as { success?: boolean; status?: string; error?: string } | null;
-      if (!result?.success) {
-        window.alert(result?.error ?? 'Could not request admin access.');
-        return;
-      }
-      if (result.status === 'already_admin') {
-        setRole('Admin');
-        window.alert('Your account already has admin access.');
-        return;
-      }
-      setAdminRequestPending(true);
-      window.alert('Your admin access request has been sent for approval.');
-    } catch (e: unknown) {
-      window.alert(e instanceof Error ? e.message : 'Could not request admin access.');
-    } finally {
-      setAdminRequestLoading(false);
-    }
-  };
-
-  const handleSignOut = () => {
-    if (typeof window !== 'undefined' && window.confirm('Are you sure you want to sign out?')) {
-      doSignOut(signOut, userId, router);
-    }
-  };
-
-  const handleDeleteAccount = () => {
-    if (typeof window === 'undefined') return;
-    if (!window.confirm('This will permanently delete your account and all your data (selections, competition entries). You will not be able to sign in again with this email. This cannot be undone. Are you sure?')) {
-      return;
-    }
-    setDeleteAccountLoading(true);
-    (async () => {
-      try {
-        const { data: { session: s } } = await supabase.auth.getSession();
-        const token = s?.access_token;
-        if (!token) {
-          window.alert('Not signed in.');
-          return;
-        }
-        const url = `${getSupabaseUrl()}/functions/v1/delete-account`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          window.alert((body as { error?: string })?.error ?? 'Could not delete account. Try again later.');
-          return;
-        }
-        await doSignOut(signOut, userId, router);
-        window.alert('Your account has been permanently deleted.');
-      } catch (e) {
-        window.alert(e instanceof Error ? e.message : 'Something went wrong.');
-      } finally {
-        setDeleteAccountLoading(false);
-      }
-    })();
-  };
-
-  const openAdminTools = () => {
-    if (role !== 'Admin' || !accessCode) {
-      window.alert('Your admin quick access code is not ready yet. Please try again in a moment.');
-      return;
-    }
-    router.push({
-      pathname: '/(auth)/admin',
-      params: { code: accessCode, returnTo: '/(app)' },
-    } as any);
-  };
-
-  return (
-    <View style={{ marginTop: 'auto', paddingTop: 24, borderTopWidth: 1, borderTopColor: theme.colors.border }}>
-      {role === 'Admin' && (
-        <View style={{ marginBottom: 8, marginHorizontal: 12, backgroundColor: theme.colors.accentMuted, borderRadius: theme.radius.sm, paddingVertical: 6, paddingHorizontal: 10, borderWidth: 1, borderColor: theme.colors.accent }}>
-          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.accent, fontWeight: '700' }}>Admin</Text>
+        <Text style={styles.logo}>Top Tipster Racing</Text>
+        <Text style={styles.tagline}>Fantasy racing tips</Text>
+        <View style={styles.navSection}>
+          <Text style={styles.navLabel}>Main</Text>
+          {NAV_ITEMS.map((item) => {
+            const active = isActive(item.href);
+            return (
+              <TouchableOpacity
+                key={item.href}
+                style={[styles.navItem, active && styles.navItemActive]}
+                onPress={() => router.push(item.href as any)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.navItemText, active && styles.navItemTextActive]}>{item.label}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
-      )}
-      <View style={{ paddingVertical: 4, paddingHorizontal: 12 }}>
-        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 9, color: theme.colors.textMuted, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-          Your access code
-        </Text>
-        {accessCode ? (
-          <>
-            <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 14, letterSpacing: 3.5, color: theme.colors.accent, fontWeight: '600' }}>
-              {accessCode}
-            </Text>
-            {role === 'Admin' && (
-              <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 10, color: theme.colors.textMuted, marginTop: 4 }}>
-                This code also lets you manage competitions in Quick access.
-              </Text>
-            )}
-          </>
-        ) : (
-          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 12, color: theme.colors.textMuted }}>…</Text>
-        )}
       </View>
-      {role === 'Admin' && (
-        <TouchableOpacity
-          onPress={openAdminTools}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingVertical: 8,
-            paddingHorizontal: 12,
-            gap: 8,
-          }}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="construct-outline" size={17} color={theme.colors.accent} />
-          <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.accent }}>
-            Admin tools
-          </Text>
-        </TouchableOpacity>
-      )}
       <TouchableOpacity
-        onPress={handleSignOut}
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          paddingVertical: 8,
-          paddingHorizontal: 12,
-          gap: 8,
-        }}
+        style={styles.homeLink}
+        onPress={() => router.replace('/competition-hub')}
         activeOpacity={0.7}
       >
-        <Ionicons name="log-out-outline" size={17} color={theme.colors.textSecondary} />
-        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textSecondary }}>
-          Sign out
-        </Text>
-      </TouchableOpacity>
-
-      <View style={{ paddingVertical: 4, paddingHorizontal: 12 }}>
-        {role !== 'Admin' && (
-          <TouchableOpacity
-            onPress={handleRequestAdmin}
-            disabled={adminRequestLoading || adminRequestPending}
-            style={{ paddingVertical: 4 }}
-            activeOpacity={0.7}
-          >
-            {adminRequestLoading ? (
-              <ActivityIndicator size="small" color={theme.colors.accent} />
-            ) : (
-              <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: adminRequestPending ? theme.colors.textMuted : theme.colors.accent }}>
-                {adminRequestPending ? 'Admin request pending' : 'Request admin access'}
-              </Text>
-            )}
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity
-          onPress={() => setAccountExpanded((e) => !e)}
-          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 }}
-          activeOpacity={0.7}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Ionicons name="person-outline" size={17} color={theme.colors.textSecondary} />
-            <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textSecondary }}>
-              Account
-            </Text>
-          </View>
-          <Ionicons
-            name="chevron-down"
-            size={16}
-            color={theme.colors.textMuted}
-            style={{ transform: [{ rotate: accountExpanded ? '0deg' : '-90deg' }] }}
-          />
-        </TouchableOpacity>
-        {accountExpanded && (
-          <View style={{ paddingLeft: 28, paddingBottom: 6 }}>
-            <TouchableOpacity
-              onPress={() => router.push('/(app)/change-password')}
-              style={{ paddingVertical: 4 }}
-              activeOpacity={0.7}
-            >
-              <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.accent }}>
-                Change password
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleDeleteAccount}
-              disabled={deleteAccountLoading}
-              style={{ paddingVertical: 4 }}
-              activeOpacity={0.7}
-            >
-              {deleteAccountLoading ? (
-                <ActivityIndicator size="small" color={theme.colors.error} />
-              ) : (
-                <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.error }}>
-                  Delete account
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-
-      <TouchableOpacity
-        onPress={openSidebar}
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          paddingVertical: 8,
-          paddingHorizontal: 12,
-          gap: 8,
-        }}
-        activeOpacity={0.7}
-      >
-        <Ionicons name="menu" size={17} color={theme.colors.textSecondary} />
-        <Text style={{ fontFamily: theme.fontFamily.regular, fontSize: 11, color: theme.colors.textSecondary }}>
-          More options
-        </Text>
+        <Ionicons name="home-outline" size={18} color={theme.colors.accent} />
+        <Text style={styles.homeLinkText}>Return to Home</Text>
       </TouchableOpacity>
     </View>
   );
@@ -471,7 +186,6 @@ function MobileWebLayout() {
       : undefined;
 
   const styles = StyleSheet.create({
-    /** Narrow native: min height; narrow web: combined with webMobileShell for viewport-locked shell. */
     wrapper: {
       flex: 1,
       backgroundColor: theme.colors.background,
@@ -496,36 +210,39 @@ function MobileWebLayout() {
       color: isLight ? theme.colors.white : theme.colors.text,
       marginLeft: 6,
     },
-    /** Main scroll area; bottom inset so content clears iOS home / browser overlays. */
     content: {
       flex: 1,
       minHeight: 0,
       overflow: 'hidden',
       paddingBottom: Math.max(12, insets.bottom),
     },
-    /**
-     * Primary nav sits under the header on narrow web only — avoids the bar sitting
-     * under the mobile browser URL/chrome at the bottom of the viewport.
-     */
     tabBar: {
       flexDirection: 'row',
       flexShrink: 0,
-      backgroundColor: theme.colors.accent,
-      paddingVertical: 8,
-      paddingHorizontal: 4,
+      backgroundColor: theme.colors.background,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: 'rgba(0, 0, 0, 0.12)',
+      borderBottomColor: theme.colors.border,
+      paddingHorizontal: theme.spacing.sm,
     },
     tabItem: {
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: 6,
+      paddingVertical: 11,
+      borderBottomWidth: 2,
+      borderBottomColor: 'transparent',
+    },
+    tabItemActive: {
+      borderBottomColor: theme.colors.accent,
     },
     tabLabel: {
-      fontFamily: theme.fontFamily.regular,
-      fontSize: 9,
-      marginTop: 2,
+      fontFamily: theme.fontFamily.baiMedium,
+      fontSize: 12,
+      color: theme.colors.textMuted,
+      textAlign: 'center',
+    },
+    tabLabelActive: {
+      color: theme.colors.accent,
     },
   });
 
@@ -540,16 +257,14 @@ function MobileWebLayout() {
       <View style={styles.tabBar}>
         {NAV_ITEMS.map((item) => {
           const active = isActive(item.href);
-          const color = active ? '#ffffff' : 'rgba(255, 255, 255, 0.7)';
           return (
             <TouchableOpacity
               key={item.href}
-              style={styles.tabItem}
+              style={[styles.tabItem, active && styles.tabItemActive]}
               onPress={() => router.push(item.href as any)}
               activeOpacity={0.7}
             >
-              <Ionicons name={item.icon} size={22} color={color} />
-              <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
+              <Text style={[styles.tabLabel, active && styles.tabLabelActive]} numberOfLines={1}>
                 {item.label}
               </Text>
             </TouchableOpacity>
@@ -606,14 +321,18 @@ function AppLayoutWebContent() {
   const { width } = useWindowDimensions();
   const { session } = useAuth();
   const { isLocked } = useAppLock();
+  const baseTheme = useTheme();
+  const racingTheme = useMemo(() => withRacingAccent(baseTheme), [baseTheme]);
   const isNarrow = width < MOBILE_BREAKPOINT;
 
   return (
-    <ForceRefreshProvider>
-      <SidebarProvider>
-        {session && isLocked ? <AppUnlockScreen /> : isNarrow ? <MobileWebLayout /> : <WebLayoutContent />}
-      </SidebarProvider>
-    </ForceRefreshProvider>
+    <NestedThemeProvider theme={racingTheme}>
+      <ForceRefreshProvider>
+        <SidebarProvider initialVariant="racing">
+          {session && isLocked ? <AppUnlockScreen /> : isNarrow ? <MobileWebLayout /> : <WebLayoutContent />}
+        </SidebarProvider>
+      </ForceRefreshProvider>
+    </NestedThemeProvider>
   );
 }
 
