@@ -32,7 +32,7 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "favicon": "./assets/TT Logo.png"
+      "favicon": "./assets/logo/FAVICON.png"
     },
     "plugins": [
       "expo-router",

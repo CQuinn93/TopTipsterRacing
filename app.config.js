@@ -41,7 +41,11 @@ module.exports = {
       bundler: 'metro',
       // SPA: dynamic routes like /[competitionId] must not require prebuilt HTML per id
       output: 'single',
-      favicon: './assets/TT Logo.png',
+      favicon: './assets/logo/FAVICON.png',
+      name: 'Top Tipster',
+      shortName: 'Top Tipster',
+      themeColor: '#0a0a0a',
+      backgroundColor: '#0a0a0a',
     },
     plugins: [
       'expo-router',

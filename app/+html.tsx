@@ -3,8 +3,11 @@ import type { PropsWithChildren } from 'react';
 
 /**
  * Root HTML for web.
- * Use a standard mobile viewport so browsers render at natural scale.
+ * Includes PWA / Add to Home Screen icon metadata.
  */
+const BASE = (process.env.EXPO_BASE_URL ?? '').replace(/\/$/, '');
+const asset = (path: string) => `${BASE}${path.startsWith('/') ? path : `/${path}`}`;
+
 export default function Root({ children }: PropsWithChildren) {
   return (
     <html lang="en">
@@ -15,6 +18,17 @@ export default function Root({ children }: PropsWithChildren) {
           name="viewport"
           content="width=device-width, initial-scale=1, viewport-fit=cover"
         />
+        <meta name="theme-color" content="#0a0a0a" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Top Tipster" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="application-name" content="Top Tipster" />
+
+        <link rel="icon" type="image/png" href={asset('/favicon.png')} />
+        <link rel="apple-touch-icon" href={asset('/apple-touch-icon.png')} />
+        <link rel="manifest" href={asset('/manifest.json')} />
+
         <style>{`
           html, body, #root {
             width: 100%;
