@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 
 const TABLET_CODE_CACHE_KEY = 'tablet_code';
+const TABLET_CODE_USER_KEY = 'tablet_code_user_id';
 
 function generateSixDigitCode(): string {
   let code = '';
@@ -23,16 +24,36 @@ export async function getCachedTabletCode(): Promise<string | null> {
 /** Clear cached tablet code. Call on sign out. */
 export async function clearTabletCodeCache(): Promise<void> {
   try {
-    await AsyncStorage.removeItem(TABLET_CODE_CACHE_KEY);
+    await AsyncStorage.multiRemove([TABLET_CODE_CACHE_KEY, TABLET_CODE_USER_KEY]);
   } catch {}
+}
+
+async function getCachedTabletCodeForUser(userId: string): Promise<string | null> {
+  try {
+    const [[, code], [, cachedUserId]] = await AsyncStorage.multiGet([
+      TABLET_CODE_CACHE_KEY,
+      TABLET_CODE_USER_KEY,
+    ]);
+    if (code && cachedUserId === userId) return code;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function setCachedTabletCodeForUser(userId: string, code: string): Promise<void> {
+  await AsyncStorage.multiSet([
+    [TABLET_CODE_CACHE_KEY, code],
+    [TABLET_CODE_USER_KEY, userId],
+  ]);
 }
 
 /**
  * Get or create the 6-digit tablet code for the current user.
- * Uses cache first to reduce egress; if missing, fetches or creates in DB then caches.
+ * Uses a user-scoped cache first to reduce egress and avoid cross-user code reuse.
  */
 export async function getOrCreateTabletCode(userId: string): Promise<string> {
-  const cached = await getCachedTabletCode();
+  const cached = await getCachedTabletCodeForUser(userId);
   if (cached) return cached;
 
   const { data: existing } = await supabase
@@ -42,7 +63,7 @@ export async function getOrCreateTabletCode(userId: string): Promise<string> {
     .maybeSingle();
 
   if (existing?.code) {
-    await AsyncStorage.setItem(TABLET_CODE_CACHE_KEY, existing.code);
+    await setCachedTabletCodeForUser(userId, existing.code);
     return existing.code;
   }
 
@@ -54,7 +75,7 @@ export async function getOrCreateTabletCode(userId: string): Promise<string> {
       updated_at: new Date().toISOString(),
     });
     if (!error) {
-      await AsyncStorage.setItem(TABLET_CODE_CACHE_KEY, code);
+      await setCachedTabletCodeForUser(userId, code);
       return code;
     }
     if (error.code !== '23505') throw error; // not unique, retry

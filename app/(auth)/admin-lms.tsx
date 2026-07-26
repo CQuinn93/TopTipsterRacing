@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { AdminScreenLayout, useAdminAccent } from '@/components/AdminScreenLayout';
+import { resolveAdminTabletCode } from '@/lib/adminSession';
 import {
   lmsAdminApproveJoin,
   lmsAdminCreateCompetition,
@@ -55,15 +57,20 @@ export default function AdminLmsScreen() {
   const theme = useTheme();
   const admin = useAdminAccent();
   const insets = useSafeAreaInsets();
+  const { userId } = useAuth();
   const params = useLocalSearchParams<{ code?: string; returnTo?: string }>();
-  const adminCode = String(params.code ?? '').trim();
-  const returnToRaw = String(params.returnTo ?? '/(auth)/admin').trim() || '/(auth)/admin';
+  const paramCode = String(params.code ?? '').trim();
+  const [adminCode, setAdminCode] = useState(paramCode);
+  const [codeReady, setCodeReady] = useState(!!paramCode);
+  const returnToRaw = String(params.returnTo ?? '/competition-hub?tab=admin').trim() || '/competition-hub?tab=admin';
   const returnTo =
     returnToRaw === '/competition-hub' ||
+    returnToRaw.startsWith('/competition-hub') ||
     returnToRaw === '/(auth)/admin' ||
-    returnToRaw.startsWith('/(app)')
+    returnToRaw.startsWith('/(app)') ||
+    returnToRaw.startsWith('/(lms)')
       ? returnToRaw
-      : '/(auth)/admin';
+      : '/competition-hub?tab=admin';
 
   const [tab, setTab] = useState<'comps' | 'joins'>('comps');
   const [loading, setLoading] = useState(true);
@@ -76,6 +83,19 @@ export default function AdminLmsScreen() {
   const [gameweeks, setGameweeks] = useState<LmsGameweek[]>([]);
   const [currentGwId, setCurrentGwId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const code = await resolveAdminTabletCode(userId, paramCode);
+      if (cancelled) return;
+      setAdminCode(code ?? '');
+      setCodeReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, paramCode]);
 
   const load = useCallback(async () => {
     if (!adminCode) {
@@ -106,8 +126,9 @@ export default function AdminLmsScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (!codeReady) return;
       void load();
-    }, [load])
+    }, [load, codeReady])
   );
 
   const onCreate = async () => {
@@ -368,10 +389,21 @@ export default function AdminLmsScreen() {
     [theme, admin.accent, admin.accentMuted, insets.bottom, insets.top]
   );
 
+  if (!codeReady) {
+    return (
+      <View style={styles.emptyWrap}>
+        <ActivityIndicator color={admin.accent} />
+      </View>
+    );
+  }
+
   if (!adminCode) {
     return (
       <View style={styles.emptyWrap}>
         <Text style={styles.emptyTitle}>Admin code required</Text>
+        <Text style={styles.rowMeta}>
+          Reopen Admin tools from the Home Admin tab or the sport menu.
+        </Text>
         <Pressable style={styles.btn} onPress={() => router.replace(returnTo as any)}>
           <Text style={styles.btnText}>Back</Text>
         </Pressable>

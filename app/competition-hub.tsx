@@ -13,7 +13,7 @@ import {
   Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -22,6 +22,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase, getSupabaseUrl } from '@/lib/supabase';
 import { setLastRoute } from '@/lib/lastRoute';
 import { getOrCreateTabletCode, clearTabletCodeCache } from '@/lib/tabletCode';
+import { adminAlert, resolveAdminTabletCode } from '@/lib/adminSession';
 import { getAdminAccent } from '@/constants/adminUi';
 
 const DESKTOP_BREAKPOINT = 900;
@@ -168,12 +169,19 @@ export default function CompetitionHubScreen() {
   const insets = useSafeAreaInsets();
   const { userId, signOut } = useAuth();
   const { width, height } = useWindowDimensions();
+  const params = useLocalSearchParams<{ tab?: string }>();
   const [displayName, setDisplayName] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminCode, setAdminCode] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
-  const [tab, setTab] = useState<HubTab>('football');
+  const [openingAdmin, setOpeningAdmin] = useState<'racing' | 'football' | null>(null);
+  const initialTab = String(params.tab ?? '').trim();
+  const [tab, setTab] = useState<HubTab>(
+    initialTab === 'admin' || initialTab === 'racing' || initialTab === 'account'
+      ? (initialTab as HubTab)
+      : 'football'
+  );
 
   const isDesktop = width >= DESKTOP_BREAKPOINT;
   const isCompact = width < COMPACT_BREAKPOINT || height < 640;
@@ -190,6 +198,13 @@ export default function CompetitionHubScreen() {
   useEffect(() => {
     if (!isAdmin && tab === 'admin') setTab('football');
   }, [isAdmin, tab]);
+
+  useEffect(() => {
+    const next = String(params.tab ?? '').trim();
+    if (next === 'admin' || next === 'racing' || next === 'account' || next === 'football') {
+      setTab(next);
+    }
+  }, [params.tab]);
 
   useEffect(() => {
     Animated.parallel([
@@ -252,26 +267,42 @@ export default function CompetitionHubScreen() {
     };
   }, [userId]);
 
-  const openLmsAdmin = () => {
-    if (!adminCode) {
-      Alert.alert('Admin tools unavailable', 'Your admin access code is not ready yet. Try again in a moment.');
+  const openSportAdmin = async (sport: 'racing' | 'football') => {
+    if (!userId || !isAdmin) {
+      adminAlert('Admin tools unavailable', 'Admin access is required.');
       return;
     }
-    router.push({
-      pathname: '/(auth)/admin-lms',
-      params: { code: adminCode, returnTo: '/competition-hub' },
-    } as any);
+    setOpeningAdmin(sport);
+    try {
+      const code = await resolveAdminTabletCode(userId, adminCode);
+      if (!code) {
+        adminAlert(
+          'Admin tools unavailable',
+          'Your admin access code is not ready yet. Try again in a moment.'
+        );
+        return;
+      }
+      setAdminCode(code);
+      router.push({
+        pathname: sport === 'football' ? '/(auth)/admin-lms' : '/(auth)/admin',
+        params: { code, returnTo: '/competition-hub?tab=admin' },
+      } as any);
+    } catch (e) {
+      adminAlert(
+        'Admin tools unavailable',
+        e instanceof Error ? e.message : 'Could not open admin tools. Try again in a moment.'
+      );
+    } finally {
+      setOpeningAdmin(null);
+    }
+  };
+
+  const openLmsAdmin = () => {
+    void openSportAdmin('football');
   };
 
   const openAdminPanel = () => {
-    if (!adminCode) {
-      Alert.alert('Admin tools unavailable', 'Your admin access code is not ready yet. Try again in a moment.');
-      return;
-    }
-    router.push({
-      pathname: '/(auth)/admin',
-      params: { code: adminCode, returnTo: '/competition-hub' },
-    } as any);
+    void openSportAdmin('racing');
   };
 
   const handleSignOut = () => {
@@ -496,14 +527,16 @@ export default function CompetitionHubScreen() {
               {
                 key: 'racing-admin',
                 title: 'Racing',
-                status: 'Open',
-                onPress: openAdminPanel,
+                status: openingAdmin === 'racing' ? 'Opening…' : 'Open',
+                unavailable: openingAdmin === 'football',
+                onPress: openingAdmin ? undefined : openAdminPanel,
               },
               {
                 key: 'football-admin',
                 title: 'Football',
-                status: 'Open',
-                onPress: openLmsAdmin,
+                status: openingAdmin === 'football' ? 'Opening…' : 'Open',
+                unavailable: openingAdmin === 'racing',
+                onPress: openingAdmin ? undefined : openLmsAdmin,
               },
             ]
           : [];

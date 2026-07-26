@@ -20,7 +20,9 @@ import { supabase } from '@/lib/supabase';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
 import type { Theme } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { AdminScreenLayout, useAdminAccent } from '@/components/AdminScreenLayout';
+import { resolveAdminTabletCode } from '@/lib/adminSession';
 
 const IRISH_COURSES = [
   'Ballinrobe', 'Bellewstown', 'Clonmel', 'Cork', 'The Curragh', 'Down Royal', 'Downpatrick', 'Dundalk',
@@ -160,19 +162,24 @@ type TabId = 'requests' | 'admins' | 'create' | 'competitionList' | 'selections'
 export default function AdminScreen() {
   const activeTheme = useTheme();
   const admin = useAdminAccent();
+  const { userId } = useAuth();
   const styles = useMemo(
     () => createAdminStyles(activeTheme, admin.accent, admin.accentMuted),
     [activeTheme, admin.accent, admin.accentMuted]
   );
   const params = useLocalSearchParams<{ code?: string; returnTo?: string }>();
-  const adminCode = String(params.code ?? '').trim();
+  const paramCode = String(params.code ?? '').trim();
+  const [adminCode, setAdminCode] = useState(paramCode);
+  const [codeReady, setCodeReady] = useState(!!paramCode);
   const returnToRaw = String(params.returnTo ?? '').trim();
   const returnTo =
     returnToRaw === '/(auth)/tablet-mode' ||
     returnToRaw === '/competition-hub' ||
-    returnToRaw.startsWith('/(app)')
+    returnToRaw.startsWith('/competition-hub') ||
+    returnToRaw.startsWith('/(app)') ||
+    returnToRaw.startsWith('/(lms)')
       ? returnToRaw
-      : '/(auth)/tablet-mode';
+      : '/competition-hub?tab=admin';
   const [tab, setTab] = useState<TabId>('requests');
   const [list, setList] = useState<PendingRequest[]>([]);
   const [adminRequests, setAdminRequests] = useState<AdminAccessRequest[]>([]);
@@ -184,6 +191,19 @@ export default function AdminScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const code = await resolveAdminTabletCode(userId, paramCode);
+      if (cancelled) return;
+      setAdminCode(code ?? '');
+      setCodeReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, paramCode]);
 
   // Create competition form
   const [newName, setNewName] = useState('');
@@ -471,16 +491,18 @@ export default function AdminScreen() {
       ]}
       activeTab={tab}
       onTabChange={(key) => setTab(key as TabId)}
-      loading={!!adminCode && loading}
+      loading={!codeReady || (!!adminCode && loading)}
     >
-      {!adminCode ? (
+      {codeReady && !adminCode ? (
         <View style={styles.scrollContent}>
-          <Text style={styles.empty}>Admin session expired. Please reopen Admin tools from the menu.</Text>
+          <Text style={styles.empty}>
+            Admin session expired. Please reopen Admin tools from Home → Admin or the sport menu.
+          </Text>
           <TouchableOpacity style={styles.backButton} onPress={() => router.replace(returnTo as any)}>
             <Text style={styles.backButtonText}>Back</Text>
           </TouchableOpacity>
         </View>
-      ) : tab === 'requests' ? (
+      ) : !codeReady ? null : tab === 'requests' ? (
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
