@@ -160,29 +160,6 @@ export interface Database {
         Insert: { id?: string; competition_id: string; race_day_id: string };
         Update: { id?: string; competition_id?: string; race_day_id?: string };
       };
-      user_tablet_codes: {
-        Row: {
-          id: string;
-          user_id: string;
-          code: string;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          code: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          user_id?: string;
-          code?: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-      };
       profiles: {
         Row: {
           id: string;

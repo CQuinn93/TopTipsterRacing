@@ -88,9 +88,7 @@ export default function LoginScreen() {
           maxWidth: 400,
           width: '100%',
           alignSelf: 'center',
-        },
-        formArea: {
-          marginTop: 'auto',
+          justifyContent: 'center',
         },
         wordmarkBlock: {
           alignItems: 'center',
@@ -181,54 +179,13 @@ export default function LoginScreen() {
           justifyContent: 'center',
           alignItems: 'center',
           gap: theme.spacing.md,
-          marginTop: theme.spacing.lg,
-          marginBottom: theme.spacing.sm,
+          marginTop: theme.spacing.xl,
         },
         policyLink: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 13,
           color: '#737373',
           textDecorationLine: 'underline',
-        },
-        tabletModeRow: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.spacing.sm,
-        },
-        quickAccessCard: {
-          marginTop: 'auto',
-          marginBottom: Math.max(theme.spacing.sm, insets.bottom),
-          backgroundColor: theme.colors.accent,
-          borderRadius: theme.radius.lg,
-          padding: theme.spacing.md,
-          borderWidth: 1,
-          borderColor: theme.colors.accentDim,
-        },
-        tabletModeButton: {
-          flex: 1,
-          backgroundColor: 'rgba(255, 255, 255, 0.16)',
-          borderWidth: 1,
-          borderColor: 'rgba(255, 255, 255, 0.35)',
-          borderRadius: theme.radius.md,
-          paddingVertical: theme.spacing.sm,
-          alignItems: 'center',
-          justifyContent: 'center',
-        },
-        tabletModeButtonText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
-          color: theme.colors.white,
-        },
-        tabletModeInfoHit: {
-          padding: theme.spacing.xs,
-        },
-        quickAccessTitle: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
-          color: 'rgba(255,255,255,0.85)',
-          marginBottom: theme.spacing.sm,
-          textTransform: 'uppercase',
-          letterSpacing: 0.6,
         },
       }),
     [theme, insets.bottom, insets.top]
@@ -315,6 +272,12 @@ export default function LoginScreen() {
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
         if (error) throw error;
+        const { data: banned } = await (supabase as any).rpc('is_profile_banned');
+        if (banned) {
+          await supabase.auth.signOut();
+          Alert.alert('Account banned', 'This account has been banned and cannot sign in.');
+          return;
+        }
         resetWebZoomChrome();
         router.replace('/competition-hub');
       }
@@ -356,7 +319,7 @@ export default function LoginScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
       <View style={styles.content}>
-        <View style={styles.formArea}>
+        <View>
           <View style={styles.wordmarkBlock}>
             <Text style={styles.wordmarkTop} accessibilityRole="header">
               Top Tipster
@@ -453,33 +416,6 @@ export default function LoginScreen() {
           >
             <Text style={styles.policyLink}>Terms of Use</Text>
           </TouchableOpacity>
-        </View>
-
-        <View style={styles.quickAccessCard}>
-          <Text style={styles.quickAccessTitle}>Quick access</Text>
-          <View style={styles.tabletModeRow}>
-          <TouchableOpacity
-            style={styles.tabletModeButton}
-            onPress={() => router.push('/(auth)/tablet-mode')}
-            disabled={loading}
-          >
-            <Text style={styles.tabletModeButtonText}>Quick access</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.tabletModeInfoHit}
-            onPress={() =>
-              Alert.alert(
-                'Quick access',
-                "You'll need your 6-digit quick access code on the next screen.\n\nYou must have an account to use this feature.",
-                [{ text: 'OK' }]
-              )
-            }
-            disabled={loading}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Ionicons name="information-circle-outline" size={24} color={theme.colors.white} />
-          </TouchableOpacity>
-          </View>
         </View>
       </View>
       </KeyboardAvoidingView>

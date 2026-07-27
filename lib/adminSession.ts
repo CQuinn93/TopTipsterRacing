@@ -1,6 +1,7 @@
 import { Alert, Platform } from 'react-native';
-import { getOrCreateTabletCode } from '@/lib/tabletCode';
 import { supabase } from '@/lib/supabase';
+
+export type ProfileRole = 'User' | 'Admin' | 'Owner';
 
 /** RN Web's Alert.alert is unreliable; prefer window.alert/confirm on web. */
 export function adminAlert(title: string, message?: string) {
@@ -17,7 +18,15 @@ export function adminAlert(title: string, message?: string) {
   }
 }
 
-export async function isProfileAdmin(userId: string): Promise<boolean> {
+export function isStaffRole(role: string | null | undefined): boolean {
+  return role === 'Admin' || role === 'Owner';
+}
+
+export function isOwnerRole(role: string | null | undefined): boolean {
+  return role === 'Owner';
+}
+
+export async function getProfileRole(userId: string): Promise<ProfileRole> {
   const db = supabase as any;
   const { data, error } = await db
     .from('profiles')
@@ -25,25 +34,18 @@ export async function isProfileAdmin(userId: string): Promise<boolean> {
     .eq('id', userId)
     .maybeSingle();
   if (error) throw error;
-  return (data as { role?: string | null } | null)?.role === 'Admin';
+  const role = (data as { role?: string | null } | null)?.role;
+  if (role === 'Owner' || role === 'Admin' || role === 'User') return role;
+  return 'User';
 }
 
-/**
- * Resolve the admin tablet code for the signed-in user.
- * Prefer a provided code (e.g. route param), otherwise load/create from DB.
- */
-export async function resolveAdminTabletCode(
-  userId: string | null | undefined,
-  preferredCode?: string | null
-): Promise<string | null> {
-  const trimmed = String(preferredCode ?? '').trim();
-  if (trimmed) return trimmed;
-  if (!userId) return null;
-  try {
-    const admin = await isProfileAdmin(userId);
-    if (!admin) return null;
-    return await getOrCreateTabletCode(userId);
-  } catch {
-    return null;
-  }
+/** True for Admin or Owner (can use admin tools). */
+export async function isProfileAdmin(userId: string): Promise<boolean> {
+  const role = await getProfileRole(userId);
+  return isStaffRole(role);
+}
+
+export async function isProfileOwner(userId: string): Promise<boolean> {
+  const role = await getProfileRole(userId);
+  return isOwnerRole(role);
 }

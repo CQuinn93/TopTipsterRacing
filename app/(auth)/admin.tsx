@@ -20,9 +20,9 @@ import { supabase } from '@/lib/supabase';
 import { fetchRaceDaysForCompetition } from '@/lib/raceDaysForCompetition';
 import type { Theme } from '@/constants/theme';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useAuth } from '@/contexts/AuthContext';
 import { AdminScreenLayout, useAdminAccent } from '@/components/AdminScreenLayout';
-import { resolveAdminTabletCode } from '@/lib/adminSession';
+import { useAuth } from '@/contexts/AuthContext';
+import { getProfileRole, isOwnerRole } from '@/lib/adminSession';
 
 const IRISH_COURSES = [
   'Ballinrobe', 'Bellewstown', 'Clonmel', 'Cork', 'The Curragh', 'Down Royal', 'Downpatrick', 'Dundalk',
@@ -168,12 +168,10 @@ export default function AdminScreen() {
     [activeTheme, admin.accent, admin.accentMuted]
   );
   const params = useLocalSearchParams<{ code?: string; returnTo?: string }>();
-  const paramCode = String(params.code ?? '').trim();
-  const [adminCode, setAdminCode] = useState(paramCode);
-  const [codeReady, setCodeReady] = useState(!!paramCode);
+  /** Legacy RPC param — ignored server-side; admin is gated by the signed-in Admin/Owner role. */
+  const adminCode = 'session';
   const returnToRaw = String(params.returnTo ?? '').trim();
   const returnTo =
-    returnToRaw === '/(auth)/tablet-mode' ||
     returnToRaw === '/competition-hub' ||
     returnToRaw.startsWith('/competition-hub') ||
     returnToRaw.startsWith('/(app)') ||
@@ -181,6 +179,7 @@ export default function AdminScreen() {
       ? returnToRaw
       : '/competition-hub?tab=admin';
   const [tab, setTab] = useState<TabId>('requests');
+  const [isOwner, setIsOwner] = useState(false);
   const [list, setList] = useState<PendingRequest[]>([]);
   const [adminRequests, setAdminRequests] = useState<AdminAccessRequest[]>([]);
   const [competitions, setCompetitions] = useState<Competition[]>([]);
@@ -193,17 +192,27 @@ export default function AdminScreen() {
   const [actingId, setActingId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!userId) {
+      setIsOwner(false);
+      return;
+    }
     let cancelled = false;
     void (async () => {
-      const code = await resolveAdminTabletCode(userId, paramCode);
-      if (cancelled) return;
-      setAdminCode(code ?? '');
-      setCodeReady(true);
+      try {
+        const role = await getProfileRole(userId);
+        if (!cancelled) setIsOwner(isOwnerRole(role));
+      } catch {
+        if (!cancelled) setIsOwner(false);
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [userId, paramCode]);
+  }, [userId]);
+
+  useEffect(() => {
+    if (!isOwner && tab === 'admins') setTab('requests');
+  }, [isOwner, tab]);
 
   // Create competition form
   const [newName, setNewName] = useState('');
@@ -365,7 +374,12 @@ export default function AdminScreen() {
       if (error) throw error;
       const result = data as { success?: boolean; error?: string };
       if (!result?.success) {
-        adminAlert('Error', result?.error ?? 'Could not approve admin request');
+        adminAlert(
+          'Error',
+          result?.error === 'unauthorized'
+            ? 'Only the Owner can grant admin access.'
+            : (result?.error ?? 'Could not approve admin request')
+        );
         return;
       }
       setAdminRequests((prev) => prev.filter((r) => r.id !== id));
@@ -403,7 +417,10 @@ export default function AdminScreen() {
       });
       if (error) throw error;
       const result = data as { success?: boolean };
-      if (!result?.success) return;
+      if (!result?.success) {
+        adminAlert('Error', 'Only the Owner can reject admin requests.');
+        return;
+      }
       setAdminRequests((prev) => prev.filter((r) => r.id !== id));
     } catch (e: unknown) {
       adminAlert('Error', e instanceof Error ? e.message : 'Could not reject admin request');
@@ -484,25 +501,16 @@ export default function AdminScreen() {
       onExit={() => router.replace(returnTo as any)}
       tabs={[
         { key: 'requests', label: 'Join requests' },
-        { key: 'admins', label: 'Admin access' },
+        ...(isOwner ? [{ key: 'admins' as const, label: 'Admin access' }] : []),
         { key: 'create', label: 'New competition' },
         { key: 'competitionList', label: 'Competitions' },
         { key: 'selections', label: 'Edit selections' },
       ]}
       activeTab={tab}
       onTabChange={(key) => setTab(key as TabId)}
-      loading={!codeReady || (!!adminCode && loading)}
+      loading={loading}
     >
-      {codeReady && !adminCode ? (
-        <View style={styles.scrollContent}>
-          <Text style={styles.empty}>
-            Admin session expired. Please reopen Admin tools from Home → Admin or the sport menu.
-          </Text>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.replace(returnTo as any)}>
-            <Text style={styles.backButtonText}>Back</Text>
-          </TouchableOpacity>
-        </View>
-      ) : !codeReady ? null : tab === 'requests' ? (
+      {tab === 'requests' ? (
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}

@@ -16,9 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
-import { useAuth } from '@/contexts/AuthContext';
 import { AdminScreenLayout, useAdminAccent } from '@/components/AdminScreenLayout';
-import { resolveAdminTabletCode } from '@/lib/adminSession';
 import {
   lmsAdminApproveJoin,
   lmsAdminCreateCompetition,
@@ -57,11 +55,9 @@ export default function AdminLmsScreen() {
   const theme = useTheme();
   const admin = useAdminAccent();
   const insets = useSafeAreaInsets();
-  const { userId } = useAuth();
   const params = useLocalSearchParams<{ code?: string; returnTo?: string }>();
-  const paramCode = String(params.code ?? '').trim();
-  const [adminCode, setAdminCode] = useState(paramCode);
-  const [codeReady, setCodeReady] = useState(!!paramCode);
+  /** Legacy RPC param — ignored server-side; admin is gated by the signed-in Admin role. */
+  const adminCode = 'session';
   const returnToRaw = String(params.returnTo ?? '/competition-hub?tab=admin').trim() || '/competition-hub?tab=admin';
   const returnTo =
     returnToRaw === '/competition-hub' ||
@@ -84,24 +80,7 @@ export default function AdminLmsScreen() {
   const [currentGwId, setCurrentGwId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const code = await resolveAdminTabletCode(userId, paramCode);
-      if (cancelled) return;
-      setAdminCode(code ?? '');
-      setCodeReady(true);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, paramCode]);
-
   const load = useCallback(async () => {
-    if (!adminCode) {
-      setLoading(false);
-      return;
-    }
     try {
       const [c, p, gws, current] = await Promise.all([
         lmsAdminListCompetitions(adminCode),
@@ -126,9 +105,8 @@ export default function AdminLmsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      if (!codeReady) return;
       void load();
-    }, [load, codeReady])
+    }, [load])
   );
 
   const onCreate = async () => {
@@ -388,28 +366,6 @@ export default function AdminLmsScreen() {
       }),
     [theme, admin.accent, admin.accentMuted, insets.bottom, insets.top]
   );
-
-  if (!codeReady) {
-    return (
-      <View style={styles.emptyWrap}>
-        <ActivityIndicator color={admin.accent} />
-      </View>
-    );
-  }
-
-  if (!adminCode) {
-    return (
-      <View style={styles.emptyWrap}>
-        <Text style={styles.emptyTitle}>Admin code required</Text>
-        <Text style={styles.rowMeta}>
-          Reopen Admin tools from the Home Admin tab or the sport menu.
-        </Text>
-        <Pressable style={styles.btn} onPress={() => router.replace(returnTo as any)}>
-          <Text style={styles.btnText}>Back</Text>
-        </Pressable>
-      </View>
-    );
-  }
 
   return (
     <AdminScreenLayout

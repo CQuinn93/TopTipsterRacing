@@ -6,11 +6,10 @@ export default function AuthLayout() {
       <Stack.Screen name="login" />
       <Stack.Screen name="forgot-password" />
       <Stack.Screen name="reset-password" />
-      <Stack.Screen name="access-code" />
-      <Stack.Screen name="tablet-mode" />
       <Stack.Screen name="admin" />
       <Stack.Screen name="admin-lms" />
       <Stack.Screen name="admin-edit-selection" />
+      <Stack.Screen name="owner" />
     </Stack>
   );
 }

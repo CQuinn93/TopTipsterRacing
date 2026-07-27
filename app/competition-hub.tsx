@@ -21,9 +21,9 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase, getSupabaseUrl } from '@/lib/supabase';
 import { setLastRoute } from '@/lib/lastRoute';
-import { getOrCreateTabletCode, clearTabletCodeCache } from '@/lib/tabletCode';
-import { adminAlert, resolveAdminTabletCode } from '@/lib/adminSession';
 import { getAdminAccent } from '@/constants/adminUi';
+import { isStaffRole, isOwnerRole, type ProfileRole } from '@/lib/adminSession';
+import { isCurrentUserBanned } from '@/lib/ownerApi';
 
 const DESKTOP_BREAKPOINT = 900;
 const COMPACT_BREAKPOINT = 420;
@@ -172,10 +172,9 @@ export default function CompetitionHubScreen() {
   const params = useLocalSearchParams<{ tab?: string }>();
   const [displayName, setDisplayName] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
-  const [adminCode, setAdminCode] = useState<string | null>(null);
+  const [isOwner, setIsOwner] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
-  const [openingAdmin, setOpeningAdmin] = useState<'racing' | 'football' | null>(null);
   const initialTab = String(params.tab ?? '').trim();
   const [tab, setTab] = useState<HubTab>(
     initialTab === 'admin' || initialTab === 'racing' || initialTab === 'account'
@@ -217,12 +216,20 @@ export default function CompetitionHubScreen() {
     if (!userId) {
       setDisplayName('');
       setIsAdmin(false);
-      setAdminCode(null);
+      setIsOwner(false);
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
+        if (await isCurrentUserBanned()) {
+          if (cancelled) return;
+          Alert.alert('Account banned', 'This account has been banned and cannot continue.');
+          await signOut();
+          router.replace('/(auth)/login');
+          return;
+        }
+
         // profiles.role is used in DB but missing from generated Database types
         const db = supabase as any;
         const { data, error } = await db
@@ -237,72 +244,49 @@ export default function CompetitionHubScreen() {
           console.warn('[competition-hub] profile load failed', error.message);
           setDisplayName('');
           setIsAdmin(false);
-          setAdminCode(null);
+          setIsOwner(false);
           return;
         }
 
         const profile = data as { username?: string | null; role?: string | null } | null;
         const username = profile?.username?.trim() || '';
+        const role = (profile?.role ?? 'User') as ProfileRole;
         setDisplayName(username);
-        const admin = profile?.role === 'Admin';
-        setIsAdmin(admin);
-
-        if (admin) {
-          const code = await getOrCreateTabletCode(userId).catch(() => null);
-          if (!cancelled) setAdminCode(code);
-        } else {
-          setAdminCode(null);
-        }
+        setIsAdmin(isStaffRole(role));
+        setIsOwner(isOwnerRole(role));
       } catch (e) {
         if (!cancelled) {
           console.warn('[competition-hub] profile load error', e);
           setDisplayName('');
           setIsAdmin(false);
-          setAdminCode(null);
+          setIsOwner(false);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [userId]);
-
-  const openSportAdmin = async (sport: 'racing' | 'football') => {
-    if (!userId || !isAdmin) {
-      adminAlert('Admin tools unavailable', 'Admin access is required.');
-      return;
-    }
-    setOpeningAdmin(sport);
-    try {
-      const code = await resolveAdminTabletCode(userId, adminCode);
-      if (!code) {
-        adminAlert(
-          'Admin tools unavailable',
-          'Your admin access code is not ready yet. Try again in a moment.'
-        );
-        return;
-      }
-      setAdminCode(code);
-      router.push({
-        pathname: sport === 'football' ? '/(auth)/admin-lms' : '/(auth)/admin',
-        params: { code, returnTo: '/competition-hub?tab=admin' },
-      } as any);
-    } catch (e) {
-      adminAlert(
-        'Admin tools unavailable',
-        e instanceof Error ? e.message : 'Could not open admin tools. Try again in a moment.'
-      );
-    } finally {
-      setOpeningAdmin(null);
-    }
-  };
+  }, [userId, signOut]);
 
   const openLmsAdmin = () => {
-    void openSportAdmin('football');
+    router.push({
+      pathname: '/(auth)/admin-lms',
+      params: { returnTo: '/competition-hub?tab=admin' },
+    } as any);
   };
 
   const openAdminPanel = () => {
-    void openSportAdmin('racing');
+    router.push({
+      pathname: '/(auth)/admin',
+      params: { returnTo: '/competition-hub?tab=admin' },
+    } as any);
+  };
+
+  const openOwnerPanel = () => {
+    router.push({
+      pathname: '/(auth)/owner',
+      params: { returnTo: '/competition-hub?tab=admin' },
+    } as any);
   };
 
   const handleSignOut = () => {
@@ -314,7 +298,6 @@ export default function CompetitionHubScreen() {
     const runSignOut = async () => {
       setSigningOut(true);
       try {
-        await clearTabletCodeCache();
         await signOut();
         router.replace('/(auth)/login');
       } catch (e) {
@@ -372,7 +355,6 @@ export default function CompetitionHubScreen() {
         else Alert.alert('Error', msg);
         return;
       }
-      await clearTabletCodeCache();
       await signOut();
       router.replace('/(auth)/login');
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -527,17 +509,25 @@ export default function CompetitionHubScreen() {
               {
                 key: 'racing-admin',
                 title: 'Racing',
-                status: openingAdmin === 'racing' ? 'Opening…' : 'Open',
-                unavailable: openingAdmin === 'football',
-                onPress: openingAdmin ? undefined : openAdminPanel,
+                status: 'Open',
+                onPress: openAdminPanel,
               },
               {
                 key: 'football-admin',
                 title: 'Football',
-                status: openingAdmin === 'football' ? 'Opening…' : 'Open',
-                unavailable: openingAdmin === 'racing',
-                onPress: openingAdmin ? undefined : openLmsAdmin,
+                status: 'Open',
+                onPress: openLmsAdmin,
               },
+              ...(isOwner
+                ? [
+                    {
+                      key: 'owner-console',
+                      title: 'Owner',
+                      status: 'Open',
+                      onPress: openOwnerPanel,
+                    },
+                  ]
+                : []),
             ]
           : [];
 
@@ -864,7 +854,7 @@ export default function CompetitionHubScreen() {
           <Text style={styles.hello}>Hi{displayName ? `, ${displayName}` : ''}</Text>
           {isAdmin ? (
             <View style={styles.adminBadge}>
-              <Text style={styles.adminBadgeText}>Admin</Text>
+              <Text style={styles.adminBadgeText}>{isOwner ? 'Owner' : 'Admin'}</Text>
             </View>
           ) : null}
         </View>

@@ -358,7 +358,8 @@ export async function lmsIsProfileAdmin(userId: string): Promise<boolean> {
     .eq('id', userId)
     .maybeSingle();
   if (error) throw error;
-  return (data as { role?: string | null } | null)?.role === 'Admin';
+  const role = (data as { role?: string | null } | null)?.role;
+  return role === 'Admin' || role === 'Owner';
 }
 
 export async function lmsAdminSetCompetitionTeam(
@@ -967,6 +968,8 @@ export function lmsJoinErrorMessage(code?: string): string {
       return 'You are already in this competition.';
     case 'competition_completed':
       return 'This competition has finished.';
+    case 'account_banned':
+      return 'This account has been banned and cannot join competitions.';
     default:
       return 'Could not send join request.';
   }

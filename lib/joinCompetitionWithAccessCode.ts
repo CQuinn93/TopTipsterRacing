@@ -24,6 +24,11 @@ export async function joinCompetitionWithAccessCode(params: {
   }
 
   try {
+    const { data: banned } = await (supabase as any).rpc('is_profile_banned');
+    if (banned) {
+      return { kind: 'error', message: 'This account has been banned and cannot join competitions.' };
+    }
+
     const { data: comp, error: compError } = await supabase
       .from('competitions')
       .select('id, name')

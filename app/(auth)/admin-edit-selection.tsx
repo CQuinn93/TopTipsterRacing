@@ -32,7 +32,7 @@ export default function AdminEditSelectionScreen() {
   const selectionId = params.selectionId as string;
   const competitionId = params.competitionId as string;
   const raceDate = params.raceDate as string;
-  const adminCode = String(params.code ?? '').trim();
+  const adminCode = 'session';
 
   const [raceDay, setRaceDay] = useState<RaceDayRow | null>(null);
   const [selections, setSelections] = useState<Record<string, { runnerId: string; runnerName: string; oddsDecimal: number }>>({});
