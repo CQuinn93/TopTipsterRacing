@@ -14,6 +14,27 @@ type ConfirmResetResponse = {
   error?: string;
 };
 
+function friendlyResetError(code?: string, fallback = 'Something went wrong. Please try again.'): string {
+  switch (code) {
+    case 'invalid_email':
+      return 'Please enter a valid email address.';
+    case 'invalid_code':
+      return 'Please enter the 6-digit reset code from your email.';
+    case 'invalid_or_expired_code':
+      return 'That code is invalid or has expired. Request a new code and try again.';
+    case 'code_expired':
+      return 'That code has expired. Request a new code and try again.';
+    case 'too_many_attempts':
+      return 'Too many incorrect attempts. Request a new code and try again.';
+    case 'weak_password':
+      return 'Please choose a password with at least 6 characters.';
+    case 'server_error':
+      return 'Something went wrong on our side. Please try again in a moment.';
+    default:
+      return code && !code.includes('_') ? code : fallback;
+  }
+}
+
 async function callResetFunction<T>(path: string, body: Record<string, unknown>): Promise<T> {
   const url = `${getSupabaseUrl()}/functions/v1/${path}`;
   const anonKey =
@@ -29,8 +50,8 @@ async function callResetFunction<T>(path: string, body: Record<string, unknown>)
   });
   const data = (await res.json().catch(() => ({}))) as T;
   if (!res.ok) {
-    const err = (data as { error?: string })?.error ?? 'Request failed';
-    throw new Error(err);
+    const err = (data as { error?: string })?.error;
+    throw new Error(friendlyResetError(err, 'Request failed'));
   }
   return data;
 }
@@ -129,7 +150,7 @@ export default function ForgotPasswordScreen() {
     try {
       const data = await callResetFunction<RequestResetResponse>('request-reset-code', { email: trimmedEmail });
       if (!data?.success) {
-        throw new Error(data?.error ?? 'Could not send reset code.');
+        throw new Error(friendlyResetError(data?.error, 'Could not send reset code.'));
       }
       setStep('verify');
       showMessage('Code sent', 'If this email exists, a reset code has been sent.');
@@ -143,6 +164,8 @@ export default function ForgotPasswordScreen() {
   const confirmReset = async () => {
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedCode = code.trim();
+    const trimmedPassword = newPassword.trim();
+    const trimmedConfirm = confirmPassword.trim();
     if (!trimmedEmail) {
       showMessage('Email required', 'Please enter your email address.');
       return;
@@ -151,11 +174,11 @@ export default function ForgotPasswordScreen() {
       showMessage('Code required', 'Please enter the 6-digit reset code.');
       return;
     }
-    if (newPassword.trim().length < 6) {
+    if (trimmedPassword.length < 6) {
       showMessage('Password too short', 'Please use at least 6 characters.');
       return;
     }
-    if (newPassword !== confirmPassword) {
+    if (trimmedPassword !== trimmedConfirm) {
       showMessage('Passwords do not match', 'Please ensure both password fields match.');
       return;
     }
@@ -165,10 +188,10 @@ export default function ForgotPasswordScreen() {
       const data = await callResetFunction<ConfirmResetResponse>('confirm-reset-code', {
         email: trimmedEmail,
         code: trimmedCode,
-        newPassword: newPassword.trim(),
+        newPassword: trimmedPassword,
       });
       if (!data?.success) {
-        throw new Error(data?.error ?? 'Could not reset password.');
+        throw new Error(friendlyResetError(data?.error, 'Could not reset password.'));
       }
       await supabase.auth.signOut();
       showMessage('Password updated', 'Your password has been reset. Please sign in with your new password.');

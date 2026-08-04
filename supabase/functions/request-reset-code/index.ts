@@ -99,11 +99,15 @@ Deno.serve(async (req) => {
     const admin = createClient(supabaseUrl, supabaseServiceKey);
 
     // Prevent rapid resends for the same email.
-    const { data: existing } = await admin
+    const { data: existing, error: existingErr } = await admin
       .from("password_reset_codes")
       .select("last_sent_at, sent_day, sent_today_count, sent_month, sent_month_count")
       .eq("email", normalizedEmail)
       .maybeSingle();
+    if (existingErr) {
+      console.error("password_reset_codes lookup failed", existingErr);
+      throw new Error("reset_code_lookup_failed");
+    }
     if (existing?.last_sent_at) {
       const deltaMs = Date.now() - new Date(existing.last_sent_at).getTime();
       if (deltaMs < MIN_RESEND_SECONDS * 1000) {
@@ -136,6 +140,27 @@ Deno.serve(async (req) => {
       const codeHash = await sha256(`${normalizedEmail}:${code}:${resetPepper}`);
       const expiresAt = new Date(Date.now() + CODE_TTL_MINUTES * 60 * 1000).toISOString();
 
+      // Persist the hashed code BEFORE emailing so a failed write cannot leave
+      // the user with a code that confirm-reset-code will never accept.
+      const { error: upsertErr } = await admin
+        .from("password_reset_codes")
+        .upsert({
+          email: normalizedEmail,
+          code_hash: codeHash,
+          expires_at: expiresAt,
+          attempts: 0,
+          last_sent_at: now.toISOString(),
+          sent_day: todayUtc,
+          sent_today_count: todayCount + 1,
+          sent_month: monthUtc,
+          sent_month_count: monthCount + 1,
+          updated_at: now.toISOString(),
+        });
+      if (upsertErr) {
+        console.error("password_reset_codes upsert failed", upsertErr);
+        throw new Error("reset_code_persist_failed");
+      }
+
       const html = buildResetEmailHtml(code);
 
       const sendRes = await fetch("https://api.resend.com/emails", {
@@ -154,23 +179,16 @@ Deno.serve(async (req) => {
       if (!sendRes.ok) {
         const body = await sendRes.text().catch(() => "");
         console.error("Resend send failed", sendRes.status, body);
+        // Roll back so an undelivered code cannot be used later.
+        const { error: rollbackErr } = await admin
+          .from("password_reset_codes")
+          .delete()
+          .eq("email", normalizedEmail);
+        if (rollbackErr) {
+          console.error("password_reset_codes rollback failed", rollbackErr);
+        }
         throw new Error("resend_send_failed");
       }
-
-      await admin
-        .from("password_reset_codes")
-        .upsert({
-          email: normalizedEmail,
-          code_hash: codeHash,
-          expires_at: expiresAt,
-          attempts: 0,
-          last_sent_at: now.toISOString(),
-          sent_day: todayUtc,
-          sent_today_count: todayCount + 1,
-          sent_month: monthUtc,
-          sent_month_count: monthCount + 1,
-          updated_at: now.toISOString(),
-        });
     }
 
     // Always return generic success to avoid account enumeration.

@@ -55,11 +55,15 @@ Deno.serve(async (req) => {
     const resetPepper = Deno.env.get("RESET_CODE_PEPPER") ?? "default-reset-pepper";
     const admin = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { data: row } = await admin
+    const { data: row, error: rowErr } = await admin
       .from("password_reset_codes")
       .select("email, code_hash, expires_at, attempts")
       .eq("email", normalizedEmail)
       .maybeSingle();
+    if (rowErr) {
+      console.error("password_reset_codes lookup failed", rowErr);
+      throw new Error("reset_code_lookup_failed");
+    }
     if (!row) {
       return new Response(
         JSON.stringify({ success: false, error: "invalid_or_expired_code" }),
@@ -68,7 +72,13 @@ Deno.serve(async (req) => {
     }
 
     if (new Date(row.expires_at).getTime() < Date.now()) {
-      await admin.from("password_reset_codes").delete().eq("email", normalizedEmail);
+      const { error: deleteExpiredErr } = await admin
+        .from("password_reset_codes")
+        .delete()
+        .eq("email", normalizedEmail);
+      if (deleteExpiredErr) {
+        console.error("password_reset_codes expired delete failed", deleteExpiredErr);
+      }
       return new Response(
         JSON.stringify({ success: false, error: "code_expired" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -84,10 +94,13 @@ Deno.serve(async (req) => {
 
     const expected = await sha256(`${normalizedEmail}:${code}:${resetPepper}`);
     if (expected !== row.code_hash) {
-      await admin
+      const { error: attemptErr } = await admin
         .from("password_reset_codes")
         .update({ attempts: (row.attempts ?? 0) + 1, updated_at: new Date().toISOString() })
         .eq("email", normalizedEmail);
+      if (attemptErr) {
+        console.error("password_reset_codes attempt update failed", attemptErr);
+      }
       return new Response(
         JSON.stringify({ success: false, error: "invalid_or_expired_code" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -105,9 +118,19 @@ Deno.serve(async (req) => {
     const { error: updateErr } = await admin.auth.admin.updateUserById(authUser.id, {
       password: newPassword,
     });
-    if (updateErr) throw updateErr;
+    if (updateErr) {
+      console.error("auth password update failed", updateErr);
+      throw updateErr;
+    }
 
-    await admin.from("password_reset_codes").delete().eq("email", normalizedEmail);
+    const { error: deleteErr } = await admin
+      .from("password_reset_codes")
+      .delete()
+      .eq("email", normalizedEmail);
+    if (deleteErr) {
+      // Password already updated; log but still treat as success so the user can sign in.
+      console.error("password_reset_codes cleanup failed after password update", deleteErr);
+    }
 
     return new Response(
       JSON.stringify({ success: true }),
