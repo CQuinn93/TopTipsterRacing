@@ -77,6 +77,30 @@ export type LmsPick = {
   team?: LmsTeam;
 };
 
+export type LmsLeagueTableRow = {
+  position: number;
+  team_id: string;
+  name: string;
+  short_name: string;
+  slug: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  gf: number;
+  ga: number;
+  gd: number;
+  points: number;
+};
+
+export type LmsLeagueTable = {
+  success: boolean;
+  error?: string;
+  season: string;
+  computed_at: string;
+  rows: LmsLeagueTableRow[];
+};
+
 function asArray<T>(data: unknown): T[] {
   if (Array.isArray(data)) return data as T[];
   return [];
@@ -662,6 +686,24 @@ export function lmsTeamFormFromFixtures(
 
   while (lastFive.length < 5) lastFive.unshift(null);
   return lastFive;
+}
+
+/**
+ * Premier League table derived from finished `lms_fixtures` (no football-data call).
+ * Prefer caching via `lmsSessionGet/SetLeagueTable` in the UI so revisits skip the DB.
+ */
+export async function lmsGetLeagueTable(season = '2026/27'): Promise<LmsLeagueTable> {
+  const { data, error } = await db.rpc('lms_get_league_table', { p_season: season });
+  if (error) throw error;
+
+  const raw = (data ?? {}) as LmsLeagueTable;
+  return {
+    success: !!raw.success,
+    error: raw.error,
+    season: raw.season ?? season,
+    computed_at: raw.computed_at ?? new Date().toISOString(),
+    rows: Array.isArray(raw.rows) ? raw.rows : [],
+  };
 }
 
 export async function lmsGetMyPick(

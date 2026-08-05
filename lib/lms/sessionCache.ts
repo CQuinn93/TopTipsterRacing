@@ -1,10 +1,14 @@
-import type { LmsFixture, LmsTeam } from '@/lib/lms/api';
+import type { LmsFixture, LmsLeagueTable, LmsTeam } from '@/lib/lms/api';
 
 /** In-memory session caches — live until the web/app tab is closed. */
 
 let teamsCache: LmsTeam[] | null = null;
 const fixturesByGameweekId = new Map<string, LmsFixture[]>();
 let formFixturesCache: { season: string; fixtures: LmsFixture[] } | null = null;
+let leagueTableCache: { season: string; fetchedAt: number; table: LmsLeagueTable } | null = null;
+
+/** Client TTL before re-querying the DB for the league table (1 hour). */
+export const LMS_LEAGUE_TABLE_TTL_MS = 60 * 60 * 1000;
 
 export function lmsSessionGetTeams(): LmsTeam[] | null {
   return teamsCache;
@@ -51,6 +55,20 @@ export function lmsSessionSetFormFixtures(season: string, fixtures: LmsFixture[]
 
 export function lmsSessionInvalidateFormFixtures(): void {
   formFixturesCache = null;
+}
+
+export function lmsSessionGetLeagueTable(season: string): LmsLeagueTable | null {
+  if (!leagueTableCache || leagueTableCache.season !== season) return null;
+  if (Date.now() - leagueTableCache.fetchedAt >= LMS_LEAGUE_TABLE_TTL_MS) return null;
+  return leagueTableCache.table;
+}
+
+export function lmsSessionSetLeagueTable(season: string, table: LmsLeagueTable): void {
+  leagueTableCache = { season, fetchedAt: Date.now(), table };
+}
+
+export function lmsSessionInvalidateLeagueTable(): void {
+  leagueTableCache = null;
 }
 
 /*

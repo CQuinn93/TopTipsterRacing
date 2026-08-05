@@ -17,7 +17,7 @@ import { useSidebar } from '@/contexts/SidebarContext';
 /**
  * Shared sport menu (hamburger).
  * Racing: Return to Home
- * LMS: Return to Home, Rules, How it works
+ * LMS: Return to Home, Table, Rules, How it works
  * Admin tools live on the competition hub Admin tab only.
  */
 export function AppSidebar() {
@@ -121,6 +121,15 @@ export function AppSidebar() {
 
             {variant === 'lms' ? (
               <>
+                <TouchableOpacity
+                  style={styles.menuButton}
+                  onPress={() => goTo('/(lms)/table')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="stats-chart-outline" size={22} color={theme.colors.accent} />
+                  <Text style={styles.menuButtonText}>Table</Text>
+                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+                </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.menuButton}
                   onPress={() => goTo('/(lms)/rules')}

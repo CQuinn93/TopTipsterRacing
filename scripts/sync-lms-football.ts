@@ -37,7 +37,6 @@ type FdTeam = {
   name: string;
   shortName?: string;
   tla?: string;
-  crest?: string;
 };
 
 type FdMatch = {
@@ -58,9 +57,12 @@ type LmsTeamRow = {
   short_name: string;
   slug: string;
   external_id: number | null;
-  crest_url: string | null;
 };
 
+/**
+ * Turn a club name into a URL-safe slug for matching / storing in `lms_teams.slug`.
+ * Example: "Manchester United" → "manchester-united"
+ */
 function slugify(input: string): string {
   return input
     .toLowerCase()
@@ -69,6 +71,10 @@ function slugify(input: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+/**
+ * Map football-data.org match status strings into our LMS fixture statuses.
+ * Only `finished` matches are used for settlement / scoring.
+ */
 function mapMatchStatus(status: string): 'scheduled' | 'live' | 'finished' {
   switch (status) {
     case 'FINISHED':
@@ -82,6 +88,10 @@ function mapMatchStatus(status: string): 'scheduled' | 'live' | 'finished' {
   }
 }
 
+/**
+ * Call the football-data.org API with the free-tier auth token and return JSON.
+ * This is the only place we talk to the external football API (2 calls total per sync).
+ */
 async function fdGet<T>(path: string): Promise<T> {
   const url = `${API_BASE}${path}`;
   const res = await fetch(url, {
@@ -97,7 +107,19 @@ async function fdGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+/**
+ * Main LMS sync job. Runs end-to-end:
+ * 1) sync Premier League teams into `lms_teams`
+ * 2) sync fixtures/results into `lms_fixtures` + refresh `lms_gameweeks`
+ * 3) auto-assign missed picks after the deadline
+ * 4) settle finished gameweeks when every included fixture is complete
+ *
+ * Designed to be triggered by cron-job.org → GitHub Actions.
+ */
 async function main() {
+  // ---------------------------------------------------------------------------
+  // Step 0: Validate env + create Supabase service client
+  // ---------------------------------------------------------------------------
   console.log('[lms-sync] Env check:', {
     SUPABASE_URL: SUPABASE_URL ? 'set' : 'MISSING',
     SUPABASE_SERVICE_KEY: SUPABASE_KEY ? 'set' : 'MISSING',
@@ -120,7 +142,9 @@ async function main() {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  // --- Teams ---
+  // ---------------------------------------------------------------------------
+  // Step 1: Sync PL teams from football-data.org into `lms_teams`
+  // ---------------------------------------------------------------------------
   console.log('[lms-sync] Fetching PL teams…');
   const teamsPayload = await fdGet<{ teams: FdTeam[] }>(
     `/competitions/PL/teams?season=${API_SEASON}`
@@ -128,12 +152,14 @@ async function main() {
   const fdTeams = teamsPayload.teams ?? [];
   console.log(`[lms-sync] API teams: ${fdTeams.length}`);
 
+  // Load current DB teams so we can update existing rows instead of duplicating them
   const { data: existingTeams, error: teamsErr } = await supabase
     .from('lms_teams')
-    .select('id, name, short_name, slug, external_id, crest_url');
+    .select('id, name, short_name, slug, external_id');
   if (teamsErr) throw teamsErr;
   const teams = (existingTeams ?? []) as LmsTeamRow[];
 
+  // Lookup maps: match API clubs to DB clubs by external_id, slug, or name
   const byExternal = new Map<number, LmsTeamRow>();
   const bySlug = new Map<string, LmsTeamRow>();
   const byName = new Map<string, LmsTeamRow>();
@@ -143,12 +169,12 @@ async function main() {
     byName.set(t.name.trim().toLowerCase(), t);
   }
 
+  // Upsert each Premier League club from the API response
+  // (UI icons come from assets/Icons via TeamColourChip — not remote crest URLs)
   let teamsUpserted = 0;
   for (const ft of fdTeams) {
     const slug = slugify(ft.shortName || ft.name);
     const shortName = (ft.tla || ft.shortName || ft.name).slice(0, 3).toUpperCase();
-    // Stored for a possible future crest restore; UI uses TeamColourChip (no crest display).
-    const crestUrl = ft.crest?.trim() || null;
     const existing =
       byExternal.get(ft.id) ??
       bySlug.get(slug) ??
@@ -156,6 +182,7 @@ async function main() {
       byName.get(ft.name.trim().toLowerCase());
 
     if (existing) {
+      // Already in DB → update names / external id
       const { error } = await supabase
         .from('lms_teams')
         .update({
@@ -163,18 +190,17 @@ async function main() {
           short_name: shortName,
           slug: existing.slug || slug,
           external_id: ft.id,
-          crest_url: crestUrl,
         })
         .eq('id', existing.id);
       if (error) throw error;
       existing.external_id = ft.id;
       existing.name = ft.name;
       existing.short_name = shortName;
-      existing.crest_url = crestUrl;
       byExternal.set(ft.id, existing);
       bySlug.set(existing.slug, existing);
       byName.set(existing.name.trim().toLowerCase(), existing);
     } else {
+      // New club → insert
       const { data, error } = await supabase
         .from('lms_teams')
         .insert({
@@ -182,9 +208,8 @@ async function main() {
           short_name: shortName,
           slug,
           external_id: ft.id,
-          crest_url: crestUrl,
         })
-        .select('id, name, short_name, slug, external_id, crest_url')
+        .select('id, name, short_name, slug, external_id')
         .single();
       if (error) throw error;
       const row = data as LmsTeamRow;
@@ -208,6 +233,7 @@ async function main() {
     .map((t) => t.id);
 
   if (staleIds.length) {
+    // Clean related rows first so team deletes don't leave dangling FK references
     await supabase
       .from('lms_fixtures')
       .delete()
@@ -219,27 +245,30 @@ async function main() {
     console.log(`[lms-sync] Removed stale / non-PL teams: ${staleIds.length}`);
   }
 
-  // Refresh team map for fixture linking
+  // Rebuild external_id → uuid map for linking fixtures to home/away teams
   const { data: allTeams, error: allTeamsErr } = await supabase
     .from('lms_teams')
-    .select('id, name, short_name, slug, external_id, crest_url');
+    .select('id, external_id');
   if (allTeamsErr) throw allTeamsErr;
   const teamIdByExternal = new Map<number, string>();
-  for (const t of (allTeams ?? []) as LmsTeamRow[]) {
+  for (const t of (allTeams ?? []) as { id: string; external_id: number | null }[]) {
     if (t.external_id != null) teamIdByExternal.set(t.external_id, t.id);
   }
 
-  // --- Matches ---
+  // ---------------------------------------------------------------------------
+  // Step 2: Sync PL matches into fixtures + keep gameweeks in sync
+  // ---------------------------------------------------------------------------
   console.log('[lms-sync] Fetching PL matches…');
   const matchesPayload = await fdGet<{ matches: FdMatch[] }>(
     `/competitions/PL/matches?season=${API_SEASON}`
   );
+  // Only keep valid Premier League matchdays (GW1–GW38)
   const matches = (matchesPayload.matches ?? []).filter(
     (m) => m.matchday != null && m.matchday >= 1 && m.matchday <= 38
   );
   console.log(`[lms-sync] API matches (GW1–38): ${matches.length}`);
 
-  // Ensure gameweeks exist and refresh starts/deadlines from earliest kickoff
+  // Group matches by matchday so we can set each gameweek's first kick-off / deadline
   const byMatchday = new Map<number, FdMatch[]>();
   for (const m of matches) {
     const md = m.matchday as number;
@@ -247,6 +276,7 @@ async function main() {
     byMatchday.get(md)!.push(m);
   }
 
+  // Load existing gameweeks for this LMS season
   const { data: existingGws, error: gwErr } = await supabase
     .from('lms_gameweeks')
     .select('id, number, status, starts_at, deadline_at')
@@ -261,12 +291,14 @@ async function main() {
     });
   }
 
+  // Ensure GW1–GW38 rows exist; refresh starts_at / deadline_at / status when not yet complete
   for (let n = 1; n <= 38; n++) {
     const mdMatches = byMatchday.get(n) ?? [];
     const kickoffs = mdMatches
       .map((m) => new Date(m.utcDate).getTime())
       .filter((t) => Number.isFinite(t))
       .sort((a, b) => a - b);
+    // Earliest kick-off = gameweek start; deadline = 20 minutes before that
     const startsAt =
       kickoffs.length > 0
         ? new Date(kickoffs[0]).toISOString()
@@ -281,6 +313,7 @@ async function main() {
           mdMatches.length > 0 && mdMatches.every((m) => mapMatchStatus(m.status) === 'finished');
         const now = Date.now();
         let status = existing.status;
+        // Don't mark complete here — settlement owns that transition
         if (!allFinished) {
           if (anyLive || new Date(startsAt).getTime() <= now) status = 'live';
           else status = 'upcoming';
@@ -297,6 +330,7 @@ async function main() {
         existing.status = status;
       }
     } else {
+      // First sync of this gameweek → create the row
       const { data, error } = await supabase
         .from('lms_gameweeks')
         .insert({
@@ -317,6 +351,7 @@ async function main() {
     }
   }
 
+  // Upsert every match as an `lms_fixtures` row (kick-off, status, final score)
   let fixturesUpserted = 0;
   let fixturesSkipped = 0;
   for (const m of matches) {
@@ -337,6 +372,7 @@ async function main() {
     }
 
     const status = mapMatchStatus(m.status);
+    // Only store full-time goals once the match is finished
     const homeGoals = status === 'finished' ? m.score?.fullTime?.home ?? null : null;
     const awayGoals = status === 'finished' ? m.score?.fullTime?.away ?? null : null;
 
@@ -388,12 +424,16 @@ async function main() {
   }
   console.log(`[lms-sync] Fixtures upserted/updated: ${fixturesUpserted}; skipped: ${fixturesSkipped}`);
 
-  // --- Auto-assign missed picks (deadline passed) + settle finished GWs ---
+  // ---------------------------------------------------------------------------
+  // Step 3: After deadline → auto-assign missed picks
+  // Step 4: When all included fixtures are finished → settle the gameweek
+  // ---------------------------------------------------------------------------
   let autoAssigned = 0;
   let settled = 0;
   for (const gw of gwByNumber.values()) {
     if (gw.status === 'complete') continue;
 
+    // Auto-assign only after the pick deadline has passed
     const { data: gwRow } = await supabase
       .from('lms_gameweeks')
       .select('deadline_at')
@@ -418,6 +458,7 @@ async function main() {
 
     if (!AUTO_SETTLE) continue;
 
+    // Settle only when every non-excluded fixture in this GW is finished
     const { count, error: cntErr } = await supabase
       .from('lms_fixtures')
       .select('id', { count: 'exact', head: true })
@@ -435,6 +476,7 @@ async function main() {
     if (unfinishedErr) throw unfinishedErr;
     if ((unfinished ?? 0) > 0) continue;
 
+    // Score picks, eliminate losers, mark winners/rollovers, set GW status = complete
     const { data: settleRes, error: settleErr } = await supabase.rpc('lms_settle_gameweek_internal', {
       p_gameweek_id: gw.id,
     });
@@ -460,6 +502,9 @@ async function main() {
   });
 }
 
+/**
+ * Entrypoint wrapper: run `main()` and exit with a non-zero code if anything throws.
+ */
 main().catch((e) => {
   console.error('[lms-sync] Fatal:', e);
   process.exit(1);
