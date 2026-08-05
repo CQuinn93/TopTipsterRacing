@@ -16,7 +16,6 @@ export default function LmsLayout() {
         <Stack.Screen name="[competitionId]" />
         <Stack.Screen name="rules" />
         <Stack.Screen name="how-it-works" />
-        <Stack.Screen name="table" />
       </Stack>
       <AppSidebar />
     </SidebarProvider>

@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -29,10 +29,11 @@ import {
   type LmsPickStatOutcome,
 } from '@/lib/lms/api';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
+import { LeagueTablePanel } from '@/components/lms/LeagueTablePanel';
 import { lmsDisplayTeamName } from '@/lib/lms/teamColours';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 
-type HomeTab = 'competitions' | 'join';
+type HomeTab = 'competitions' | 'join' | 'table';
 
 const FIXTURE_CYCLE_MS = 3500;
 
@@ -41,6 +42,7 @@ export default function LmsHomeScreen() {
   const { openSidebar } = useSidebar();
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
+  const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
   const [comps, setComps] = useState<LmsCompetitionHomeSummary[]>([]);
   const [pending, setPending] = useState<LmsPendingJoin[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,10 +50,17 @@ export default function LmsHomeScreen() {
   const [code, setCode] = useState('');
   const [joining, setJoining] = useState(false);
   const [tab, setTab] = useState<HomeTab>('competitions');
+  const [tableRefreshKey, setTableRefreshKey] = useState(0);
   const [gw, setGw] = useState<LmsGameweek | null>(null);
   const [fixtures, setFixtures] = useState<LmsFixture[]>([]);
   const [fxIndex, setFxIndex] = useState(0);
   const [pickStats, setPickStats] = useState<LmsGameweekPickStats | null>(null);
+
+  useEffect(() => {
+    if (tabParam === 'table' || tabParam === 'join' || tabParam === 'competitions') {
+      setTab(tabParam);
+    }
+  }, [tabParam]);
 
   const upcomingFixtures = useMemo(() => {
     const open = fixtures.filter((f) => f.status !== 'finished' && !f.excluded_from_lms);
@@ -68,7 +77,10 @@ export default function LmsHomeScreen() {
       setFixtures(home.nextUp.fixtures);
       setFxIndex(0);
       setTab((prev) => {
-        if (prev === 'join') return prev;
+        if (tabParam === 'table' || tabParam === 'join' || tabParam === 'competitions') {
+          return tabParam;
+        }
+        if (prev === 'join' || prev === 'table') return prev;
         return home.competitions.length === 0 && home.pending.length === 0
           ? 'join'
           : 'competitions';
@@ -87,7 +99,7 @@ export default function LmsHomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [userId]);
+  }, [userId, tabParam]);
 
   useFocusEffect(
     useCallback(() => {
@@ -109,7 +121,7 @@ export default function LmsHomeScreen() {
 
   const onJoin = async () => {
     if (!code.trim()) {
-      Alert.alert('Access code', 'Enter the code from your admin.');
+      Alert.alert('Competition code', 'Enter the competition code to join.');
       return;
     }
     setJoining(true);
@@ -298,6 +310,7 @@ export default function LmsHomeScreen() {
         tab: {
           flex: 1,
           paddingVertical: 11,
+          paddingHorizontal: 2,
           alignItems: 'center',
           borderBottomWidth: 2,
           borderBottomColor: 'transparent',
@@ -305,8 +318,9 @@ export default function LmsHomeScreen() {
         tabActive: { borderBottomColor: theme.colors.accent },
         tabText: {
           fontFamily: theme.fontFamily.baiMedium,
-          fontSize: 13,
+          fontSize: 12,
           color: theme.colors.textMuted,
+          textAlign: 'center',
         },
         tabTextActive: { color: theme.colors.accent },
         content: {
@@ -408,6 +422,23 @@ export default function LmsHomeScreen() {
           fontSize: 13,
           color: theme.colors.textMuted,
           paddingVertical: 8,
+          lineHeight: 18,
+        },
+        emptyBlock: {
+          gap: 10,
+          paddingVertical: 4,
+        },
+        emptyAction: {
+          alignSelf: 'flex-start',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          paddingVertical: 6,
+        },
+        emptyActionText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.accent,
         },
         badge: {
           fontFamily: theme.fontFamily.baiSemiBold,
@@ -655,6 +686,7 @@ export default function LmsHomeScreen() {
               [
                 { key: 'competitions' as const, label: 'My competitions' },
                 { key: 'join' as const, label: 'Join' },
+                { key: 'table' as const, label: 'Table' },
               ] as const
             ).map((t) => {
               const active = tab === t.key;
@@ -679,6 +711,7 @@ export default function LmsHomeScreen() {
                 refreshing={refreshing}
                 onRefresh={() => {
                   setRefreshing(true);
+                  if (tab === 'table') setTableRefreshKey((k) => k + 1);
                   void load();
                 }}
                 tintColor={theme.colors.accent}
@@ -710,9 +743,21 @@ export default function LmsHomeScreen() {
                 <View>
                   <Text style={styles.sectionLabel}>Your leagues</Text>
                   {comps.length === 0 ? (
-                    <Text style={styles.empty}>
-                      You’re not in a competition yet. Use the Join tab with your access code.
-                    </Text>
+                    <View style={styles.emptyBlock}>
+                      <Text style={styles.empty}>
+                        No competitions yet. Got a competition code? Enter it on the Join tab to get
+                        started.
+                      </Text>
+                      <Pressable
+                        style={styles.emptyAction}
+                        onPress={() => setTab('join')}
+                        accessibilityRole="button"
+                        accessibilityLabel="Enter competition code"
+                      >
+                        <Text style={styles.emptyActionText}>Enter competition code</Text>
+                        <Ionicons name="arrow-forward" size={14} color={theme.colors.accent} />
+                      </Pressable>
+                    </View>
                   ) : (
                     <View style={styles.list}>
                       {comps.map((c, i) => {
@@ -767,7 +812,7 @@ export default function LmsHomeScreen() {
 
             {tab === 'join' ? (
               <View>
-                <Text style={styles.sectionLabel}>Access code</Text>
+                <Text style={styles.sectionLabel}>Competition code</Text>
                 <View style={styles.joinRow}>
                   <TextInput
                     style={styles.input}
@@ -792,11 +837,13 @@ export default function LmsHomeScreen() {
                   </Pressable>
                 </View>
                 <Text style={styles.joinHint}>
-                  Enter the 6-character code from your competition admin. Requests need approval
-                  before you can pick.
+                  Ask the competition organiser for the 6-character code, then enter it here.
+                  You’ll appear in My competitions once they approve you.
                 </Text>
               </View>
             ) : null}
+
+            {tab === 'table' ? <LeagueTablePanel refreshKey={tableRefreshKey} /> : null}
 
             <LmsTrademarkDisclaimer />
           </ScrollView>
