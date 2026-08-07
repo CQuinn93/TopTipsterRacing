@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { getSupabaseUrl, supabase } from '@/lib/supabase';
 
 export type OwnerUserRow = {
   id: string;
@@ -68,6 +68,35 @@ export async function ownerSetUserBanned(
     success: boolean;
     error?: string;
   };
+}
+
+/** Permanently delete a user (Owner only). Uses the owner-delete-user edge function. */
+export async function ownerDeleteUser(
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) return { success: false, error: 'not_signed_in' };
+
+  const anonKey =
+    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? process.env.SUPABASE_ANON_KEY ?? '';
+  const url = `${getSupabaseUrl()}/functions/v1/owner-delete-user`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      apikey: anonKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ user_id: userId }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { error?: string; success?: boolean };
+  if (!res.ok) {
+    return { success: false, error: body.error ?? 'delete_failed' };
+  }
+  return { success: true };
 }
 
 export async function isCurrentUserBanned(): Promise<boolean> {

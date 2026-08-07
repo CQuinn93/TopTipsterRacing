@@ -16,6 +16,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { AdminScreenLayout, useAdminAccent } from '@/components/AdminScreenLayout';
 import { getProfileRole, isOwnerRole } from '@/lib/adminSession';
 import {
+  ownerDeleteUser,
   ownerListCompetitions,
   ownerListUsers,
   ownerSetUserBanned,
@@ -58,6 +59,23 @@ function banErrorMessage(code?: string): string {
   }
 }
 
+function deleteErrorMessage(code?: string): string {
+  switch (code) {
+    case 'unauthorized':
+      return 'Only the Owner can remove users.';
+    case 'cannot_delete_self':
+      return 'You cannot remove your own account here.';
+    case 'cannot_delete_owner':
+      return 'Owner accounts cannot be removed.';
+    case 'user_not_found':
+      return 'User not found.';
+    case 'not_signed_in':
+      return 'You are not signed in.';
+    default:
+      return code ?? 'Could not remove user.';
+  }
+}
+
 function notify(title: string, message?: string) {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     window.alert(message ? `${title}\n\n${message}` : title);
@@ -65,6 +83,22 @@ function notify(title: string, message?: string) {
   }
   if (message) Alert.alert(title, message);
   else Alert.alert(title);
+}
+
+function confirmDestructive(
+  title: string,
+  message: string,
+  confirmLabel: string,
+  onConfirm: () => void
+) {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    if (window.confirm(`${title}\n\n${message}`)) onConfirm();
+    return;
+  }
+  Alert.alert(title, message, [
+    { text: 'Cancel', style: 'cancel' },
+    { text: confirmLabel, style: 'destructive', onPress: onConfirm },
+  ]);
 }
 
 export default function OwnerScreen() {
@@ -171,6 +205,33 @@ export default function OwnerScreen() {
     }
   };
 
+  const removeUser = (user: OwnerUserRow) => {
+    const label = user.username?.trim() || 'this user';
+    confirmDestructive(
+      'Remove user?',
+      `Permanently delete ${label} and all their competition data. They will not be able to sign in again. This cannot be undone.`,
+      'Remove',
+      () => {
+        void (async () => {
+          setBusyUserId(user.id);
+          try {
+            const res = await ownerDeleteUser(user.id);
+            if (!res.success) {
+              notify('Error', deleteErrorMessage(res.error));
+              return;
+            }
+            setUsers((prev) => prev.filter((row) => row.id !== user.id));
+            notify('Removed', `${label} has been permanently deleted.`);
+          } catch (e) {
+            notify('Error', e instanceof Error ? e.message : 'Could not remove user');
+          } finally {
+            setBusyUserId(null);
+          }
+        })();
+      }
+    );
+  };
+
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -261,6 +322,13 @@ export default function OwnerScreen() {
         actionBtnTextActive: {
           color: admin.accent,
         },
+        actionBtnDanger: {
+          borderColor: theme.colors.error,
+          backgroundColor: 'transparent',
+        },
+        actionBtnTextDanger: {
+          color: theme.colors.error,
+        },
         empty: {
           fontFamily: theme.fontFamily.regular,
           fontSize: 14,
@@ -348,8 +416,8 @@ export default function OwnerScreen() {
         {tab === 'users' ? (
           <>
             <Text style={styles.hint}>
-              All accounts on the platform. Change User/Admin roles, or ban an account so they cannot
-              sign in or join competitions. Owner accounts are locked.
+              All accounts on the platform. Change User/Admin roles, ban an account so they cannot
+              sign in or join competitions, or permanently remove a user. Owner accounts are locked.
             </Text>
             {users.length === 0 ? (
               <Text style={styles.empty}>No users found</Text>
@@ -414,16 +482,27 @@ export default function OwnerScreen() {
                           disabled={busy}
                           onPress={() => void setBanned(u, !banned)}
                         >
+                          <Text
+                            style={[
+                              styles.actionBtnText,
+                              banned && styles.actionBtnTextActive,
+                            ]}
+                          >
+                            {banned ? 'Unban' : 'Ban'}
+                          </Text>
+                        </Pressable>
+                        <Pressable
+                          style={[styles.actionBtn, styles.actionBtnDanger]}
+                          disabled={busy}
+                          onPress={() => removeUser(u)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove ${u.username?.trim() || 'user'}`}
+                        >
                           {busy ? (
-                            <ActivityIndicator size="small" color={admin.accent} />
+                            <ActivityIndicator size="small" color={theme.colors.error} />
                           ) : (
-                            <Text
-                              style={[
-                                styles.actionBtnText,
-                                banned && styles.actionBtnTextActive,
-                              ]}
-                            >
-                              {banned ? 'Unban' : 'Ban'}
+                            <Text style={[styles.actionBtnText, styles.actionBtnTextDanger]}>
+                              Remove
                             </Text>
                           )}
                         </Pressable>

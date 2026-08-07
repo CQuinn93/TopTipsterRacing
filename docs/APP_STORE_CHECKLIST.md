@@ -30,6 +30,7 @@ Use this to avoid rejections and get approved in time for next week.
 3. Link project (if not already): `supabase link --project-ref <your-project-ref>`
 4. Set the secret: `supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>`
 5. Deploy: `supabase functions deploy delete-account`
+6. (Owner tools) Deploy: `supabase functions deploy owner-delete-user` — lets the Owner permanently remove another user from the Owner admin screen.
 
 The app calls `POST <SUPABASE_URL>/functions/v1/delete-account` with the user’s JWT; the function deletes all user data and the auth user.
 
