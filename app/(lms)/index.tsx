@@ -213,7 +213,7 @@ export default function LmsHomeScreen() {
       StyleSheet.create({
         root: { flex: 1, backgroundColor: theme.colors.background },
         header: {
-          paddingTop: insets.top + theme.spacing.md,
+          paddingTop: insets.top + theme.spacing.lg,
           paddingHorizontal: theme.spacing.lg,
           paddingBottom: theme.spacing.sm,
           flexDirection: 'row',
