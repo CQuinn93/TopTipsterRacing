@@ -297,20 +297,20 @@ export async function lmsListTeams(): Promise<LmsTeam[]> {
   return (data ?? []) as LmsTeam[];
 }
 
-/** Finished fixtures from the last few completed gameweeks — enough for form dots. */
+/** Finished fixtures from recent gameweeks — enough for form dots.
+ * Includes in-progress weeks (finished matches count as soon as they FT). */
 export async function lmsListRecentFinishedFixtures(
   season = '2026/27',
-  completeGameweekLimit = 6
+  gameweekLimit = 6
 ): Promise<LmsFixture[]> {
-  const { data: completeGws, error: gwErr } = await supabase
+  const { data: recentGws, error: gwErr } = await supabase
     .from('lms_gameweeks')
     .select('id, number')
     .eq('season', season)
-    .eq('status', 'complete')
     .order('number', { ascending: false })
-    .limit(completeGameweekLimit);
+    .limit(gameweekLimit);
   if (gwErr) throw gwErr;
-  const gws = (completeGws ?? []) as { id: string; number: number }[];
+  const gws = (recentGws ?? []) as { id: string; number: number }[];
   if (!gws.length) return [];
 
   const gwIds = gws.map((g) => g.id);

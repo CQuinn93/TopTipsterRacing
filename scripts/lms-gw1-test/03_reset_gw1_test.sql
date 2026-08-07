@@ -6,6 +6,15 @@
 -- Keeps original manual GW1 picks (results reset to pending).
 -- =============================================================================
 
+-- Older test runs created the fixture backup without kickoff_at
+do $$
+begin
+  if to_regclass('public._lms_gw1_test_fixture_backup') is not null then
+    alter table public._lms_gw1_test_fixture_backup
+      add column if not exists kickoff_at timestamptz;
+  end if;
+end $$;
+
 do $$
 declare
   v_gw1_id uuid;
@@ -27,7 +36,8 @@ begin
     set
       status = b.status,
       home_goals = b.home_goals,
-      away_goals = b.away_goals
+      away_goals = b.away_goals,
+      kickoff_at = coalesce(b.kickoff_at, f.kickoff_at)
     from public._lms_gw1_test_fixture_backup b
     where f.id = b.fixture_id;
   elsif v_gw1_id is not null then

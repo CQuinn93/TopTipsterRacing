@@ -58,6 +58,7 @@ import {
   lmsSessionGetTeams,
   lmsSessionHasFixtures,
   lmsSessionInvalidateFixtures,
+  lmsSessionInvalidateFormFixtures,
   lmsSessionListCachedFixtures,
   // lmsSessionPrefetchCrests,
   lmsSessionSetFixtures,
@@ -66,6 +67,9 @@ import {
 } from '@/lib/lms/sessionCache';
 
 type TabKey = 'gameweeks' | 'selection' | 'leaderboard' | 'admin';
+
+/** Manual refresh (header / pull) may hit the DB at most once per minute. */
+const LMS_MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 
 export default function LmsCompetitionDashboard() {
   const theme = useTheme();
@@ -113,6 +117,8 @@ export default function LmsCompetitionDashboard() {
   const currentGwIdRef = useRef<string | null>(null);
   const currentGwRef = useRef<LmsGameweek | null>(null);
   const gameweeksRef = useRef<LmsGameweek[]>([]);
+  const loadedCompetitionIdRef = useRef<string | null>(null);
+  const lastManualRefreshAtRef = useRef<number | null>(null);
   const loadedRef = useRef({
     leaderboardExtras: false,
     selection: false,
@@ -220,7 +226,8 @@ export default function LmsCompetitionDashboard() {
     async (season: string, opts?: { force?: boolean }) => {
       if (!opts?.force) {
         const cached = lmsSessionGetFormFixtures(season);
-        if (cached) {
+        // Skip empty cache — it may be from before any fixtures had finished.
+        if (cached && cached.length > 0) {
           setFormFixtures(cached);
           return cached;
         }
@@ -299,6 +306,7 @@ export default function LmsCompetitionDashboard() {
       try {
         const comp = competitionRef.current;
         const gwId = currentGwIdRef.current;
+        const season = comp?.season ?? '2026/27';
 
         const base = await Promise.all([
           loadTeamsCached(opts),
@@ -309,6 +317,7 @@ export default function LmsCompetitionDashboard() {
           gwId && (!loadedRef.current.pickGwFixtures || opts?.force)
             ? ensurePickGwFixtures(gwId, opts)
             : Promise.resolve(),
+          ensureFormFixtures(season, opts),
         ]);
 
         const poolIds = base[1] as string[];
@@ -332,7 +341,7 @@ export default function LmsCompetitionDashboard() {
         setSelectionLoading(false);
       }
     },
-    [competitionId, userId, ensurePickGwFixtures, loadTeamsCached, mergeTeams]
+    [competitionId, userId, ensurePickGwFixtures, ensureFormFixtures, loadTeamsCached, mergeTeams]
   );
 
   const loadGameweeksSlice = useCallback(
@@ -428,22 +437,38 @@ export default function LmsCompetitionDashboard() {
   const loadGameweeksSliceRef = useRef(loadGameweeksSlice);
   loadGameweeksSliceRef.current = loadGameweeksSlice;
 
-  const reloadVisible = useCallback(async () => {
+  const reloadVisible = useCallback(async (mode: 'initial' | 'manual' = 'initial') => {
     if (!competitionId || !userId) return;
     try {
+      if (mode === 'manual') {
+        lmsSessionInvalidateFormFixtures();
+        if (currentGwIdRef.current) lmsSessionInvalidateFixtures(currentGwIdRef.current);
+        const gwToRefresh =
+          tabRef.current === 'admin'
+            ? adminGwIdRef.current
+            : tabRef.current === 'gameweeks'
+              ? filterGwIdRef.current
+              : null;
+        if (gwToRefresh) lmsSessionInvalidateFixtures(gwToRefresh);
+      }
+
       await loadShell();
       const t = tabRef.current;
       const tasks: Promise<unknown>[] = [];
-      if (t === 'selection') tasks.push(loadSelectionSliceRef.current({ force: true }));
+      if (t === 'selection') tasks.push(loadSelectionSliceRef.current({ force: mode === 'manual' }));
       if (t === 'gameweeks' || t === 'admin') {
         const gwToRefresh = t === 'admin' ? adminGwIdRef.current : filterGwIdRef.current;
-        if (gwToRefresh) lmsSessionInvalidateFixtures(gwToRefresh);
         tasks.push(
-          loadGameweeksSliceRef.current({ force: true }).then(async () => {
-            if (gwToRefresh) await ensureGameweekFixturesRef.current(gwToRefresh, { force: true });
+          loadGameweeksSliceRef.current({ force: mode === 'manual' }).then(async () => {
+            if (gwToRefresh) {
+              await ensureGameweekFixturesRef.current(gwToRefresh, {
+                force: mode === 'manual',
+              });
+            }
           })
         );
       }
+      // Leaderboard standings + GW picks come from loadShell → loadLeaderboardExtras.
       await Promise.all(tasks);
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load dashboard');
@@ -456,9 +481,27 @@ export default function LmsCompetitionDashboard() {
   const reloadVisibleRef = useRef(reloadVisible);
   reloadVisibleRef.current = reloadVisible;
 
+  const requestManualRefresh = useCallback(() => {
+    if (refreshing || loading) return;
+    const now = Date.now();
+    const last = lastManualRefreshAtRef.current;
+    if (last != null && now - last < LMS_MANUAL_REFRESH_COOLDOWN_MS) {
+      const waitSec = Math.ceil((LMS_MANUAL_REFRESH_COOLDOWN_MS - (now - last)) / 1000);
+      Alert.alert('Slow down', `You can refresh again in ${waitSec}s.`);
+      return;
+    }
+    lastManualRefreshAtRef.current = now;
+    setRefreshing(true);
+    void reloadVisible('manual');
+  }, [refreshing, loading, reloadVisible]);
+
   useFocusEffect(
     useCallback(() => {
-      void reloadVisibleRef.current();
+      if (!competitionId || !userId) return;
+      // Keep in-memory screen data while staying on / returning to this competition.
+      if (loadedCompetitionIdRef.current === competitionId) return;
+      loadedCompetitionIdRef.current = competitionId;
+      void reloadVisibleRef.current('initial');
     }, [competitionId, userId])
   );
 
@@ -960,6 +1003,12 @@ export default function LmsCompetitionDashboard() {
           gap: theme.spacing.md,
         },
         titleBlock: { flex: 1 },
+        headerRefresh: {
+          padding: 6,
+          minWidth: 36,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
         title: {
           fontFamily: theme.fontFamily.baiBold,
           fontSize: 20,
@@ -1035,6 +1084,7 @@ export default function LmsCompetitionDashboard() {
           color: theme.colors.accent,
         },
         content: {
+          flexGrow: 1,
           paddingHorizontal: theme.spacing.lg,
           paddingBottom: insets.bottom + theme.spacing.xl,
           gap: theme.spacing.lg,
@@ -1635,6 +1685,20 @@ export default function LmsCompetitionDashboard() {
           <Text style={styles.title}>{name}</Text>
           <Text style={styles.sub}>Last Man Standing · {compStatus || '—'}</Text>
         </View>
+        <Pressable
+          style={styles.headerRefresh}
+          onPress={requestManualRefresh}
+          disabled={refreshing || loading}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh competition"
+        >
+          {refreshing ? (
+            <ActivityIndicator size="small" color={theme.colors.accent} />
+          ) : (
+            <Ionicons name="refresh" size={22} color={theme.colors.text} />
+          )}
+        </Pressable>
       </View>
 
       {loading ? (
@@ -1694,11 +1758,9 @@ export default function LmsCompetitionDashboard() {
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
-                onRefresh={() => {
-                  setRefreshing(true);
-                  void reloadVisible();
-                }}
+                onRefresh={requestManualRefresh}
                 tintColor={theme.colors.accent}
+                colors={[theme.colors.accent]}
               />
             }
           >

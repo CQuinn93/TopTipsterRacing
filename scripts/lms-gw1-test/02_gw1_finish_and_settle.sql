@@ -9,8 +9,12 @@ create table if not exists public._lms_gw1_test_fixture_backup (
   fixture_id uuid primary key,
   status text not null,
   home_goals int,
-  away_goals int
+  away_goals int,
+  kickoff_at timestamptz
 );
+
+alter table public._lms_gw1_test_fixture_backup
+  add column if not exists kickoff_at timestamptz;
 
 create table if not exists public._lms_gw1_test_gameweek_backup (
   gameweek_id uuid primary key,
@@ -34,11 +38,17 @@ begin
     raise exception 'GW1 for season 2026/27 not found';
   end if;
 
-  insert into public._lms_gw1_test_fixture_backup (fixture_id, status, home_goals, away_goals)
-  select id, status, home_goals, away_goals
+  insert into public._lms_gw1_test_fixture_backup (
+    fixture_id, status, home_goals, away_goals, kickoff_at
+  )
+  select id, status, home_goals, away_goals, kickoff_at
   from public.lms_fixtures
   where gameweek_id = v_gw_id
-  on conflict (fixture_id) do nothing;
+  on conflict (fixture_id) do update
+    set kickoff_at = coalesce(
+      public._lms_gw1_test_fixture_backup.kickoff_at,
+      excluded.kickoff_at
+    );
 
   insert into public._lms_gw1_test_gameweek_backup (gameweek_id, starts_at, deadline_at, status)
   select id, starts_at, deadline_at, status

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -36,6 +36,7 @@ import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer'
 type HomeTab = 'competitions' | 'join' | 'table';
 
 const FIXTURE_CYCLE_MS = 3500;
+const LMS_MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 
 export default function LmsHomeScreen() {
   const theme = useTheme();
@@ -55,6 +56,8 @@ export default function LmsHomeScreen() {
   const [fixtures, setFixtures] = useState<LmsFixture[]>([]);
   const [fxIndex, setFxIndex] = useState(0);
   const [pickStats, setPickStats] = useState<LmsGameweekPickStats | null>(null);
+  const homeLoadedRef = useRef(false);
+  const lastManualRefreshAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (tabParam === 'table' || tabParam === 'join' || tabParam === 'competitions') {
@@ -101,10 +104,31 @@ export default function LmsHomeScreen() {
     }
   }, [userId, tabParam]);
 
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
+  const requestManualRefresh = useCallback(() => {
+    if (refreshing || loading) return;
+    const now = Date.now();
+    const last = lastManualRefreshAtRef.current;
+    if (last != null && now - last < LMS_MANUAL_REFRESH_COOLDOWN_MS) {
+      const waitSec = Math.ceil((LMS_MANUAL_REFRESH_COOLDOWN_MS - (now - last)) / 1000);
+      Alert.alert('Slow down', `You can refresh again in ${waitSec}s.`);
+      return;
+    }
+    lastManualRefreshAtRef.current = now;
+    setRefreshing(true);
+    if (tab === 'table') setTableRefreshKey((k) => k + 1);
+    void load();
+  }, [refreshing, loading, tab, load]);
+
   useFocusEffect(
     useCallback(() => {
-      void load();
-    }, [load])
+      if (!userId) return;
+      if (homeLoadedRef.current) return;
+      homeLoadedRef.current = true;
+      void loadRef.current();
+    }, [userId])
   );
 
   useEffect(() => {
@@ -198,6 +222,12 @@ export default function LmsHomeScreen() {
         },
         back: { padding: 4 },
         titleBlock: { flex: 1 },
+        headerRefresh: {
+          padding: 6,
+          minWidth: 36,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
         title: {
           fontFamily: theme.fontFamily.baiBold,
           fontSize: 20,
@@ -673,6 +703,20 @@ export default function LmsHomeScreen() {
           <Text style={styles.title}>Last Man Standing</Text>
           <Text style={styles.sub}>Premier League 2026/27</Text>
         </View>
+        <Pressable
+          style={styles.headerRefresh}
+          onPress={requestManualRefresh}
+          disabled={refreshing || loading}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh"
+        >
+          {refreshing ? (
+            <ActivityIndicator size="small" color={theme.colors.accent} />
+          ) : (
+            <Ionicons name="refresh" size={22} color={theme.colors.text} />
+          )}
+        </Pressable>
       </View>
 
       {loading ? (
@@ -709,12 +753,9 @@ export default function LmsHomeScreen() {
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
-                onRefresh={() => {
-                  setRefreshing(true);
-                  if (tab === 'table') setTableRefreshKey((k) => k + 1);
-                  void load();
-                }}
+                onRefresh={requestManualRefresh}
                 tintColor={theme.colors.accent}
+                colors={[theme.colors.accent]}
               />
             }
           >
