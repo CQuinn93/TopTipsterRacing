@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -18,12 +18,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { AdminScreenLayout, useAdminAccent } from '@/components/AdminScreenLayout';
 import {
-  lmsAdminApproveJoin,
   lmsAdminCreateCompetition,
   lmsAdminCreateRejoinCode,
   lmsAdminListCompetitions,
-  lmsAdminListPending,
-  lmsAdminRejectJoin,
   lmsGetCurrentGameweek,
   lmsListGameweeks,
   type LmsGameweek,
@@ -40,15 +37,6 @@ type AdminComp = {
   active_rejoin_code: string | null;
   participant_count: number;
   active_count: number;
-};
-
-type PendingRow = {
-  id: string;
-  competition_id: string;
-  competition_name: string;
-  username: string | null;
-  code_type: string;
-  created_at: string;
 };
 
 export default function AdminLmsScreen() {
@@ -68,11 +56,9 @@ export default function AdminLmsScreen() {
       ? returnToRaw
       : '/competition-hub?tab=admin';
 
-  const [tab, setTab] = useState<'comps' | 'joins'>('comps');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [comps, setComps] = useState<AdminComp[]>([]);
-  const [pending, setPending] = useState<PendingRow[]>([]);
   const [newName, setNewName] = useState('');
   const [startGwId, setStartGwId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -82,14 +68,12 @@ export default function AdminLmsScreen() {
 
   const load = useCallback(async () => {
     try {
-      const [c, p, gws, current] = await Promise.all([
+      const [c, gws, current] = await Promise.all([
         lmsAdminListCompetitions(adminCode),
-        lmsAdminListPending(adminCode),
         lmsListGameweeks('2026/27'),
         lmsGetCurrentGameweek('2026/27'),
       ]);
       setComps(c as AdminComp[]);
-      setPending(p as PendingRow[]);
       setGameweeks(gws);
       const defaultGw =
         current?.id ?? gws.find((g) => g.status !== 'complete')?.id ?? gws[0]?.id ?? null;
@@ -137,37 +121,6 @@ export default function AdminLmsScreen() {
       Alert.alert('Error', e instanceof Error ? e.message : 'Create failed');
     } finally {
       setCreating(false);
-    }
-  };
-
-  const onApprove = async (id: string) => {
-    setBusyId(id);
-    try {
-      const res = await lmsAdminApproveJoin(adminCode, id);
-      if (!res.success) {
-        Alert.alert(
-          'Failed',
-          res.error === 'entries_closed'
-            ? 'Entries are closed — the start gameweek pick deadline has passed. Request rejected.'
-            : res.error === 'code_void'
-              ? 'This rejoin code is no longer valid.'
-              : res.error ?? 'Confirm failed'
-        );
-      }
-      await load();
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const onReject = async (id: string) => {
-    setBusyId(id);
-    try {
-      const res = await lmsAdminRejectJoin(adminCode, id);
-      if (!res.success) Alert.alert('Failed', res.error ?? 'Reject failed');
-      await load();
-    } finally {
-      setBusyId(null);
     }
   };
 
@@ -380,12 +333,9 @@ export default function AdminLmsScreen() {
     <AdminScreenLayout
       sectionTitle="Football"
       onExit={() => router.replace(returnTo as any)}
-      tabs={[
-        { key: 'comps', label: 'Competitions' },
-        { key: 'joins', label: 'Verify users' },
-      ]}
-      activeTab={tab}
-      onTabChange={(key) => setTab(key as typeof tab)}
+      tabs={[{ key: 'comps', label: 'Competitions' }]}
+      activeTab="comps"
+      onTabChange={() => {}}
       loading={loading}
     >
       <ScrollView
@@ -401,8 +351,6 @@ export default function AdminLmsScreen() {
           />
         }
       >
-        {tab === 'comps' ? (
-          <>
             <View style={styles.panel}>
               <Text style={styles.rowTitle}>Create competition</Text>
               <Text style={styles.rowMeta}>
@@ -487,47 +435,6 @@ export default function AdminLmsScreen() {
                 </View>
               </View>
             ))}
-          </>
-        ) : null}
-
-        {tab === 'joins' ? (
-          <>
-            <View style={styles.panel}>
-              <Text style={styles.rowTitle}>Verify sign-ups</Text>
-              <Text style={styles.rowMeta}>
-                Confirm or reject players who have requested to join with a competition code.
-              </Text>
-            </View>
-            {pending.length === 0 ? (
-              <Text style={styles.rowMeta}>No users waiting for verification.</Text>
-            ) : (
-              pending.map((r) => (
-                <View key={r.id} style={styles.panel}>
-                  <Text style={styles.rowTitle}>{r.username || 'User'}</Text>
-                  <Text style={styles.rowMeta}>
-                    {r.competition_name} · {r.code_type} code
-                  </Text>
-                  <View style={styles.actions}>
-                    <Pressable
-                      style={styles.btn}
-                      onPress={() => void onApprove(r.id)}
-                      disabled={busyId === r.id}
-                    >
-                      <Text style={styles.btnText}>Confirm</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.ghostBtn}
-                      onPress={() => void onReject(r.id)}
-                      disabled={busyId === r.id}
-                    >
-                      <Text style={styles.ghostText}>Reject</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ))
-            )}
-          </>
-        ) : null}
       </ScrollView>
     </AdminScreenLayout>
   );

@@ -23,6 +23,9 @@ import { TeamColourChip } from '@/components/lms/TeamColourChip';
 import { TeamFormDots } from '@/components/lms/TeamFormDots';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import {
+  lmsAdminApproveJoin,
+  lmsAdminListPending,
+  lmsAdminRejectJoin,
   lmsAdminSetCompetitionTeam,
   lmsAdminSetFixtureExcluded,
   lmsAdminDeleteCompetition,
@@ -109,7 +112,17 @@ export default function LmsCompetitionDashboard() {
   const [poolTeamIds, setPoolTeamIds] = useState<string[]>([]);
   const [adminGwId, setAdminGwId] = useState<string | null>(null);
   const [adminBusy, setAdminBusy] = useState(false);
-  const [adminSubTab, setAdminSubTab] = useState<'pool' | 'exclusions'>('pool');
+  const [adminSubTab, setAdminSubTab] = useState<'joins' | 'pool' | 'exclusions'>('joins');
+  const [pendingJoins, setPendingJoins] = useState<
+    {
+      id: string;
+      competition_id: string;
+      username: string | null;
+      code_type: string;
+      created_at: string;
+    }[]
+  >([]);
+  const [joinBusyId, setJoinBusyId] = useState<string | null>(null);
   const [excludeReasons, setExcludeReasons] = useState<Record<string, string>>({});
   const [historyLoadingUserId, setHistoryLoadingUserId] = useState<string | null>(null);
 
@@ -432,10 +445,22 @@ export default function LmsCompetitionDashboard() {
     await loadLeaderboardExtrasRef.current(gw, { force: true });
   }, [competitionId, userId]);
 
+  const loadPendingJoins = useCallback(async () => {
+    if (!competitionId) return;
+    try {
+      const rows = await lmsAdminListPending('session');
+      setPendingJoins(rows.filter((r) => r.competition_id === competitionId));
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load join requests');
+    }
+  }, [competitionId]);
+
   const loadSelectionSliceRef = useRef(loadSelectionSlice);
   loadSelectionSliceRef.current = loadSelectionSlice;
   const loadGameweeksSliceRef = useRef(loadGameweeksSlice);
   loadGameweeksSliceRef.current = loadGameweeksSlice;
+  const loadPendingJoinsRef = useRef(loadPendingJoins);
+  loadPendingJoinsRef.current = loadPendingJoins;
 
   const reloadVisible = useCallback(async (mode: 'initial' | 'manual' = 'initial') => {
     if (!competitionId || !userId) return;
@@ -468,6 +493,7 @@ export default function LmsCompetitionDashboard() {
           })
         );
       }
+      if (t === 'admin') tasks.push(loadPendingJoinsRef.current());
       // Leaderboard standings + GW picks come from loadShell → loadLeaderboardExtras.
       await Promise.all(tasks);
     } catch (e) {
@@ -516,7 +542,10 @@ export default function LmsCompetitionDashboard() {
         Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load fixtures');
       });
     }
-  }, [tab]);
+    if (tab === 'admin' && isAdmin) {
+      void loadPendingJoinsRef.current();
+    }
+  }, [tab, isAdmin]);
 
   useEffect(() => {
     if (tab !== 'gameweeks' && tab !== 'admin') return;
@@ -828,6 +857,41 @@ export default function LmsCompetitionDashboard() {
       { text: 'Cancel', style: 'cancel' },
       { text: confirmLabel, style: 'destructive', onPress: onConfirm },
     ]);
+  };
+
+  const onApproveJoin = async (requestId: string) => {
+    setJoinBusyId(requestId);
+    try {
+      const res = await lmsAdminApproveJoin('session', requestId);
+      if (!res.success) {
+        Alert.alert(
+          'Failed',
+          res.error === 'entries_closed'
+            ? 'Entries are closed — the start gameweek pick deadline has passed. Request rejected.'
+            : res.error === 'code_void'
+              ? 'This rejoin code is no longer valid.'
+              : res.error ?? 'Confirm failed'
+        );
+      }
+      await reloadVisible();
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Confirm failed');
+    } finally {
+      setJoinBusyId(null);
+    }
+  };
+
+  const onRejectJoin = async (requestId: string) => {
+    setJoinBusyId(requestId);
+    try {
+      const res = await lmsAdminRejectJoin('session', requestId);
+      if (!res.success) Alert.alert('Failed', res.error ?? 'Reject failed');
+      await loadPendingJoins();
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Reject failed');
+    } finally {
+      setJoinBusyId(null);
+    }
   };
 
   const onTogglePoolTeam = (team: LmsTeam, enabled: boolean) => {
@@ -1518,10 +1582,13 @@ export default function LmsCompetitionDashboard() {
         },
         adminSubTabs: {
           flexDirection: 'row',
+          flexWrap: 'wrap',
           gap: 8,
         },
         adminSubTab: {
-          flex: 1,
+          flexGrow: 1,
+          flexBasis: '30%',
+          minWidth: 96,
           paddingVertical: 10,
           paddingHorizontal: 8,
           alignItems: 'center',
@@ -1542,6 +1609,38 @@ export default function LmsCompetitionDashboard() {
         },
         adminSubTabTextActive: {
           color: theme.colors.accent,
+        },
+        adminJoinActions: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 8,
+          marginTop: 8,
+        },
+        adminConfirmBtn: {
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.sm,
+          paddingVertical: 8,
+          paddingHorizontal: 12,
+          alignItems: 'center',
+        },
+        adminConfirmBtnText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 12,
+          color: theme.colors.white,
+        },
+        adminRejectBtn: {
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.sm,
+          paddingVertical: 8,
+          paddingHorizontal: 12,
+          alignItems: 'center',
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        adminRejectBtnText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 12,
+          color: theme.colors.text,
         },
         dangerZone: {
           marginTop: theme.spacing.md,
@@ -2238,6 +2337,7 @@ export default function LmsCompetitionDashboard() {
                 <View style={styles.adminSubTabs}>
                   {(
                     [
+                      { key: 'joins' as const, label: 'Join requests' },
                       { key: 'pool' as const, label: 'Team pool' },
                       { key: 'exclusions' as const, label: 'Fixture exclusions' },
                     ] as const
@@ -2264,7 +2364,61 @@ export default function LmsCompetitionDashboard() {
                   })}
                 </View>
 
-                {adminSubTab === 'pool' ? (
+                {adminSubTab === 'joins' ? (
+                  <>
+                    <Text style={styles.sectionIntro}>
+                      Confirm or reject players who have requested to join this competition with a
+                      code.
+                    </Text>
+                    <Text style={styles.poolTitle}>
+                      Join requests · {pendingJoins.length} waiting
+                    </Text>
+                    {pendingJoins.length === 0 ? (
+                      <Text style={styles.muted}>No users waiting for verification.</Text>
+                    ) : (
+                      pendingJoins.map((r) => {
+                        const busy = joinBusyId === r.id;
+                        return (
+                          <View key={r.id} style={styles.adminRow}>
+                            <View style={styles.adminRowBody}>
+                              <Text style={styles.adminRowTitle}>{r.username || 'User'}</Text>
+                              <Text style={styles.adminRowMeta}>
+                                {r.code_type} code
+                                {r.created_at
+                                  ? ` · ${new Date(r.created_at).toLocaleDateString()}`
+                                  : ''}
+                              </Text>
+                              <View style={styles.adminJoinActions}>
+                                <Pressable
+                                  style={[styles.adminConfirmBtn, busy && styles.primaryBtnDisabled]}
+                                  onPress={() => void onApproveJoin(r.id)}
+                                  disabled={busy}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Confirm ${r.username || 'user'}`}
+                                >
+                                  {busy ? (
+                                    <ActivityIndicator size="small" color={theme.colors.white} />
+                                  ) : (
+                                    <Text style={styles.adminConfirmBtnText}>Confirm</Text>
+                                  )}
+                                </Pressable>
+                                <Pressable
+                                  style={[styles.adminRejectBtn, busy && styles.primaryBtnDisabled]}
+                                  onPress={() => void onRejectJoin(r.id)}
+                                  disabled={busy}
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`Reject ${r.username || 'user'}`}
+                                >
+                                  <Text style={styles.adminRejectBtnText}>Reject</Text>
+                                </Pressable>
+                              </View>
+                            </View>
+                          </View>
+                        );
+                      })
+                    )}
+                  </>
+                ) : adminSubTab === 'pool' ? (
                   <>
                     <Text style={styles.sectionIntro}>
                       Choose which clubs are eligible in this competition. Late-start or small
