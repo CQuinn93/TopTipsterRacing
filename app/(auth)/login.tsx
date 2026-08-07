@@ -227,24 +227,61 @@ export default function LoginScreen() {
     }
   };
 
+  /** Web: `Alert.alert` is unreliable — use a dismissible `window.alert` instead. */
+  const showMessage = (title: string, message: string) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.alert(`${title}\n\n${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
+
+  const authErrorMessage = (e: unknown, mode: 'signIn' | 'signUp'): string => {
+    const raw = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
+    const lower = raw.toLowerCase();
+    if (mode === 'signIn') {
+      if (
+        lower.includes('invalid login') ||
+        lower.includes('invalid credentials') ||
+        lower.includes('email not confirmed') ||
+        lower.includes('user not found') ||
+        lower.includes('invalid email or password')
+      ) {
+        return 'Incorrect email or password. Please try again.';
+      }
+    }
+    if (mode === 'signUp') {
+      if (lower.includes('already registered') || lower.includes('already been registered')) {
+        return 'An account with this email already exists. Sign in instead.';
+      }
+      if (lower.includes('password')) {
+        return raw || 'Please choose a stronger password (at least 6 characters).';
+      }
+    }
+    return raw || 'Something went wrong. Please try again.';
+  };
+
   const handleAuth = async () => {
     if (!email.trim() || !password) {
-      Alert.alert('Error', 'Please enter email and password.');
+      showMessage('Missing details', 'Please enter your email and password.');
       return;
     }
     if (isSignUp && !username.trim()) {
-      Alert.alert('Error', 'Please choose a username for the leaderboard.');
+      showMessage('Username required', 'Please choose a username for the leaderboard.');
       return;
     }
     const trimmedUsername = username.trim().toLowerCase().replace(/\s+/g, '');
     if (isSignUp && trimmedUsername.length < 2) {
-      Alert.alert('Error', 'Username must be at least 2 characters.');
+      showMessage('Username too short', 'Username must be at least 2 characters.');
       return;
     }
     setLoading(true);
     try {
       if (isSignUp) {
-        const { data: signUpData, error } = await supabase.auth.signUp({ email: email.trim(), password });
+        const { data: signUpData, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+        });
         if (error) throw error;
         if (signUpData.user) {
           const profilePayload = {
@@ -258,42 +295,49 @@ export default function LoginScreen() {
             .insert(profilePayload as any);
           if (profileError) {
             if (profileError.code === '23505') {
-              Alert.alert('Username taken', 'That username is already in use. Please choose another.');
+              showMessage(
+                'Username taken',
+                'That username is already in use. Please choose another.'
+              );
             } else {
-              throw profileError;
+              showMessage('Sign up failed', authErrorMessage(profileError, 'signUp'));
             }
             setLoading(false);
             return;
           }
         }
-        Alert.alert('You\'re in', 'Account created. Sign in to continue.');
+        showMessage(
+          'Account created',
+          'Your account was created successfully. You can now sign in with your email and password.'
+        );
         setIsSignUp(false);
         setUsername('');
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        const { error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
         if (error) throw error;
         const { data: banned } = await (supabase as any).rpc('is_profile_banned');
         if (banned) {
           await supabase.auth.signOut();
-          Alert.alert('Account banned', 'This account has been banned and cannot sign in.');
+          showMessage(
+            'Account banned',
+            'This account has been banned and cannot sign in.'
+          );
           return;
         }
         resetWebZoomChrome();
         router.replace('/competition-hub');
       }
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : 'Something went wrong';
-      Alert.alert('Error', message);
+      if (isSignUp) {
+        showMessage('Sign up failed', authErrorMessage(e, 'signUp'));
+      } else {
+        showMessage('Sign in failed', authErrorMessage(e, 'signIn'));
+      }
     } finally {
       setLoading(false);
-    }
-  };
-
-  const showMessage = (title: string, message: string) => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.alert(`${title}\n\n${message}`);
-    } else {
-      Alert.alert(title, message);
     }
   };
 

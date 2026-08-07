@@ -144,7 +144,16 @@ export default function AdminLmsScreen() {
     setBusyId(id);
     try {
       const res = await lmsAdminApproveJoin(adminCode, id);
-      if (!res.success) Alert.alert('Failed', res.error ?? 'Confirm failed');
+      if (!res.success) {
+        Alert.alert(
+          'Failed',
+          res.error === 'entries_closed'
+            ? 'Entries are closed — the start gameweek pick deadline has passed. Request rejected.'
+            : res.error === 'code_void'
+              ? 'This rejoin code is no longer valid.'
+              : res.error ?? 'Confirm failed'
+        );
+      }
       await load();
     } finally {
       setBusyId(null);

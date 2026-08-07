@@ -1010,6 +1010,8 @@ export function lmsJoinErrorMessage(code?: string): string {
       return 'You are already in this competition.';
     case 'competition_completed':
       return 'This competition has finished.';
+    case 'entries_closed':
+      return "Entries are closed — the pick deadline for this competition's starting gameweek has passed.";
     case 'account_banned':
       return 'This account has been banned and cannot join competitions.';
     default:

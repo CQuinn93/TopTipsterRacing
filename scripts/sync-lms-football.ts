@@ -426,9 +426,12 @@ async function main() {
 
   // ---------------------------------------------------------------------------
   // Step 3: After deadline → auto-assign missed picks
+  // Step 3b: Progressive eliminate when a pick's fixture has finished
   // Step 4: When all included fixtures are finished → settle the gameweek
   // ---------------------------------------------------------------------------
   let autoAssigned = 0;
+  let progressiveScored = 0;
+  let progressiveEliminated = 0;
   let settled = 0;
   for (const gw of gwByNumber.values()) {
     if (gw.status === 'complete') continue;
@@ -458,6 +461,25 @@ async function main() {
 
     if (!AUTO_SETTLE) continue;
 
+    // Mid-week: score finished fixtures and eliminate losers immediately
+    const { data: applyRes, error: applyErr } = await supabase.rpc(
+      'lms_apply_finished_pick_results',
+      { p_gameweek_id: gw.id }
+    );
+    if (applyErr) {
+      console.warn(`[lms-sync] Progressive apply GW${gw.number} failed:`, applyErr.message);
+    } else {
+      const scored = Number((applyRes as { scored?: number })?.scored ?? 0);
+      const elim = Number((applyRes as { eliminated?: number })?.eliminated ?? 0);
+      progressiveScored += scored;
+      progressiveEliminated += elim;
+      if (scored > 0) {
+        console.log(
+          `[lms-sync] Progressive GW${gw.number}: scored ${scored}, eliminated ${elim}`
+        );
+      }
+    }
+
     // Settle only when every non-excluded fixture in this GW is finished
     const { count, error: cntErr } = await supabase
       .from('lms_fixtures')
@@ -476,7 +498,7 @@ async function main() {
     if (unfinishedErr) throw unfinishedErr;
     if ((unfinished ?? 0) > 0) continue;
 
-    // Score picks, eliminate losers, mark winners/rollovers, set GW status = complete
+    // Winner/rollover, no-picks, set GW status = complete
     const { data: settleRes, error: settleErr } = await supabase.rpc('lms_settle_gameweek_internal', {
       p_gameweek_id: gw.id,
     });
@@ -498,6 +520,8 @@ async function main() {
     fixturesUpserted,
     fixturesSkipped,
     autoAssigned,
+    progressiveScored,
+    progressiveEliminated,
     settled,
   });
 }

@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  RefreshControl,
   ActivityIndicator,
   useWindowDimensions,
   Platform,
@@ -72,9 +73,9 @@ export default function HomeScreen() {
   }, [userId, session?.user?.email]);
 
   const load = useCallback(
-    async (forceRefresh = false) => {
+    async (forceRefresh = false, isPullRefresh = false) => {
       if (!userId) return;
-      setRefreshing(true);
+      if (isPullRefresh) setRefreshing(true);
       try {
         const { participations: p, availableRaces: r } = await getAvailableRacesForUser(supabase, userId, forceRefresh);
         setParticipations(p);
@@ -162,11 +163,16 @@ export default function HomeScreen() {
           setCompDateRangeByCompId({});
         }
       } finally {
-        setRefreshing(false);
+        if (isPullRefresh) setRefreshing(false);
       }
     },
     [userId, selectedCompId]
   );
+
+  const onRefresh = useCallback(() => {
+    if (refreshing) return;
+    void load(true, true);
+  }, [load, refreshing]);
 
   useFocusEffect(
     useCallback(() => {
@@ -758,6 +764,9 @@ export default function HomeScreen() {
         style={[styles.container, isWideWeb && styles.webHomeScroll]}
         contentContainerStyle={[styles.content, { paddingBottom: theme.spacing.lg, paddingTop: theme.spacing.sm }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} />
+        }
       >
         {/* Header strip */}
         <View style={styles.headerStrip}>

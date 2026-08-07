@@ -1118,9 +1118,24 @@ export default function LmsCompetitionDashboard() {
           flexDirection: 'row',
           alignItems: 'center',
           gap: 8,
+          paddingVertical: 4,
+          paddingHorizontal: 6,
+          borderRadius: theme.radius.sm,
+          borderWidth: 1.5,
+          borderColor: 'transparent',
         },
         fixtureTeamMainAway: {
           flexDirection: 'row-reverse',
+        },
+        fixtureTeamWin: {
+          borderColor: theme.colors.accent,
+        },
+        fixtureWinLabel: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 10,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: theme.colors.accent,
         },
         fixtureName: {
           fontFamily: theme.fontFamily.baiMedium,
@@ -1135,11 +1150,19 @@ export default function LmsCompetitionDashboard() {
           minWidth: 52,
           alignItems: 'center',
           paddingHorizontal: 6,
+          gap: 2,
         },
         scoreText: {
           fontFamily: theme.fontFamily.baiBold,
           fontSize: 15,
           color: theme.colors.text,
+        },
+        drawLabel: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 11,
+          letterSpacing: 0.5,
+          textTransform: 'uppercase',
+          color: theme.colors.statusAccent,
         },
         vsText: {
           fontFamily: theme.fontFamily.baiLight,
@@ -1510,6 +1533,15 @@ export default function LmsCompetitionDashboard() {
     const excluded = !!f.excluded_from_lms;
     const homeForm = formByTeamId.get(f.home_team_id) ?? [null, null, null, null, null];
     const awayForm = formByTeamId.get(f.away_team_id) ?? [null, null, null, null, null];
+    const hg = f.home_goals;
+    const ag = f.away_goals;
+    const isDraw =
+      finished && hg != null && ag != null && hg === ag;
+    const homeWin =
+      finished && hg != null && ag != null && hg > ag;
+    const awayWin =
+      finished && hg != null && ag != null && ag > hg;
+
     return (
       <View
         key={f.id}
@@ -1522,7 +1554,9 @@ export default function LmsCompetitionDashboard() {
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <View style={styles.fixtureTeam}>
-              <View style={styles.fixtureTeamMain}>
+              <View
+                style={[styles.fixtureTeamMain, homeWin && styles.fixtureTeamWin]}
+              >
                 <TeamColourChip
                   shortName={f.home_team?.short_name}
                   name={f.home_team?.name}
@@ -1532,14 +1566,18 @@ export default function LmsCompetitionDashboard() {
                 <Text style={styles.fixtureName} numberOfLines={1}>
                   {f.home_team?.short_name ?? f.home_team?.name ?? 'H'}
                 </Text>
+                {homeWin ? <Text style={styles.fixtureWinLabel}>Win</Text> : null}
               </View>
               <TeamFormDots results={homeForm} />
             </View>
             <View style={styles.scoreBox}>
               {finished ? (
-                <Text style={styles.scoreText}>
-                  {f.home_goals ?? 0}–{f.away_goals ?? 0}
-                </Text>
+                <>
+                  <Text style={styles.scoreText}>
+                    {hg ?? 0}–{ag ?? 0}
+                  </Text>
+                  {isDraw ? <Text style={styles.drawLabel}>Draw</Text> : null}
+                </>
               ) : (
                 <>
                   <Text style={styles.vsText}>vs</Text>
@@ -1553,7 +1591,13 @@ export default function LmsCompetitionDashboard() {
               )}
             </View>
             <View style={[styles.fixtureTeam, styles.fixtureTeamAway]}>
-              <View style={[styles.fixtureTeamMain, styles.fixtureTeamMainAway]}>
+              <View
+                style={[
+                  styles.fixtureTeamMain,
+                  styles.fixtureTeamMainAway,
+                  awayWin && styles.fixtureTeamWin,
+                ]}
+              >
                 <TeamColourChip
                   shortName={f.away_team?.short_name}
                   name={f.away_team?.name}
@@ -1563,6 +1607,7 @@ export default function LmsCompetitionDashboard() {
                 <Text style={[styles.fixtureName, styles.fixtureNameAway]} numberOfLines={1}>
                   {f.away_team?.short_name ?? f.away_team?.name ?? 'A'}
                 </Text>
+                {awayWin ? <Text style={styles.fixtureWinLabel}>Win</Text> : null}
               </View>
               <TeamFormDots results={awayForm} />
             </View>
@@ -1880,6 +1925,36 @@ export default function LmsCompetitionDashboard() {
                     <Text style={styles.poolTitle}>
                       Choose a winner · GW{currentGw.number}
                     </Text>
+                    {remainingTeams.length === 0 ? (
+                      <Text style={styles.muted}>
+                        Every remaining pool team is unavailable this gameweek (excluded fixture or
+                        no game).
+                      </Text>
+                    ) : (
+                      <Pressable
+                        style={[
+                          styles.primaryBtn,
+                          (!selectedTeamId ||
+                            saving ||
+                            !playingTeamIds.has(selectedTeamId)) &&
+                            styles.primaryBtnDisabled,
+                        ]}
+                        disabled={
+                          !selectedTeamId ||
+                          saving ||
+                          !playingTeamIds.has(selectedTeamId)
+                        }
+                        onPress={() => void onSavePick()}
+                      >
+                        {saving ? (
+                          <ActivityIndicator color={theme.colors.white} />
+                        ) : (
+                          <Text style={styles.primaryBtnText}>
+                            {pick ? 'Update pick' : 'Lock in pick'}
+                          </Text>
+                        )}
+                      </Pressable>
+                    )}
                     <View style={styles.teamGrid}>
                       {selectionTeams.map((t) => {
                         const selected = selectedTeamId === t.id;
@@ -1950,36 +2025,6 @@ export default function LmsCompetitionDashboard() {
                         );
                       })}
                     </View>
-                    {remainingTeams.length === 0 ? (
-                      <Text style={styles.muted}>
-                        Every remaining pool team is unavailable this gameweek (excluded fixture or
-                        no game).
-                      </Text>
-                    ) : (
-                      <Pressable
-                        style={[
-                          styles.primaryBtn,
-                          (!selectedTeamId ||
-                            saving ||
-                            !playingTeamIds.has(selectedTeamId)) &&
-                            styles.primaryBtnDisabled,
-                        ]}
-                        disabled={
-                          !selectedTeamId ||
-                          saving ||
-                          !playingTeamIds.has(selectedTeamId)
-                        }
-                        onPress={() => void onSavePick()}
-                      >
-                        {saving ? (
-                          <ActivityIndicator color={theme.colors.white} />
-                        ) : (
-                          <Text style={styles.primaryBtnText}>
-                            {pick ? 'Update pick' : 'Lock in pick'}
-                          </Text>
-                        )}
-                      </Pressable>
-                    )}
                   </>
                 )}
 
