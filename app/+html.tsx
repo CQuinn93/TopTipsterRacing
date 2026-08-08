@@ -2,8 +2,10 @@ import { ScrollViewStyleReset } from 'expo-router/html';
 import type { PropsWithChildren } from 'react';
 
 /**
- * Root HTML for web.
- * Includes PWA / Add to Home Screen icon metadata.
+ * Root HTML for web (used when web.output is "static" / "server").
+ * With web.output "single" (current deploy), Expo ignores this file and
+ * scripts/inject-csp-meta.js injects the same PWA tags into dist HTML.
+ *
  * apple-mobile-web-app-capable is what gives the classic iOS Home Screen
  * shell (same as Safari content, but no bottom search bar / browser chrome).
  */

@@ -16,6 +16,8 @@ on:
       - 'assets/**'
       - 'scripts/inject-csp-meta.js'
       - 'scripts/spa-github-pages-fallback.js'
+      - 'scripts/write-web-manifest.js'
+      - 'public/**'
       - 'app.json'
       - 'package.json'
       - 'package-lock.json'
