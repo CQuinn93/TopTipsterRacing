@@ -510,6 +510,15 @@ export default function AdminScreen() {
       onTabChange={(key) => setTab(key as TabId)}
       loading={loading}
     >
+      <View style={{ flex: 1 }}>
+      {!isOwner ? (
+        <View style={styles.nonOwnerNote}>
+          <Text style={styles.nonOwnerNoteText}>
+            Competition create and join requests live in My Competitions. Use this screen to edit
+            selections when needed.
+          </Text>
+        </View>
+      ) : null}
       {tab === 'requests' ? (
         <ScrollView
           style={styles.scroll}
@@ -978,6 +987,7 @@ export default function AdminScreen() {
           )}
         </ScrollView>
       )}
+      </View>
     </AdminScreenLayout>
   );
 }
@@ -1315,6 +1325,24 @@ function createAdminStyles(t: Theme, adminAccent: string, adminAccentMuted: stri
     color: t.colors.textMuted,
     textAlign: 'center',
     marginBottom: t.spacing.sm,
+  },
+  nonOwnerNote: {
+    marginHorizontal: t.spacing.lg,
+    marginTop: t.spacing.md,
+    marginBottom: t.spacing.xs,
+    padding: t.spacing.md,
+    borderRadius: t.radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: t.colors.border,
+    backgroundColor: t.colors.surfaceElevated,
+    borderLeftWidth: 3,
+    borderLeftColor: adminAccent,
+  },
+  nonOwnerNoteText: {
+    fontFamily: t.fontFamily.regular,
+    fontSize: 13,
+    color: t.colors.textMuted,
+    lineHeight: 18,
   },
   modalHeader: {
     flexDirection: 'row',

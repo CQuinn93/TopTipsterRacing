@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -16,7 +16,9 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { AdminScreenLayout, useAdminAccent } from '@/components/AdminScreenLayout';
+import { getProfileRole, isOwnerRole } from '@/lib/adminSession';
 import {
   lmsAdminCreateCompetition,
   lmsAdminCreateRejoinCode,
@@ -43,6 +45,7 @@ export default function AdminLmsScreen() {
   const theme = useTheme();
   const admin = useAdminAccent();
   const insets = useSafeAreaInsets();
+  const { userId } = useAuth();
   const params = useLocalSearchParams<{ code?: string; returnTo?: string }>();
   /** Legacy RPC param — ignored server-side; admin is gated by the signed-in Admin role. */
   const adminCode = 'session';
@@ -56,6 +59,7 @@ export default function AdminLmsScreen() {
       ? returnToRaw
       : '/competition-hub?tab=admin';
 
+  const [isOwner, setIsOwner] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [comps, setComps] = useState<AdminComp[]>([]);
@@ -65,6 +69,25 @@ export default function AdminLmsScreen() {
   const [gameweeks, setGameweeks] = useState<LmsGameweek[]>([]);
   const [currentGwId, setCurrentGwId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!userId) {
+      setIsOwner(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const role = await getProfileRole(userId);
+        if (!cancelled) setIsOwner(isOwnerRole(role));
+      } catch {
+        if (!cancelled) setIsOwner(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const load = useCallback(async () => {
     try {
@@ -89,8 +112,9 @@ export default function AdminLmsScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (isOwner !== true) return;
       void load();
-    }, [load])
+    }, [isOwner, load])
   );
 
   const onCreate = async () => {
@@ -325,9 +349,68 @@ export default function AdminLmsScreen() {
           fontWeight: '700',
           color: theme.colors.text,
         },
+        blocked: {
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: theme.spacing.xl,
+          gap: theme.spacing.md,
+          backgroundColor: theme.colors.background,
+        },
+        blockedTitle: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 18,
+          fontWeight: '700',
+          color: theme.colors.text,
+          textAlign: 'center',
+        },
+        blockedBody: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: theme.colors.textMuted,
+          textAlign: 'center',
+          lineHeight: 20,
+          maxWidth: 320,
+        },
+        goBtn: {
+          marginTop: theme.spacing.sm,
+          paddingVertical: 12,
+          paddingHorizontal: 18,
+          borderRadius: theme.radius.md,
+          backgroundColor: admin.accent,
+        },
+        goBtnText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          fontWeight: '700',
+          color: theme.colors.black,
+        },
       }),
     [theme, admin.accent, admin.accentMuted, insets.bottom, insets.top]
   );
+
+  if (isOwner === null) {
+    return (
+      <View style={styles.blocked}>
+        <ActivityIndicator color={admin.accent} />
+      </View>
+    );
+  }
+
+  if (isOwner === false) {
+    return (
+      <View style={styles.blocked}>
+        <Text style={styles.blockedTitle}>LMS admin tools live inside Last Man Standing</Text>
+        <Text style={styles.blockedBody}>
+          Create competitions, approve joins, and manage your leagues from My Competitions in LMS —
+          not this hub screen.
+        </Text>
+        <Pressable style={styles.goBtn} onPress={() => router.replace('/(lms)' as any)}>
+          <Text style={styles.goBtnText}>Go to Last Man Standing</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <AdminScreenLayout

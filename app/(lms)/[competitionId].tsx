@@ -8,7 +8,6 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
-  TextInput,
   Platform,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -23,17 +22,16 @@ import { TeamColourChip } from '@/components/lms/TeamColourChip';
 import { TeamFormDots } from '@/components/lms/TeamFormDots';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import {
-  lmsAdminApproveJoin,
-  lmsAdminListPending,
-  lmsAdminRejectJoin,
   lmsAdminSetCompetitionTeam,
-  lmsAdminSetFixtureExcluded,
   lmsAdminDeleteCompetition,
+  lmsAdminListPendingForCompetition,
+  lmsAdminSubmitPickForUser,
+  lmsApproveJoinRequest,
+  lmsCanManageCompetition,
   lmsGetCompetition,
   lmsGetCompetitionCurrentGameweek,
   lmsGetMyParticipant,
   lmsGetMyPick,
-  lmsIsProfileAdmin,
   lmsListCompetitionGameweeks,
   lmsListCompetitionTeamIds,
   lmsListCompletedPicksForUser,
@@ -44,6 +42,7 @@ import {
   lmsListTeams,
   lmsListUsedTeamIds,
   lmsPickErrorMessage,
+  lmsRejectJoinRequest,
   lmsSubmitPick,
   lmsTeamFormFromFixtures,
   type LmsCompetition,
@@ -108,11 +107,10 @@ export default function LmsCompetitionDashboard() {
   const [leaderboard, setLeaderboard] = useState<LmsParticipant[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [canManage, setCanManage] = useState(false);
   const [poolTeamIds, setPoolTeamIds] = useState<string[]>([]);
-  const [adminGwId, setAdminGwId] = useState<string | null>(null);
   const [adminBusy, setAdminBusy] = useState(false);
-  const [adminSubTab, setAdminSubTab] = useState<'joins' | 'pool' | 'exclusions'>('joins');
+  const [adminSubTab, setAdminSubTab] = useState<'joins' | 'pool' | 'picks'>('joins');
   const [pendingJoins, setPendingJoins] = useState<
     {
       id: string;
@@ -123,7 +121,10 @@ export default function LmsCompetitionDashboard() {
     }[]
   >([]);
   const [joinBusyId, setJoinBusyId] = useState<string | null>(null);
-  const [excludeReasons, setExcludeReasons] = useState<Record<string, string>>({});
+  const [adminPickUserId, setAdminPickUserId] = useState<string | null>(null);
+  const [adminPickTeamId, setAdminPickTeamId] = useState<string | null>(null);
+  const [adminPickUsedIds, setAdminPickUsedIds] = useState<string[]>([]);
+  const [adminPickLoadingUser, setAdminPickLoadingUser] = useState(false);
   const [historyLoadingUserId, setHistoryLoadingUserId] = useState<string | null>(null);
 
   const competitionRef = useRef<LmsCompetition | null>(null);
@@ -143,8 +144,6 @@ export default function LmsCompetitionDashboard() {
   tabRef.current = tab;
   const filterGwIdRef = useRef(filterGwId);
   filterGwIdRef.current = filterGwId;
-  const adminGwIdRef = useRef(adminGwId);
-  adminGwIdRef.current = adminGwId;
   currentGwRef.current = currentGw;
   gameweeksRef.current = gameweeks;
 
@@ -372,7 +371,6 @@ export default function LmsCompetitionDashboard() {
           ensureFormFixtures(season, opts),
         ]);
         setGameweeks(gws);
-        setAdminGwId((prev) => prev ?? currentGwIdRef.current ?? gws[0]?.id ?? null);
         setFilterGwId((prev) => {
           if (prev) return prev;
           return currentGwIdRef.current ?? gws.find((g) => g.status !== 'complete')?.id ?? gws[0]?.id ?? null;
@@ -414,11 +412,11 @@ export default function LmsCompetitionDashboard() {
 
   const loadShell = useCallback(async () => {
     if (!competitionId || !userId) return;
-    const [comp, participant, parts, admin] = await Promise.all([
+    const [comp, participant, parts, manage] = await Promise.all([
       lmsGetCompetition(competitionId),
       lmsGetMyParticipant(competitionId, userId),
       lmsListParticipants(competitionId),
-      lmsIsProfileAdmin(userId),
+      lmsCanManageCompetition(competitionId),
     ]);
     competitionRef.current = comp;
     const gwInfo = await lmsGetCompetitionCurrentGameweek(competitionId, comp);
@@ -430,7 +428,7 @@ export default function LmsCompetitionDashboard() {
     setMe(participant);
     setCurrentGw(gw);
     setLeaderboard(parts);
-    setIsAdmin(admin);
+    setCanManage(!!manage.can_manage);
     currentGwIdRef.current = gw?.id ?? null;
 
     // Reset dependent slices when shell reloads (focus / pull-to-refresh).
@@ -448,8 +446,8 @@ export default function LmsCompetitionDashboard() {
   const loadPendingJoins = useCallback(async () => {
     if (!competitionId) return;
     try {
-      const rows = await lmsAdminListPending('session');
-      setPendingJoins(rows.filter((r) => r.competition_id === competitionId));
+      const rows = await lmsAdminListPendingForCompetition(competitionId);
+      setPendingJoins(rows);
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load join requests');
     }
@@ -468,13 +466,9 @@ export default function LmsCompetitionDashboard() {
       if (mode === 'manual') {
         lmsSessionInvalidateFormFixtures();
         if (currentGwIdRef.current) lmsSessionInvalidateFixtures(currentGwIdRef.current);
-        const gwToRefresh =
-          tabRef.current === 'admin'
-            ? adminGwIdRef.current
-            : tabRef.current === 'gameweeks'
-              ? filterGwIdRef.current
-              : null;
-        if (gwToRefresh) lmsSessionInvalidateFixtures(gwToRefresh);
+        if (tabRef.current === 'gameweeks' && filterGwIdRef.current) {
+          lmsSessionInvalidateFixtures(filterGwIdRef.current);
+        }
       }
 
       await loadShell();
@@ -482,7 +476,7 @@ export default function LmsCompetitionDashboard() {
       const tasks: Promise<unknown>[] = [];
       if (t === 'selection') tasks.push(loadSelectionSliceRef.current({ force: mode === 'manual' }));
       if (t === 'gameweeks' || t === 'admin') {
-        const gwToRefresh = t === 'admin' ? adminGwIdRef.current : filterGwIdRef.current;
+        const gwToRefresh = t === 'gameweeks' ? filterGwIdRef.current : currentGwIdRef.current;
         tasks.push(
           loadGameweeksSliceRef.current({ force: mode === 'manual' }).then(async () => {
             if (gwToRefresh) {
@@ -542,36 +536,21 @@ export default function LmsCompetitionDashboard() {
         Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load fixtures');
       });
     }
-    if (tab === 'admin' && isAdmin) {
+    if (tab === 'admin' && canManage) {
       void loadPendingJoinsRef.current();
     }
-  }, [tab, isAdmin]);
+  }, [tab, canManage]);
 
   useEffect(() => {
-    if (tab !== 'gameweeks' && tab !== 'admin') return;
-    const targetId = tab === 'admin' ? adminGwId : filterGwId;
-    if (!targetId) {
+    if (tab !== 'gameweeks') return;
+    if (!filterGwId) {
       syncSeasonFixturesFromCache();
       return;
     }
-    void ensureGameweekFixturesRef.current(targetId).catch((e) => {
+    void ensureGameweekFixturesRef.current(filterGwId).catch((e) => {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load gameweek fixtures');
     });
-  }, [tab, filterGwId, adminGwId, syncSeasonFixturesFromCache]);
-
-  useEffect(() => {
-    setExcludeReasons((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      for (const f of seasonFixtures) {
-        if (f.excluded_from_lms && f.excluded_reason && next[f.id] === undefined) {
-          next[f.id] = f.excluded_reason;
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [seasonFixtures]);
+  }, [tab, filterGwId, syncSeasonFixturesFromCache]);
 
   useEffect(() => {
     if (!expandedUserId) return;
@@ -579,6 +558,12 @@ export default function LmsCompetitionDashboard() {
       // Non-fatal: drawer shows empty until retry.
     });
   }, [expandedUserId, loadHistoryForUser]);
+
+  useEffect(() => {
+    if (!canManage && tab === 'admin') {
+      setTab('leaderboard');
+    }
+  }, [canManage, tab]);
 
   const formByTeamId = useMemo(() => {
     const map = new Map<string, ReturnType<typeof lmsTeamFormFromFixtures>>();
@@ -706,13 +691,6 @@ export default function LmsCompetitionDashboard() {
     [competitionTeams]
   );
 
-  const adminFixtures = useMemo(() => {
-    if (!adminGwId) return [];
-    return seasonFixtures
-      .filter((f) => f.gameweek_id === adminGwId)
-      .sort((a, b) => new Date(a.kickoff_at).getTime() - new Date(b.kickoff_at).getTime());
-  }, [seasonFixtures, adminGwId]);
-
   const allTeamsAlphabetical = useMemo(
     () =>
       [...teams].sort((a, b) =>
@@ -724,6 +702,26 @@ export default function LmsCompetitionDashboard() {
   );
 
   const usedTeamIdSet = useMemo(() => new Set(usedIds), [usedIds]);
+
+  const adminActiveParticipants = useMemo(
+    () => leaderboard.filter((p) => p.status === 'active'),
+    [leaderboard]
+  );
+
+  const adminPickTeams = useMemo(() => {
+    const used = new Set(adminPickUsedIds);
+    if (adminPickUserId) {
+      const existing = gwPicks.find((p) => p.user_id === adminPickUserId);
+      if (existing?.team_id) used.delete(existing.team_id);
+    }
+    return competitionTeams
+      .filter((t) => !used.has(t.id) && playingTeamIds.has(t.id))
+      .sort((a, b) =>
+        (a.short_name || a.name).localeCompare(b.short_name || b.name, undefined, {
+          sensitivity: 'base',
+        })
+      );
+  }, [competitionTeams, adminPickUsedIds, playingTeamIds, adminPickUserId, gwPicks]);
 
   const picksRevealed = useMemo(() => {
     if (!pickGwFixtures.length) return false;
@@ -862,7 +860,7 @@ export default function LmsCompetitionDashboard() {
   const onApproveJoin = async (requestId: string) => {
     setJoinBusyId(requestId);
     try {
-      const res = await lmsAdminApproveJoin('session', requestId);
+      const res = await lmsApproveJoinRequest(requestId);
       if (!res.success) {
         Alert.alert(
           'Failed',
@@ -884,13 +882,59 @@ export default function LmsCompetitionDashboard() {
   const onRejectJoin = async (requestId: string) => {
     setJoinBusyId(requestId);
     try {
-      const res = await lmsAdminRejectJoin('session', requestId);
+      const res = await lmsRejectJoinRequest(requestId);
       if (!res.success) Alert.alert('Failed', res.error ?? 'Reject failed');
       await loadPendingJoins();
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Reject failed');
     } finally {
       setJoinBusyId(null);
+    }
+  };
+
+  const onSelectAdminPickUser = async (targetUserId: string) => {
+    setAdminPickUserId(targetUserId);
+    const existing = gwPicks.find((p) => p.user_id === targetUserId);
+    setAdminPickTeamId(existing?.team_id ?? null);
+    setAdminPickLoadingUser(true);
+    try {
+      const used = await lmsListUsedTeamIds(competitionId, targetUserId);
+      setAdminPickUsedIds(used);
+    } catch (e) {
+      setAdminPickUsedIds([]);
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load user picks');
+    } finally {
+      setAdminPickLoadingUser(false);
+    }
+  };
+
+  const onAdminSubmitPick = async () => {
+    if (!adminPickUserId || !adminPickTeamId || !currentGw) return;
+    if (deadlinePassed) {
+      Alert.alert('Deadline passed', 'Picks are closed for this gameweek.');
+      return;
+    }
+    setAdminBusy(true);
+    try {
+      const res = await lmsAdminSubmitPickForUser(
+        competitionId,
+        adminPickUserId,
+        currentGw.id,
+        adminPickTeamId
+      );
+      if (!res.success) {
+        Alert.alert('Pick not saved', lmsPickErrorMessage(res.error) || res.error || 'Unknown error');
+        return;
+      }
+      Alert.alert('Saved', 'Pick submitted for that player.');
+      setAdminPickTeamId(null);
+      const used = await lmsListUsedTeamIds(competitionId, adminPickUserId);
+      setAdminPickUsedIds(used);
+      await loadLeaderboardExtrasRef.current(currentGw, { force: true });
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not submit pick');
+    } finally {
+      setAdminBusy(false);
     }
   };
 
@@ -921,82 +965,6 @@ export default function LmsCompetitionDashboard() {
       return;
     }
     void apply();
-  };
-
-  const applyFixtureExclude = async (fixture: LmsFixture, excluded: boolean, reason?: string) => {
-    setAdminBusy(true);
-    try {
-      const res = await lmsAdminSetFixtureExcluded(
-        fixture.id,
-        excluded,
-        excluded ? reason ?? excludeReasons[fixture.id] ?? null : null
-      );
-      if (!res.success) {
-          Alert.alert('Could not update fixture', res.error ?? 'Unknown error');
-          return;
-        }
-        lmsSessionInvalidateFixtures(fixture.gameweek_id);
-        await ensureGameweekFixtures(fixture.gameweek_id, { force: true });
-        if (pickGwFixtures.some((f) => f.id === fixture.id) || currentGwIdRef.current === fixture.gameweek_id) {
-          const next = lmsSessionGetFixtures(fixture.gameweek_id) ?? [];
-          setPickGwFixtures(next);
-        }
-      } catch (e) {
-        Alert.alert('Error', e instanceof Error ? e.message : 'Could not update fixture');
-      } finally {
-        setAdminBusy(false);
-      }
-    };
-
-  const onToggleFixtureExcluded = (fixture: LmsFixture) => {
-    if (fixture.excluded_from_lms) {
-      confirmDestructive(
-        'Restore fixture?',
-        'Players will be able to pick either side for this gameweek again.',
-        'Restore',
-        () => void applyFixtureExclude(fixture, false)
-      );
-      return;
-    }
-
-    const reason =
-      Platform.OS === 'ios'
-        ? excludeReasons[fixture.id] ?? fixture.excluded_reason ?? ''
-        : (excludeReasons[fixture.id] ?? '').trim();
-
-    const runExclude = (finalReason: string) => {
-      confirmDestructive(
-        'Exclude fixture?',
-        'Neither side can be picked in any LMS competition for this gameweek. Pending picks on these teams will be cleared.',
-        'Exclude',
-        () => void applyFixtureExclude(fixture, true, finalReason)
-      );
-    };
-
-    if (Platform.OS === 'ios') {
-      Alert.prompt(
-        'Exclude fixture',
-        'Optional reason (shown on Selection), e.g. Postponed',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Continue',
-            onPress: (value?: string) => {
-              const next = (value ?? '').trim();
-              if (next) {
-                setExcludeReasons((prev) => ({ ...prev, [fixture.id]: next }));
-              }
-              runExclude(next);
-            },
-          },
-        ],
-        'plain-text',
-        reason
-      );
-      return;
-    }
-
-    runExclude(reason);
   };
 
   const onDeleteCompetition = () => {
@@ -1141,7 +1109,7 @@ export default function LmsCompetitionDashboard() {
         },
         tabText: {
           fontFamily: theme.fontFamily.baiSemiBold,
-          fontSize: isAdmin ? 12 : 13,
+          fontSize: canManage ? 12 : 13,
           color: theme.colors.textMuted,
         },
         tabTextActive: {
@@ -1568,18 +1536,6 @@ export default function LmsCompetitionDashboard() {
         adminToggleTextOn: {
           color: theme.colors.accent,
         },
-        adminReasonInput: {
-          marginTop: 6,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.colors.border,
-          borderRadius: theme.radius.sm,
-          paddingHorizontal: 10,
-          paddingVertical: 8,
-          fontFamily: theme.fontFamily.bai,
-          fontSize: 13,
-          color: theme.colors.text,
-          backgroundColor: theme.colors.surface,
-        },
         adminSubTabs: {
           flexDirection: 'row',
           flexWrap: 'wrap',
@@ -1674,7 +1630,7 @@ export default function LmsCompetitionDashboard() {
           textAlign: 'right',
         },
       }),
-    [theme, insets.top, insets.bottom, isAdmin]
+    [theme, insets.top, insets.bottom, canManage]
   );
 
   const renderFixtureRow = (f: LmsFixture, i: number, list: LmsFixture[]) => {
@@ -1834,7 +1790,7 @@ export default function LmsCompetitionDashboard() {
                 { key: 'gameweeks' as const, label: 'Gameweeks' },
                 { key: 'selection' as const, label: 'Selection' },
                 { key: 'leaderboard' as const, label: 'Leaderboard' },
-                ...(isAdmin ? [{ key: 'admin' as const, label: 'Admin' }] : []),
+                ...(canManage ? [{ key: 'admin' as const, label: 'Admin' }] : []),
               ] as { key: TabKey; label: string }[]
             ).map((t) => {
               const active = tab === t.key;
@@ -2332,14 +2288,14 @@ export default function LmsCompetitionDashboard() {
               </>
             ) : null}
 
-            {tab === 'admin' && isAdmin ? (
+            {tab === 'admin' && canManage ? (
               <>
                 <View style={styles.adminSubTabs}>
                   {(
                     [
                       { key: 'joins' as const, label: 'Join requests' },
                       { key: 'pool' as const, label: 'Team pool' },
-                      { key: 'exclusions' as const, label: 'Fixture exclusions' },
+                      { key: 'picks' as const, label: 'Pick for user' },
                     ] as const
                   ).map((t) => {
                     const active = adminSubTab === t.key;
@@ -2464,91 +2420,138 @@ export default function LmsCompetitionDashboard() {
                 ) : (
                   <>
                     <Text style={styles.sectionIntro}>
-                      Exclude postponed or unavailable fixtures from LMS picks. This applies to
-                      every competition using the shared calendar.
+                      Submit a gameweek pick on behalf of an active player before the deadline.
                     </Text>
-                    <Text style={styles.poolTitle}>Fixture exclusions</Text>
-                    <ScrollView
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      style={styles.filterScroll}
-                      contentContainerStyle={styles.filterRow}
-                      nestedScrollEnabled
-                    >
-                      {gameweeks.map((g) => {
-                        const active = adminGwId === g.id;
-                        return (
-                          <Pressable
-                            key={g.id}
-                            style={[styles.filterChip, active && styles.filterChipActive]}
-                            onPress={() => setAdminGwId(g.id)}
-                          >
-                            <Text
-                              style={[
-                                styles.filterChipText,
-                                active && styles.filterChipTextActive,
-                              ]}
-                            >
-                              GW{g.number}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </ScrollView>
-
-                    {adminFixtures.length === 0 ? (
-                      <Text style={styles.muted}>No fixtures for this gameweek.</Text>
+                    {!currentGw ? (
+                      <Text style={styles.muted}>No open gameweek for picks yet.</Text>
+                    ) : deadlinePassed ? (
+                      <Text style={styles.muted}>
+                        Picks are closed for GW{currentGw.number}. Admin picks unlock again next
+                        gameweek before the deadline.
+                      </Text>
                     ) : (
-                      adminFixtures.map((f) => {
-                        const excluded = !!f.excluded_from_lms;
-                        const home = f.home_team?.short_name ?? f.home_team?.name ?? 'Home';
-                        const away = f.away_team?.short_name ?? f.away_team?.name ?? 'Away';
-                        return (
-                          <View key={f.id} style={styles.adminRow}>
-                            <View style={styles.adminRowBody}>
-                              <Text style={styles.adminRowTitle}>
-                                {home} vs {away}
+                      <>
+                        <Text style={styles.poolTitle}>Player · GW{currentGw.number}</Text>
+                        {adminActiveParticipants.length === 0 ? (
+                          <Text style={styles.muted}>No active players to pick for.</Text>
+                        ) : (
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            style={styles.filterScroll}
+                            contentContainerStyle={styles.filterRow}
+                            nestedScrollEnabled
+                          >
+                            {adminActiveParticipants.map((p) => {
+                              const active = adminPickUserId === p.user_id;
+                              return (
+                                <Pressable
+                                  key={p.user_id}
+                                  style={[styles.filterChip, active && styles.filterChipActive]}
+                                  onPress={() => void onSelectAdminPickUser(p.user_id)}
+                                  disabled={adminBusy || adminPickLoadingUser}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.filterChipText,
+                                      active && styles.filterChipTextActive,
+                                    ]}
+                                  >
+                                    {p.username || p.user_id.slice(0, 8)}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                          </ScrollView>
+                        )}
+
+                        {adminPickLoadingUser ? (
+                          <ActivityIndicator color={theme.colors.accent} />
+                        ) : adminPickUserId ? (
+                          <>
+                            <Text style={styles.poolTitle}>Team</Text>
+                            {adminPickTeams.length === 0 ? (
+                              <Text style={styles.muted}>
+                                No unused pool teams playing this gameweek for that player.
                               </Text>
-                              <Text style={styles.adminRowMeta}>
-                                {formatKickoff(f.kickoff_at)}
-                                {excluded
-                                  ? ` · ${f.excluded_reason?.trim() || 'Excluded'}`
-                                  : ''}
-                              </Text>
-                              {Platform.OS !== 'ios' && !excluded ? (
-                                <TextInput
-                                  style={styles.adminReasonInput}
-                                  placeholder="Reason (optional)"
-                                  placeholderTextColor={theme.colors.textMuted}
-                                  value={excludeReasons[f.id] ?? ''}
-                                  onChangeText={(text) =>
-                                    setExcludeReasons((prev) => ({ ...prev, [f.id]: text }))
-                                  }
-                                />
-                              ) : null}
-                            </View>
-                            <Pressable
-                              style={[
-                                styles.adminToggle,
-                                excluded ? styles.adminToggleOn : styles.adminToggleOff,
-                              ]}
-                              disabled={adminBusy}
-                              onPress={() => onToggleFixtureExcluded(f)}
-                              accessibilityRole="switch"
-                              accessibilityState={{ checked: excluded, disabled: adminBusy }}
-                            >
-                              <Text
-                                style={[
-                                  styles.adminToggleText,
-                                  excluded && styles.adminToggleTextOn,
-                                ]}
-                              >
-                                {excluded ? 'Restore' : 'Exclude'}
-                              </Text>
-                            </Pressable>
-                          </View>
-                        );
-                      })
+                            ) : (
+                              <>
+                                <View style={styles.teamGrid}>
+                                  {adminPickTeams.map((t) => {
+                                    const selected = adminPickTeamId === t.id;
+                                    const opponent = opponentByTeamId.get(t.id);
+                                    const opponentLabel =
+                                      opponent?.short_name || opponent?.name || null;
+                                    return (
+                                      <Pressable
+                                        key={t.id}
+                                        style={[
+                                          styles.teamTile,
+                                          selected && styles.teamTileSelected,
+                                        ]}
+                                        onPress={() => setAdminPickTeamId(t.id)}
+                                        disabled={adminBusy}
+                                      >
+                                        <TeamColourChip
+                                          shortName={t.short_name}
+                                          name={t.name}
+                                          slug={t.slug}
+                                          size={28}
+                                        />
+                                        <View style={styles.teamTileTextCol}>
+                                          <Text
+                                            style={[
+                                              styles.teamTileName,
+                                              selected && styles.teamTileNameSelected,
+                                            ]}
+                                            numberOfLines={2}
+                                          >
+                                            {lmsDisplayTeamName(t.name)}
+                                          </Text>
+                                          {opponentLabel ? (
+                                            <Text
+                                              style={[
+                                                styles.teamTileVs,
+                                                selected && styles.teamTileVsSelected,
+                                              ]}
+                                              numberOfLines={1}
+                                            >
+                                              vs {opponentLabel}
+                                            </Text>
+                                          ) : null}
+                                        </View>
+                                        {selected ? (
+                                          <Ionicons
+                                            name="checkmark-circle"
+                                            size={18}
+                                            color={theme.colors.accent}
+                                          />
+                                        ) : null}
+                                      </Pressable>
+                                    );
+                                  })}
+                                </View>
+                                <Pressable
+                                  style={[
+                                    styles.primaryBtn,
+                                    (!adminPickTeamId || adminBusy) && styles.primaryBtnDisabled,
+                                  ]}
+                                  disabled={!adminPickTeamId || adminBusy}
+                                  onPress={() => void onAdminSubmitPick()}
+                                >
+                                  {adminBusy ? (
+                                    <ActivityIndicator color={theme.colors.white} />
+                                  ) : (
+                                    <Text style={styles.primaryBtnText}>Submit pick</Text>
+                                  )}
+                                </Pressable>
+                              </>
+                            )}
+                          </>
+                        ) : adminActiveParticipants.length > 0 ? (
+                          <Text style={styles.muted}>Select a player above.</Text>
+                        ) : null}
+                      </>
                     )}
                   </>
                 )}

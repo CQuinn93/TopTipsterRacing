@@ -9,6 +9,7 @@ import {
   Alert,
   TextInput,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +22,11 @@ import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
 import { getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
 import { useNarrowWebCompact, cfs } from '@/lib/narrowWebTypography';
+import { getProfileRole, isOwnerRole, isStaffRole } from '@/lib/adminSession';
+import {
+  racingAdminListCompetitions,
+  racingCreateCompetition,
+} from '@/lib/racingAdminApi';
 
 type UserCompetition = {
   competition_id: string;
@@ -30,6 +36,7 @@ type UserCompetition = {
   festival_end_date: string;
   display_name: string;
   position: number | null; // 1-based rank in that competition, null if no scores yet
+  created_by_user_id: string | null;
 };
 
 type PendingCompetition = {
@@ -57,6 +64,16 @@ export default function MyCompetitionsScreen() {
   const [joinProfileUsername, setJoinProfileUsername] = useState<string | null>(null);
   const [joinLoading, setJoinLoading] = useState(false);
 
+  const [isStaff, setIsStaff] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
+  const [creatorByCompId, setCreatorByCompId] = useState<Record<string, string | null>>({});
+  const [createExpanded, setCreateExpanded] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createStartDate, setCreateStartDate] = useState('');
+  const [createEndDate, setCreateEndDate] = useState('');
+  const [createAccessCode, setCreateAccessCode] = useState('');
+  const [createLoading, setCreateLoading] = useState(false);
+
   const displayNameToUse = joinProfileUsername?.length ? joinProfileUsername : joinDisplayName.trim();
 
   useEffect(() => {
@@ -70,6 +87,31 @@ export default function MyCompetitionsScreen() {
         setJoinProfileUsername(data?.username ?? null);
         if (data?.username) setJoinDisplayName(data.username);
       });
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) {
+      setIsStaff(false);
+      setIsOwner(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const role = await getProfileRole(userId);
+        if (cancelled) return;
+        setIsStaff(isStaffRole(role));
+        setIsOwner(isOwnerRole(role));
+      } catch {
+        if (!cancelled) {
+          setIsStaff(false);
+          setIsOwner(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [userId]);
 
   useEffect(() => {
@@ -92,7 +134,8 @@ export default function MyCompetitionsScreen() {
     const prevPendingIds = new Set(pendingListRef.current.map((c) => c.competition_id));
     setRefreshing(true);
     try {
-      const [participantsRes, pendingRes] = await Promise.all([
+      const staff = isStaff;
+      const [participantsRes, pendingRes, adminList] = await Promise.all([
         supabase
           .from('competition_participants')
           .select('competition_id, display_name')
@@ -102,8 +145,21 @@ export default function MyCompetitionsScreen() {
           .select('competition_id')
           .eq('user_id', userId)
           .eq('status', 'pending'),
+        staff
+          ? racingAdminListCompetitions().catch(() => [])
+          : Promise.resolve([] as Awaited<ReturnType<typeof racingAdminListCompetitions>>),
       ]);
       if (participantsRes.error) throw participantsRes.error;
+
+      let creatorMap: Record<string, string | null> = {};
+      if (staff && Array.isArray(adminList)) {
+        for (const row of adminList) {
+          creatorMap[row.id] = row.created_by_user_id ?? null;
+        }
+        setCreatorByCompId(creatorMap);
+      } else {
+        setCreatorByCompId({});
+      }
 
       if (!participantsRes.data?.length) {
         setList([]);
@@ -115,12 +171,13 @@ export default function MyCompetitionsScreen() {
         );
         const { data: comps, error: compsError } = await supabase
           .from('competitions')
-          .select('id, name, festival_start_date, festival_end_date')
+          .select('id, name, festival_start_date, festival_end_date, created_by_user_id')
           .in('id', compIds);
         if (compsError) throw compsError;
         const joined: UserCompetition[] = (comps ?? []).map((c) => {
             const displayStatus = getCompetitionDisplayStatus(c.festival_start_date, c.festival_end_date);
             const statusLabel = displayStatus === 'upcoming' ? 'Upcoming' : displayStatus === 'live' ? 'Live' : 'Complete';
+            const fromRow = (c as { created_by_user_id?: string | null }).created_by_user_id ?? null;
             return {
               competition_id: c.id,
               name: c.name,
@@ -129,6 +186,7 @@ export default function MyCompetitionsScreen() {
               festival_end_date: c.festival_end_date,
               display_name: displayNameByComp.get(c.id) ?? '',
               position: null,
+              created_by_user_id: fromRow ?? creatorMap[c.id] ?? null,
             };
           });
 
@@ -194,7 +252,7 @@ export default function MyCompetitionsScreen() {
 
   useEffect(() => {
     load();
-  }, [userId]);
+  }, [userId, isStaff]);
 
   useEffect(() => {
     if (newlyApprovedNames.length === 0 || !userId) return;
@@ -248,6 +306,55 @@ export default function MyCompetitionsScreen() {
     } finally {
       setJoinLoading(false);
     }
+  };
+
+  const handleCreateSubmit = async () => {
+    const name = createName.trim();
+    if (!name) {
+      Alert.alert('Error', 'Please enter a competition name.');
+      return;
+    }
+    const start = createStartDate.trim();
+    const end = createEndDate.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+      Alert.alert('Error', 'Enter start and end dates as YYYY-MM-DD.');
+      return;
+    }
+    if (end < start) {
+      Alert.alert('Error', 'End date must be on or after the start date.');
+      return;
+    }
+    const code = createAccessCode.trim().toUpperCase().slice(0, 6) || null;
+    setCreateLoading(true);
+    try {
+      const result = await racingCreateCompetition({
+        name,
+        festivalStartDate: start,
+        festivalEndDate: end,
+        accessCode: code,
+      });
+      if (!result.success) {
+        Alert.alert('Error', result.error ?? 'Could not create competition');
+        return;
+      }
+      Alert.alert('Created', code ? `Competition created. Access code: ${code}` : 'Competition created.');
+      setCreateName('');
+      setCreateStartDate('');
+      setCreateEndDate('');
+      setCreateAccessCode('');
+      setCreateExpanded(false);
+      await load();
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not create competition');
+    } finally {
+      setCreateLoading(false);
+    }
+  };
+
+  const isCreatedByMe = (c: UserCompetition) => {
+    const fromRow = c.created_by_user_id;
+    const fromMap = creatorByCompId[c.competition_id];
+    return (fromRow ?? fromMap) === userId;
   };
 
   const styles = useMemo(() => {
@@ -392,6 +499,30 @@ export default function MyCompetitionsScreen() {
         color: theme.colors.textMuted,
         marginTop: theme.spacing.sm,
       },
+      adminBadge: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: cfs(11, compact),
+        fontWeight: '700',
+        color: theme.colors.accent,
+        borderWidth: 1,
+        borderColor: theme.colors.accent,
+        borderRadius: theme.radius.sm,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        overflow: 'hidden',
+      },
+      titleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing.sm,
+        flexWrap: 'wrap',
+      },
+      createLabel: {
+        fontFamily: theme.fontFamily.regular,
+        fontSize: cfs(12, compact),
+        color: theme.colors.textSecondary,
+        marginBottom: theme.spacing.xs,
+      },
       compTabsRow: {
         flexDirection: 'row',
         width: '100%',
@@ -427,7 +558,127 @@ export default function MyCompetitionsScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} tintColor={theme.colors.accent} />}
     >
       <Text style={styles.title}>My Competitions</Text>
-      <Text style={styles.subtitle}>Tap a competition to view the leaderboard.</Text>
+      <Text style={styles.subtitle}>Tap a competition to open its hub.</Text>
+
+      {isStaff ? (
+        <View style={styles.joinSection}>
+          <TouchableOpacity
+            style={styles.joinHeader}
+            onPress={() => setCreateExpanded((e) => !e)}
+            activeOpacity={0.75}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: createExpanded }}
+          >
+            <Text style={styles.joinHeaderText}>Create competition</Text>
+            <Ionicons
+              name={createExpanded ? 'chevron-up' : 'chevron-down'}
+              size={22}
+              color={theme.colors.textSecondary}
+            />
+          </TouchableOpacity>
+          {createExpanded && (
+            <View style={styles.joinPanel}>
+              <Text style={styles.joinHint}>
+                Name and festival dates are required. Access code is optional (up to 6 characters).
+                {isOwner ? ' As Owner you can manage any competition.' : ' You will admin competitions you create.'}
+              </Text>
+              <Text style={styles.createLabel}>Competition name</Text>
+              <TextInput
+                style={styles.joinInput}
+                placeholder="e.g. Pat Nutter 2027"
+                placeholderTextColor={theme.colors.textMuted}
+                value={createName}
+                onChangeText={setCreateName}
+                editable={!createLoading}
+              />
+              <Text style={styles.createLabel}>Start date (YYYY-MM-DD)</Text>
+              {Platform.OS === 'web' ? (
+                <input
+                  type="date"
+                  value={createStartDate}
+                  onChange={(e) => setCreateStartDate(e.target.value)}
+                  disabled={createLoading}
+                  style={{
+                    fontFamily: theme.fontFamily.input,
+                    fontSize: 16,
+                    color: theme.colors.text,
+                    backgroundColor: theme.colors.background,
+                    border: `1px solid ${theme.colors.border}`,
+                    borderRadius: 8,
+                    padding: 12,
+                    width: '100%',
+                    marginBottom: 8,
+                  }}
+                />
+              ) : (
+                <TextInput
+                  style={styles.joinInput}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={theme.colors.textMuted}
+                  value={createStartDate}
+                  onChangeText={setCreateStartDate}
+                  autoCapitalize="none"
+                  editable={!createLoading}
+                />
+              )}
+              <Text style={styles.createLabel}>End date (YYYY-MM-DD)</Text>
+              {Platform.OS === 'web' ? (
+                <input
+                  type="date"
+                  value={createEndDate}
+                  onChange={(e) => setCreateEndDate(e.target.value)}
+                  disabled={createLoading}
+                  min={createStartDate || undefined}
+                  style={{
+                    fontFamily: theme.fontFamily.input,
+                    fontSize: 16,
+                    color: theme.colors.text,
+                    backgroundColor: theme.colors.background,
+                    border: `1px solid ${theme.colors.border}`,
+                    borderRadius: 8,
+                    padding: 12,
+                    width: '100%',
+                    marginBottom: 8,
+                  }}
+                />
+              ) : (
+                <TextInput
+                  style={styles.joinInput}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={theme.colors.textMuted}
+                  value={createEndDate}
+                  onChangeText={setCreateEndDate}
+                  autoCapitalize="none"
+                  editable={!createLoading}
+                />
+              )}
+              <Text style={styles.createLabel}>Access code (optional)</Text>
+              <TextInput
+                style={styles.joinInput}
+                placeholder="e.g. PN2027"
+                placeholderTextColor={theme.colors.textMuted}
+                value={createAccessCode}
+                onChangeText={setCreateAccessCode}
+                maxLength={6}
+                autoCapitalize="characters"
+                editable={!createLoading}
+              />
+              <TouchableOpacity
+                style={[styles.joinButton, createLoading && styles.joinButtonDisabled]}
+                onPress={handleCreateSubmit}
+                disabled={createLoading}
+                activeOpacity={0.85}
+              >
+                {createLoading ? (
+                  <ActivityIndicator color={theme.colors.black} />
+                ) : (
+                  <Text style={styles.joinButtonText}>Create competition</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      ) : null}
 
       <View style={styles.joinSection}>
         <TouchableOpacity
@@ -533,10 +784,18 @@ export default function MyCompetitionsScreen() {
             <TouchableOpacity
               key={c.competition_id}
               style={styles.card}
-              onPress={() => router.push({ pathname: '/(app)/leaderboard', params: { competitionId: c.competition_id } })}
+              onPress={() =>
+                router.push({
+                  pathname: '/(app)/competition/[competitionId]',
+                  params: { competitionId: c.competition_id },
+                })
+              }
               activeOpacity={0.8}
             >
-              <Text style={styles.cardTitle}>{c.name}</Text>
+              <View style={styles.titleRow}>
+                <Text style={styles.cardTitle}>{c.name}</Text>
+                {isCreatedByMe(c) ? <Text style={styles.adminBadge}>Admin</Text> : null}
+              </View>
               <Text style={styles.cardMeta}>
                 {new Date(c.festival_start_date).toLocaleDateString()} – {new Date(c.festival_end_date).toLocaleDateString()}
               </Text>
@@ -546,7 +805,7 @@ export default function MyCompetitionsScreen() {
                   <Text style={styles.cardPosition}>Your position: {c.position}{c.position === 1 ? 'st' : c.position === 2 ? 'nd' : c.position === 3 ? 'rd' : 'th'}</Text>
                 )}
               </View>
-              <Text style={styles.tapHint}>Tap to open leaderboard</Text>
+              <Text style={styles.tapHint}>Tap to open competition</Text>
             </TouchableOpacity>
           ))
       )}

@@ -49,6 +49,7 @@ function AppTabs() {
         options={{ title: 'My Competitions', tabBarLabel: 'Competitions' }}
       />
       <Tabs.Screen name="leaderboard" options={{ href: null }} />
+      <Tabs.Screen name="competition/[competitionId]" options={{ href: null, title: 'Competition' }} />
       <Tabs.Screen name="participant-selections" options={{ href: null }} />
       <Tabs.Screen name="rules" options={{ title: 'Rules', href: null }} />
       <Tabs.Screen name="points" options={{ title: 'Points system', href: null }} />

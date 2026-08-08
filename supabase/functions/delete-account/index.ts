@@ -2,7 +2,7 @@
 // Deletes all user data and the auth user. Call with Authorization: Bearer <access_token>.
 // Required for App Store Guideline 5.1.1 (account deletion within the app).
 
-import "jsr:@supabase/functions-js/edge_runtime.d.ts";
+import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {

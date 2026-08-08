@@ -195,8 +195,8 @@ export default function CompetitionHubScreen() {
   const enterRise = useRef(new Animated.Value(12)).current;
 
   useEffect(() => {
-    if (!isAdmin && tab === 'admin') setTab('football');
-  }, [isAdmin, tab]);
+    if (!isOwner && tab === 'admin') setTab('football');
+  }, [isOwner, tab]);
 
   useEffect(() => {
     const next = String(params.tab ?? '').trim();
@@ -269,15 +269,16 @@ export default function CompetitionHubScreen() {
   }, [userId, signOut]);
 
   const openLmsAdmin = () => {
+    // Day-to-day LMS admin lives in-mode; Owners use the owner console.
     router.push({
-      pathname: '/(auth)/admin-lms',
+      pathname: '/(auth)/owner',
       params: { returnTo: '/competition-hub?tab=admin' },
     } as any);
   };
 
   const openAdminPanel = () => {
     router.push({
-      pathname: '/(auth)/admin',
+      pathname: '/(auth)/owner',
       params: { returnTo: '/competition-hub?tab=admin' },
     } as any);
   };
@@ -507,27 +508,11 @@ export default function CompetitionHubScreen() {
         : tab === 'admin'
           ? [
               {
-                key: 'racing-admin',
-                title: 'Racing',
-                status: 'Open',
-                onPress: openAdminPanel,
+                key: 'owner-console',
+                title: 'Owner console',
+                status: 'Users · competitions · exclusions',
+                onPress: openOwnerPanel,
               },
-              {
-                key: 'football-admin',
-                title: 'Football',
-                status: 'Open',
-                onPress: openLmsAdmin,
-              },
-              ...(isOwner
-                ? [
-                    {
-                      key: 'owner-console',
-                      title: 'Owner',
-                      status: 'Open',
-                      onPress: openOwnerPanel,
-                    },
-                  ]
-                : []),
             ]
           : [];
 
@@ -806,7 +791,7 @@ export default function CompetitionHubScreen() {
               {([
                 { key: 'football' as const, label: 'Football' },
                 { key: 'racing' as const, label: 'Racing' },
-                ...(isAdmin ? [{ key: 'admin' as const, label: 'Admin' }] : []),
+                ...(isOwner ? [{ key: 'admin' as const, label: 'Admin' }] : []),
                 { key: 'account' as const, label: 'Account' },
               ]).map((item) => {
                 const active = tab === item.key;
@@ -852,9 +837,13 @@ export default function CompetitionHubScreen() {
       >
         <View style={styles.greetingInner}>
           <Text style={styles.hello}>Hi{displayName ? `, ${displayName}` : ''}</Text>
-          {isAdmin ? (
+          {isOwner ? (
             <View style={styles.adminBadge}>
-              <Text style={styles.adminBadgeText}>{isOwner ? 'Owner' : 'Admin'}</Text>
+              <Text style={styles.adminBadgeText}>Owner</Text>
+            </View>
+          ) : isAdmin ? (
+            <View style={styles.adminBadge}>
+              <Text style={styles.adminBadgeText}>Admin</Text>
             </View>
           ) : null}
         </View>

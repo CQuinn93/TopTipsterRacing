@@ -13,6 +13,9 @@ export type LmsCompetitionRow = {
   rollover_count: number;
   start_gameweek_id?: string | null;
   start_gameweek_number?: number | null;
+  created_by_user_id?: string | null;
+  is_creator?: boolean;
+  can_manage?: boolean;
 };
 
 export type LmsPendingJoin = {
@@ -730,6 +733,8 @@ export type LmsCompetitionHomeSummary = LmsCompetitionRow & {
   currentGameweekNumber: number | null;
   pickTeam: LmsTeam | null;
   pickAvailable: boolean;
+  isCreator: boolean;
+  canManage: boolean;
 };
 
 export type LmsHomePayload = {
@@ -773,11 +778,14 @@ export async function lmsGetHome(season = '2026/27'): Promise<LmsHomePayload> {
     rollover_count: c.rollover_count,
     start_gameweek_id: c.start_gameweek_id,
     start_gameweek_number: c.start_gameweek_number,
+    created_by_user_id: (c as { created_by_user_id?: string | null }).created_by_user_id ?? null,
     aliveCount: Number(c.alive_count ?? 0),
     totalCount: Number(c.total_count ?? 0),
     currentGameweekNumber: c.current_gameweek_number ?? null,
     pickTeam: c.pick_team ?? null,
     pickAvailable: !!c.pick_available,
+    isCreator: !!(c as { is_creator?: boolean }).is_creator,
+    canManage: !!(c as { can_manage?: boolean }).can_manage,
   }));
 
   return {
@@ -918,6 +926,84 @@ export async function lmsAdminListPending(adminCode: string) {
     code_type: string;
     created_at: string;
   }>(data);
+}
+
+export type LmsJoinRequestRow = {
+  id: string;
+  competition_id: string;
+  competition_name?: string;
+  user_id: string;
+  username: string | null;
+  code_type: string;
+  created_at: string;
+};
+
+export async function lmsAdminListPendingForCompetition(
+  competitionId: string
+): Promise<LmsJoinRequestRow[]> {
+  const { data, error } = await db.rpc('lms_admin_list_pending_for_competition', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  return asArray<LmsJoinRequestRow>(data);
+}
+
+export async function lmsCanManageCompetition(competitionId: string): Promise<{
+  success: boolean;
+  can_manage: boolean;
+  is_creator: boolean;
+  created_by_user_id: string | null;
+  error?: string;
+}> {
+  const { data, error } = await db.rpc('lms_can_manage_competition_rpc', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  return (data ?? {
+    success: false,
+    can_manage: false,
+    is_creator: false,
+    created_by_user_id: null,
+  }) as {
+    success: boolean;
+    can_manage: boolean;
+    is_creator: boolean;
+    created_by_user_id: string | null;
+    error?: string;
+  };
+}
+
+export async function lmsAdminSubmitPickForUser(
+  competitionId: string,
+  userId: string,
+  gameweekId: string,
+  teamId: string
+): Promise<{ success: boolean; error?: string }> {
+  const { data, error } = await db.rpc('lms_admin_submit_pick_for_user', {
+    p_competition_id: competitionId,
+    p_user_id: userId,
+    p_gameweek_id: gameweekId,
+    p_team_id: teamId,
+  });
+  if (error) throw error;
+  return (data ?? { success: false, error: 'unknown' }) as { success: boolean; error?: string };
+}
+
+/** Session-auth create (p_code ignored by tablet_code_admin_user_id). */
+export async function lmsCreateCompetition(
+  name: string,
+  startGameweekId: string,
+  season = '2026/27'
+) {
+  return lmsAdminCreateCompetition('', name, startGameweekId, season);
+}
+
+export async function lmsApproveJoinRequest(requestId: string) {
+  return lmsAdminApproveJoin('', requestId);
+}
+
+export async function lmsRejectJoinRequest(requestId: string) {
+  return lmsAdminRejectJoin('', requestId);
 }
 
 export async function lmsAdminApproveJoin(adminCode: string, requestId: string) {

@@ -17,9 +17,11 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import {
+  lmsCreateCompetition,
   lmsGetGameweekPickStats,
   lmsGetHome,
   lmsJoinErrorMessage,
+  lmsListGameweeks,
   lmsRequestJoin,
   type LmsCompetitionHomeSummary,
   type LmsFixture,
@@ -28,6 +30,7 @@ import {
   type LmsPendingJoin,
   type LmsPickStatOutcome,
 } from '@/lib/lms/api';
+import { getProfileRole, isStaffRole } from '@/lib/adminSession';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
 import { LeagueTablePanel } from '@/components/lms/LeagueTablePanel';
 import { lmsDisplayTeamName } from '@/lib/lms/teamColours';
@@ -56,7 +59,14 @@ export default function LmsHomeScreen() {
   const [fixtures, setFixtures] = useState<LmsFixture[]>([]);
   const [fxIndex, setFxIndex] = useState(0);
   const [pickStats, setPickStats] = useState<LmsGameweekPickStats | null>(null);
+  const [isStaff, setIsStaff] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createGwId, setCreateGwId] = useState<string | null>(null);
+  const [createGws, setCreateGws] = useState<LmsGameweek[]>([]);
+  const [creating, setCreating] = useState(false);
   const homeLoadedRef = useRef(false);
+  const createGwsLoadedRef = useRef(false);
   const lastManualRefreshAtRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -73,7 +83,12 @@ export default function LmsHomeScreen() {
   const load = useCallback(async () => {
     if (!userId) return;
     try {
-      const home = await lmsGetHome('2026/27');
+      const [home, role] = await Promise.all([
+        lmsGetHome('2026/27'),
+        getProfileRole(userId),
+      ]);
+      const staff = isStaffRole(role);
+      setIsStaff(staff);
       setComps(home.competitions);
       setPending(home.pending);
       setGw(home.nextUp.gameweek);
@@ -94,6 +109,18 @@ export default function LmsHomeScreen() {
         setPickStats(stats.revealed ? stats : null);
       } else {
         setPickStats(null);
+      }
+
+      if (staff && !createGwsLoadedRef.current) {
+        const gws = await lmsListGameweeks('2026/27');
+        createGwsLoadedRef.current = true;
+        setCreateGws(gws);
+        const defaultGw =
+          home.nextUp.gameweek?.id ??
+          gws.find((g) => g.status !== 'complete')?.id ??
+          gws[0]?.id ??
+          null;
+        setCreateGwId((prev) => prev ?? defaultGw);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load competitions';
@@ -166,6 +193,41 @@ export default function LmsHomeScreen() {
       Alert.alert('Error', e instanceof Error ? e.message : 'Join failed');
     } finally {
       setJoining(false);
+    }
+  };
+
+  const onCreateCompetition = async () => {
+    if (!createName.trim()) {
+      Alert.alert('Name required', 'Enter a competition name.');
+      return;
+    }
+    if (!createGwId) {
+      Alert.alert('Starting week required', 'Choose which gameweek this competition starts on.');
+      return;
+    }
+    setCreating(true);
+    try {
+      const res = await lmsCreateCompetition(createName.trim(), createGwId, '2026/27');
+      if (!res.success) {
+        Alert.alert('Failed', res.error ?? 'Could not create competition');
+        return;
+      }
+      setCreateName('');
+      setShowCreate(false);
+      Alert.alert(
+        'Created',
+        `Join code: ${res.access_code ?? '—'}${
+          res.start_gameweek_number != null ? `\nStarts GW${res.start_gameweek_number}` : ''
+        }`
+      );
+      await load();
+      if (res.competition_id) {
+        router.push(`/(lms)/${res.competition_id}` as any);
+      }
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Create failed');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -424,6 +486,107 @@ export default function LmsHomeScreen() {
           fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: 15,
           color: theme.colors.text,
+        },
+        rowTitleRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+        },
+        manageChip: {
+          paddingVertical: 2,
+          paddingHorizontal: 6,
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+        },
+        manageChipText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 10,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: theme.colors.accent,
+        },
+        createToggle: {
+          alignSelf: 'flex-start',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          paddingVertical: 6,
+          marginBottom: 8,
+        },
+        createToggleText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.accent,
+        },
+        createPanel: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          padding: 12,
+          gap: 10,
+          marginBottom: 12,
+        },
+        createInput: {
+          fontFamily: theme.fontFamily.input,
+          fontSize: 14,
+          color: theme.colors.text,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.sm,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          backgroundColor: theme.colors.background,
+        },
+        createFieldLabel: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          letterSpacing: 1,
+          textTransform: 'uppercase',
+          color: theme.colors.textMuted,
+        },
+        createGwScroll: {
+          marginHorizontal: -4,
+        },
+        createGwRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingHorizontal: 4,
+        },
+        createGwChip: {
+          paddingVertical: 7,
+          paddingHorizontal: 12,
+          borderRadius: theme.radius.sm,
+          backgroundColor: theme.colors.background,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+        },
+        createGwChipActive: {
+          backgroundColor: theme.colors.accentMuted,
+          borderColor: theme.colors.accent,
+        },
+        createGwChipText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.textSecondary,
+        },
+        createGwChipTextActive: {
+          color: theme.colors.accent,
+        },
+        createSubmit: {
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.sm,
+          paddingVertical: 10,
+          alignItems: 'center',
+        },
+        createSubmitText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.white,
         },
         rowMeta: {
           fontFamily: theme.fontFamily.baiLight,
@@ -783,6 +946,78 @@ export default function LmsHomeScreen() {
 
                 <View>
                   <Text style={styles.sectionLabel}>Your leagues</Text>
+                  {isStaff ? (
+                    <>
+                      <Pressable
+                        style={styles.createToggle}
+                        onPress={() => setShowCreate((v) => !v)}
+                        accessibilityRole="button"
+                        accessibilityState={{ expanded: showCreate }}
+                        accessibilityLabel="Create competition"
+                      >
+                        <Ionicons
+                          name={showCreate ? 'chevron-up' : 'add-circle-outline'}
+                          size={18}
+                          color={theme.colors.accent}
+                        />
+                        <Text style={styles.createToggleText}>Create competition</Text>
+                      </Pressable>
+                      {showCreate ? (
+                        <View style={styles.createPanel}>
+                          <TextInput
+                            style={styles.createInput}
+                            value={createName}
+                            onChangeText={setCreateName}
+                            placeholder="e.g. Office LMS"
+                            placeholderTextColor={theme.colors.textMuted}
+                            autoCorrect={false}
+                          />
+                          <Text style={styles.createFieldLabel}>Starting gameweek</Text>
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            style={styles.createGwScroll}
+                            contentContainerStyle={styles.createGwRow}
+                            nestedScrollEnabled
+                          >
+                            {createGws.slice(0, 20).map((g) => {
+                              const active = createGwId === g.id;
+                              return (
+                                <Pressable
+                                  key={g.id}
+                                  style={[
+                                    styles.createGwChip,
+                                    active && styles.createGwChipActive,
+                                  ]}
+                                  onPress={() => setCreateGwId(g.id)}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.createGwChipText,
+                                      active && styles.createGwChipTextActive,
+                                    ]}
+                                  >
+                                    GW{g.number}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                          </ScrollView>
+                          <Pressable
+                            style={styles.createSubmit}
+                            onPress={() => void onCreateCompetition()}
+                            disabled={creating}
+                          >
+                            {creating ? (
+                              <ActivityIndicator color={theme.colors.white} size="small" />
+                            ) : (
+                              <Text style={styles.createSubmitText}>Create</Text>
+                            )}
+                          </Pressable>
+                        </View>
+                      ) : null}
+                    </>
+                  ) : null}
                   {comps.length === 0 ? (
                     <View style={styles.emptyBlock}>
                       <Text style={styles.empty}>
@@ -813,7 +1048,18 @@ export default function LmsHomeScreen() {
                             onPress={() => router.push(`/(lms)/${c.competition_id}` as any)}
                           >
                             <View style={styles.rowCopy}>
-                              <Text style={styles.rowTitle}>{c.name}</Text>
+                              <View style={styles.rowTitleRow}>
+                                <Text style={styles.rowTitle}>{c.name}</Text>
+                                {c.isCreator ? (
+                                  <View style={styles.manageChip}>
+                                    <Text style={styles.manageChipText}>Admin</Text>
+                                  </View>
+                                ) : c.canManage ? (
+                                  <View style={styles.manageChip}>
+                                    <Text style={styles.manageChipText}>Owner</Text>
+                                  </View>
+                                ) : null}
+                              </View>
                               <Text style={styles.rowMeta}>{remainLabel}</Text>
                               {c.participant_status === 'active' && c.pickAvailable ? (
                                 <Text style={styles.rowPickHint}>Pick available</Text>

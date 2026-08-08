@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Switch,
+  TextInput,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,8 +26,20 @@ import {
   type OwnerCompetitionRow,
   type OwnerUserRow,
 } from '@/lib/ownerApi';
+import { racingDeleteCompetition } from '@/lib/racingAdminApi';
+import {
+  lmsAdminDeleteCompetition,
+  lmsAdminSetFixtureExcluded,
+  lmsGetCurrentGameweek,
+  lmsListFixturesForGameweek,
+  lmsListGameweeks,
+  type LmsFixture,
+  type LmsGameweek,
+} from '@/lib/lms/api';
 
-type TabKey = 'users' | 'competitions';
+type TabKey = 'users' | 'competitions' | 'exclusions';
+
+const LMS_SEASON = '2026/27';
 
 function roleErrorMessage(code?: string): string {
   switch (code) {
@@ -101,6 +115,12 @@ function confirmDestructive(
   ]);
 }
 
+function fixtureLabel(f: LmsFixture): string {
+  const home = f.home_team?.short_name || f.home_team?.name || 'Home';
+  const away = f.away_team?.short_name || f.away_team?.name || 'Away';
+  return `${home} vs ${away}`;
+}
+
 export default function OwnerScreen() {
   const theme = useTheme();
   const admin = useAdminAccent();
@@ -119,6 +139,14 @@ export default function OwnerScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [busyCompKey, setBusyCompKey] = useState<string | null>(null);
+
+  const [gameweeks, setGameweeks] = useState<LmsGameweek[]>([]);
+  const [selectedGwId, setSelectedGwId] = useState<string | null>(null);
+  const [fixtures, setFixtures] = useState<LmsFixture[]>([]);
+  const [exclusionsLoading, setExclusionsLoading] = useState(false);
+  const [busyFixtureId, setBusyFixtureId] = useState<string | null>(null);
+  const [reasonById, setReasonById] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!userId) {
@@ -154,6 +182,41 @@ export default function OwnerScreen() {
     }
   }, []);
 
+  const loadExclusions = useCallback(async (preferGwId?: string | null) => {
+    setExclusionsLoading(true);
+    try {
+      const [gws, current] = await Promise.all([
+        lmsListGameweeks(LMS_SEASON),
+        lmsGetCurrentGameweek(LMS_SEASON),
+      ]);
+      setGameweeks(gws);
+      const gwId =
+        preferGwId && gws.some((g) => g.id === preferGwId)
+          ? preferGwId
+          : current?.id ??
+            gws.find((g) => g.status !== 'complete')?.id ??
+            gws[0]?.id ??
+            null;
+      setSelectedGwId(gwId);
+      if (!gwId) {
+        setFixtures([]);
+        setReasonById({});
+        return;
+      }
+      const list = await lmsListFixturesForGameweek(gwId);
+      setFixtures(list);
+      setReasonById(
+        Object.fromEntries(list.map((f) => [f.id, f.excluded_reason?.trim() || '']))
+      );
+    } catch (e) {
+      notify('Error', e instanceof Error ? e.message : 'Failed to load fixtures');
+      setFixtures([]);
+    } finally {
+      setExclusionsLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       if (allowed !== true) return;
@@ -161,6 +224,13 @@ export default function OwnerScreen() {
       void load();
     }, [allowed, load])
   );
+
+  useEffect(() => {
+    if (allowed !== true || tab !== 'exclusions') return;
+    void loadExclusions(selectedGwId);
+    // Intentionally omit selectedGwId — chip presses call loadExclusions directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowed, tab, loadExclusions]);
 
   const setRole = async (user: OwnerUserRow, role: 'User' | 'Admin') => {
     if (user.role === role) return;
@@ -230,6 +300,102 @@ export default function OwnerScreen() {
         })();
       }
     );
+  };
+
+  const deleteCompetition = (c: OwnerCompetitionRow) => {
+    const key = `${c.sport}-${c.id}`;
+    const label = c.name?.trim() || 'this competition';
+    confirmDestructive(
+      'Delete competition?',
+      `Permanently delete ${label} and all related entries. This cannot be undone.`,
+      'Delete',
+      () => {
+        void (async () => {
+          setBusyCompKey(key);
+          try {
+            const res =
+              c.sport === 'lms'
+                ? await lmsAdminDeleteCompetition(c.id)
+                : await racingDeleteCompetition(c.id);
+            if (!res.success) {
+              notify('Error', res.error ?? 'Could not delete competition');
+              return;
+            }
+            setComps((prev) => prev.filter((row) => !(row.id === c.id && row.sport === c.sport)));
+            notify('Deleted', `${res.name?.trim() || label} has been deleted.`);
+          } catch (e) {
+            notify('Error', e instanceof Error ? e.message : 'Could not delete competition');
+          } finally {
+            setBusyCompKey(null);
+          }
+        })();
+      }
+    );
+  };
+
+  const setFixtureExcluded = async (fixture: LmsFixture, excluded: boolean) => {
+    setBusyFixtureId(fixture.id);
+    try {
+      const reason = reasonById[fixture.id]?.trim() || null;
+      const res = await lmsAdminSetFixtureExcluded(
+        fixture.id,
+        excluded,
+        excluded ? reason : null
+      );
+      if (!res.success) {
+        notify('Error', res.error ?? 'Could not update exclusion');
+        return;
+      }
+      setFixtures((prev) =>
+        prev.map((f) =>
+          f.id === fixture.id
+            ? {
+                ...f,
+                excluded_from_lms: excluded,
+                excluded_reason: excluded ? reason : null,
+              }
+            : f
+        )
+      );
+      if (!excluded) {
+        setReasonById((prev) => ({ ...prev, [fixture.id]: '' }));
+      }
+    } catch (e) {
+      notify('Error', e instanceof Error ? e.message : 'Could not update exclusion');
+    } finally {
+      setBusyFixtureId(null);
+    }
+  };
+
+  const saveFixtureReason = async (fixture: LmsFixture, reasonText: string) => {
+    if (!fixture.excluded_from_lms) return;
+    setBusyFixtureId(fixture.id);
+    try {
+      const reason = reasonText.trim() || null;
+      const res = await lmsAdminSetFixtureExcluded(fixture.id, true, reason);
+      if (!res.success) {
+        notify('Error', res.error ?? 'Could not update reason');
+        return;
+      }
+      setFixtures((prev) =>
+        prev.map((f) =>
+          f.id === fixture.id ? { ...f, excluded_reason: reason } : f
+        )
+      );
+    } catch (e) {
+      notify('Error', e instanceof Error ? e.message : 'Could not update reason');
+    } finally {
+      setBusyFixtureId(null);
+    }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    if (tab === 'exclusions') {
+      void loadExclusions(selectedGwId);
+    } else {
+      void load();
+    }
   };
 
   const styles = useMemo(
@@ -362,6 +528,54 @@ export default function OwnerScreen() {
           fontWeight: '700',
           color: theme.colors.black,
         },
+        gwScroll: {
+          flexGrow: 0,
+        },
+        gwChip: {
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          borderRadius: theme.radius.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          marginRight: 8,
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        gwChipActive: {
+          borderColor: admin.accent,
+          backgroundColor: admin.accentMuted,
+        },
+        gwChipText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 12,
+          color: theme.colors.textSecondary,
+        },
+        gwChipTextActive: {
+          color: admin.accent,
+          fontWeight: '700',
+        },
+        excludeRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: theme.spacing.sm,
+        },
+        excludeLabel: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          fontWeight: '600',
+          color: theme.colors.textSecondary,
+        },
+        reasonInput: {
+          fontFamily: theme.fontFamily.input,
+          fontSize: 14,
+          color: theme.colors.text,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.sm,
+          paddingHorizontal: theme.spacing.sm,
+          paddingVertical: 8,
+          backgroundColor: theme.colors.surfaceElevated,
+        },
       }),
     [theme, admin.accent, admin.accentMuted]
   );
@@ -387,6 +601,56 @@ export default function OwnerScreen() {
 
   const racingComps = comps.filter((c) => c.sport === 'racing');
   const lmsComps = comps.filter((c) => c.sport === 'lms');
+  const selectedGw = gameweeks.find((g) => g.id === selectedGwId) ?? null;
+
+  const renderCompCard = (c: OwnerCompetitionRow) => {
+    const key = `${c.sport}-${c.id}`;
+    const busy = busyCompKey === key;
+    return (
+      <View key={key} style={styles.card}>
+        <View style={styles.rowTop}>
+          <Text style={styles.name} numberOfLines={2}>
+            {c.name}
+          </Text>
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{c.status}</Text>
+          </View>
+        </View>
+        <Text style={styles.meta}>
+          Join code <Text style={styles.code}>{c.join_code?.trim() || '—'}</Text>
+        </Text>
+        {c.sport === 'lms' && c.rejoin_code ? (
+          <Text style={styles.meta}>
+            Rejoin code <Text style={styles.code}>{c.rejoin_code}</Text>
+          </Text>
+        ) : null}
+        <Text style={styles.meta}>
+          {c.sport === 'lms'
+            ? `${c.active_count ?? 0} active / ${c.participant_count ?? 0} total${
+                c.season ? ` · ${c.season}` : ''
+              }`
+            : `${c.participant_count ?? 0} players${
+                c.creator_username ? ` · created by ${c.creator_username}` : ''
+              }`}
+        </Text>
+        <View style={styles.actions}>
+          <Pressable
+            style={[styles.actionBtn, styles.actionBtnDanger]}
+            disabled={busy}
+            onPress={() => deleteCompetition(c)}
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${c.name}`}
+          >
+            {busy ? (
+              <ActivityIndicator size="small" color={theme.colors.error} />
+            ) : (
+              <Text style={[styles.actionBtnText, styles.actionBtnTextDanger]}>Delete</Text>
+            )}
+          </Pressable>
+        </View>
+      </View>
+    );
+  };
 
   return (
     <AdminScreenLayout
@@ -395,20 +659,18 @@ export default function OwnerScreen() {
       tabs={[
         { key: 'users', label: 'Users' },
         { key: 'competitions', label: 'Competitions' },
+        { key: 'exclusions', label: 'Exclusions' },
       ]}
       activeTab={tab}
       onTabChange={(key) => setTab(key as TabKey)}
-      loading={loading}
+      loading={loading && tab !== 'exclusions'}
     >
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => {
-              setRefreshing(true);
-              void load();
-            }}
+            onRefresh={onRefresh}
             tintColor={admin.accent}
           />
         }
@@ -513,10 +775,11 @@ export default function OwnerScreen() {
               })
             )}
           </>
-        ) : (
+        ) : tab === 'competitions' ? (
           <>
             <Text style={styles.hint}>
-              Every competition across Racing and Football, with join codes. Pull to refresh.
+              Every competition across Racing and Football, with join codes. Delete removes the
+              competition permanently. Pull to refresh.
             </Text>
 
             <Text style={[styles.meta, { textTransform: 'uppercase', letterSpacing: 0.8 }]}>
@@ -525,26 +788,7 @@ export default function OwnerScreen() {
             {racingComps.length === 0 ? (
               <Text style={styles.empty}>No racing competitions</Text>
             ) : (
-              racingComps.map((c) => (
-                <View key={`racing-${c.id}`} style={styles.card}>
-                  <View style={styles.rowTop}>
-                    <Text style={styles.name} numberOfLines={2}>
-                      {c.name}
-                    </Text>
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{c.status}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.meta}>
-                    Join code{' '}
-                    <Text style={styles.code}>{c.join_code?.trim() || '—'}</Text>
-                  </Text>
-                  <Text style={styles.meta}>
-                    {c.participant_count ?? 0} players
-                    {c.creator_username ? ` · created by ${c.creator_username}` : ''}
-                  </Text>
-                </View>
-              ))
+              racingComps.map(renderCompCard)
             )}
 
             <Text
@@ -558,30 +802,99 @@ export default function OwnerScreen() {
             {lmsComps.length === 0 ? (
               <Text style={styles.empty}>No LMS competitions</Text>
             ) : (
-              lmsComps.map((c) => (
-                <View key={`lms-${c.id}`} style={styles.card}>
-                  <View style={styles.rowTop}>
+              lmsComps.map(renderCompCard)
+            )}
+          </>
+        ) : (
+          <>
+            <Text style={styles.hint}>
+              Exclusions apply to all LMS competitions (season calendar). Excluded fixtures cannot be
+              picked in any Last Man Standing league.
+            </Text>
+
+            <Text style={[styles.meta, { textTransform: 'uppercase', letterSpacing: 0.8 }]}>
+              Gameweek
+              {selectedGw ? ` · GW${selectedGw.number}` : ''}
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gwScroll}>
+              {gameweeks.map((g) => {
+                const active = selectedGwId === g.id;
+                return (
+                  <Pressable
+                    key={g.id}
+                    style={[styles.gwChip, active && styles.gwChipActive]}
+                    onPress={() => {
+                      setSelectedGwId(g.id);
+                      void loadExclusions(g.id);
+                    }}
+                  >
+                    <Text style={[styles.gwChipText, active && styles.gwChipTextActive]}>
+                      GW{g.number}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            {exclusionsLoading ? (
+              <ActivityIndicator color={admin.accent} style={{ marginTop: theme.spacing.lg }} />
+            ) : fixtures.length === 0 ? (
+              <Text style={styles.empty}>No fixtures for this gameweek</Text>
+            ) : (
+              fixtures.map((f) => {
+                const excluded = !!f.excluded_from_lms;
+                const busy = busyFixtureId === f.id;
+                return (
+                  <View key={f.id} style={styles.card}>
                     <Text style={styles.name} numberOfLines={2}>
-                      {c.name}
+                      {fixtureLabel(f)}
                     </Text>
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{c.status}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.meta}>
-                    Join code <Text style={styles.code}>{c.join_code?.trim() || '—'}</Text>
-                  </Text>
-                  {c.rejoin_code ? (
                     <Text style={styles.meta}>
-                      Rejoin code <Text style={styles.code}>{c.rejoin_code}</Text>
+                      {f.kickoff_at
+                        ? new Date(f.kickoff_at).toLocaleString(undefined, {
+                            weekday: 'short',
+                            day: 'numeric',
+                            month: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : 'Kickoff TBD'}
+                      {f.status ? ` · ${f.status}` : ''}
                     </Text>
-                  ) : null}
-                  <Text style={styles.meta}>
-                    {c.active_count ?? 0} active / {c.participant_count ?? 0} total
-                    {c.season ? ` · ${c.season}` : ''}
-                  </Text>
-                </View>
-              ))
+                    <View style={styles.excludeRow}>
+                      <Text style={styles.excludeLabel}>
+                        {excluded ? 'Excluded from LMS' : 'Available to pick'}
+                      </Text>
+                      {busy ? (
+                        <ActivityIndicator size="small" color={admin.accent} />
+                      ) : (
+                        <Switch
+                          value={excluded}
+                          onValueChange={(value) => void setFixtureExcluded(f, value)}
+                          trackColor={{ false: theme.colors.border, true: admin.accent }}
+                          thumbColor={theme.colors.surface}
+                        />
+                      )}
+                    </View>
+                    <TextInput
+                      style={styles.reasonInput}
+                      value={reasonById[f.id] ?? ''}
+                      onChangeText={(text) =>
+                        setReasonById((prev) => ({ ...prev, [f.id]: text }))
+                      }
+                      placeholder="Optional exclusion reason"
+                      placeholderTextColor={theme.colors.textMuted}
+                      editable={!busy}
+                      onBlur={() => {
+                        if (!excluded) return;
+                        const next = reasonById[f.id]?.trim() || '';
+                        const prev = f.excluded_reason?.trim() || '';
+                        if (next !== prev) void saveFixtureReason(f, reasonById[f.id] ?? '');
+                      }}
+                    />
+                  </View>
+                );
+              })
             )}
           </>
         )}
