@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Platform } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,7 +16,10 @@ export default function LmsRulesScreen() {
       StyleSheet.create({
         root: { flex: 1, backgroundColor: theme.colors.background },
         header: {
-          paddingTop: insets.top + theme.spacing.md,
+          paddingTop:
+            Platform.OS === 'web'
+              ? Math.max(theme.spacing.md, insets.top + 6)
+              : insets.top + theme.spacing.sm,
           paddingHorizontal: theme.spacing.lg,
           paddingBottom: theme.spacing.sm,
           flexDirection: 'row',

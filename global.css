@@ -1,13 +1,9 @@
-/* Web-only base styles; React Native uses theme via StyleSheet */
-@supports (padding: env(safe-area-inset-top)) {
-  body {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-    padding-left: env(safe-area-inset-left);
-    padding-right: env(safe-area-inset-right);
-  }
-}
-
+/* Web-only base styles; React Native uses theme via StyleSheet.
+ *
+ * Do NOT pad body with env(safe-area-inset-*). Screens already apply
+ * useSafeAreaInsets() on headers; body padding doubled the top gap in
+ * iOS Home Screen / standalone mode (status bar + header sat too low).
+ */
 body {
   margin: 0;
   background-color: #0a0a0a;

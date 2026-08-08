@@ -9,6 +9,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -275,7 +276,10 @@ export default function LmsHomeScreen() {
       StyleSheet.create({
         root: { flex: 1, backgroundColor: theme.colors.background },
         header: {
-          paddingTop: insets.top + theme.spacing.lg,
+          paddingTop:
+            Platform.OS === 'web'
+              ? Math.max(theme.spacing.md, insets.top + 6)
+              : insets.top + theme.spacing.sm,
           paddingHorizontal: theme.spacing.lg,
           paddingBottom: theme.spacing.sm,
           flexDirection: 'row',

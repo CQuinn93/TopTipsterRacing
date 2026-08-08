@@ -1027,7 +1027,11 @@ export default function LmsCompetitionDashboard() {
       StyleSheet.create({
         root: { flex: 1, backgroundColor: theme.colors.background },
         header: {
-          paddingTop: insets.top + theme.spacing.lg,
+          // Web: match competition-hub (body no longer adds safe-area padding).
+          paddingTop:
+            Platform.OS === 'web'
+              ? Math.max(theme.spacing.md, insets.top + 6)
+              : insets.top + theme.spacing.sm,
           paddingHorizontal: theme.spacing.lg,
           paddingBottom: theme.spacing.sm,
           flexDirection: 'row',
