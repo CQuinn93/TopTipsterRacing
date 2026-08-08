@@ -86,9 +86,10 @@ export function AppSidebar() {
     [theme, variant]
   );
 
-  const goTo = (path: string) => {
+  const goTo = (path: string, mode: 'push' | 'replace' = 'push') => {
     closeSidebar();
-    router.push(path as any);
+    if (mode === 'replace') router.replace(path as any);
+    else router.push(path as any);
   };
 
   return (
@@ -111,7 +112,7 @@ export function AppSidebar() {
           >
             <TouchableOpacity
               style={styles.menuButton}
-              onPress={() => goTo('/competition-hub')}
+              onPress={() => goTo('/competition-hub', 'replace')}
               activeOpacity={0.7}
             >
               <Ionicons name="home-outline" size={22} color={theme.colors.accent} />

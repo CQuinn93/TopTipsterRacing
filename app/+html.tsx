@@ -4,8 +4,11 @@ import type { PropsWithChildren } from 'react';
 /**
  * Root HTML for web.
  * Includes PWA / Add to Home Screen icon metadata.
+ * apple-mobile-web-app-capable is what gives the classic iOS Home Screen
+ * shell (same as Safari content, but no bottom search bar / browser chrome).
  */
-const BASE = (process.env.EXPO_BASE_URL ?? '').replace(/\/$/, '');
+const BASE = (process.env.EXPO_PUBLIC_WEB_BASE_URL ?? process.env.EXPO_BASE_URL ?? '')
+  .replace(/\/$/, '');
 const asset = (path: string) => `${BASE}${path.startsWith('/') ? path : `/${path}`}`;
 
 export default function Root({ children }: PropsWithChildren) {
@@ -20,7 +23,6 @@ export default function Root({ children }: PropsWithChildren) {
         />
         <meta name="theme-color" content="#0a0a0a" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
-        <meta name="apple-touch-fullscreen" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="Top Tipster" />
         <meta name="mobile-web-app-capable" content="yes" />

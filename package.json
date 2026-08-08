@@ -9,7 +9,7 @@
     "android": "node ./scripts/expo-start.cjs start --android",
     "ios": "node ./scripts/expo-start.cjs start --ios",
     "web": "node ./scripts/expo-start.cjs start --web",
-    "build:web": "expo export --platform web && node scripts/inject-csp-meta.js && node scripts/spa-github-pages-fallback.js",
+    "build:web": "node scripts/write-web-manifest.js && expo export --platform web && node scripts/inject-csp-meta.js && node scripts/spa-github-pages-fallback.js && node scripts/write-web-manifest.js",
     "sync:lms-football": "npx tsx scripts/sync-lms-football.ts"
   },
   "dependencies": {

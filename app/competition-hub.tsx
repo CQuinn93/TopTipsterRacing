@@ -480,7 +480,9 @@ export default function CompetitionHubScreen() {
             status: 'Open',
             onPress: () => {
               void setLastRoute('/(lms)');
-              router.push('/(lms)' as any);
+              // replace keeps the Home Screen PWA history shallow so iOS
+              // is less likely to show system back/forward chrome.
+              router.replace('/(lms)' as any);
             },
           },
           {
