@@ -310,6 +310,10 @@ export default function LmsHomeScreen() {
           paddingHorizontal: theme.spacing.lg,
           paddingBottom: theme.spacing.md,
         },
+        deadlineAlertsWrap: {
+          paddingHorizontal: theme.spacing.lg,
+          paddingBottom: theme.spacing.md,
+        },
         spotlight: {
           backgroundColor: theme.colors.surfaceElevated,
           borderRadius: theme.radius.lg,
@@ -892,6 +896,9 @@ export default function LmsHomeScreen() {
       ) : (
         <>
           {renderNextUp()}
+          <View style={styles.deadlineAlertsWrap}>
+            <LmsPushNotificationsCard />
+          </View>
 
           <View style={styles.tabs}>
             {(
@@ -1099,8 +1106,6 @@ export default function LmsHomeScreen() {
                     </View>
                   )}
                 </View>
-
-                <LmsPushNotificationsCard />
               </>
             ) : null}
 
