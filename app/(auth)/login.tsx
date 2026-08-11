@@ -19,6 +19,12 @@ import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+function isRunningAsInstalledWebApp(): boolean {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
+  const mq = window.matchMedia?.('(display-mode: standalone), (display-mode: fullscreen)');
+  if (mq?.matches) return true;
+  return Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
+}
 function ContourDecor({ color, compact }: { color: string; compact: boolean }) {
   const rings = compact ? [140, 210, 280] : [200, 300, 400, 520];
   return (
@@ -65,6 +71,7 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
+  const showHomeScreenTip = Platform.OS === 'web' && !isRunningAsInstalledWebApp();
 
   const styles = useMemo(
     () =>
@@ -185,6 +192,32 @@ export default function LoginScreen() {
           fontFamily: theme.fontFamily.regular,
           fontSize: 13,
           color: '#737373',
+          textDecorationLine: 'underline',
+        },
+        homeTip: {
+          marginTop: theme.spacing.lg,
+          paddingTop: theme.spacing.md,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: '#2a2a2a',
+          gap: theme.spacing.sm,
+        },
+        homeTipText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: '#a3a3a3',
+          textAlign: 'center',
+          lineHeight: 18,
+        },
+        homeTipBtn: {
+          alignSelf: 'center',
+          paddingVertical: 8,
+          paddingHorizontal: 14,
+        },
+        homeTipBtnText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          fontWeight: '700',
+          color: theme.colors.accent,
           textDecorationLine: 'underline',
         },
       }),
@@ -445,6 +478,24 @@ export default function LoginScreen() {
               {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
             </Text>
           </TouchableOpacity>
+
+          {showHomeScreenTip ? (
+            <View style={styles.homeTip}>
+              <Text style={styles.homeTipText}>
+                For the best experience, add Top Tipster to your Home Screen (Safari Share → Add to
+                Home Screen).
+              </Text>
+              <TouchableOpacity
+                style={styles.homeTipBtn}
+                onPress={() => router.push('/(auth)/add-to-home-screen')}
+                disabled={loading}
+                accessibilityRole="button"
+                accessibilityLabel="Show me how to add to Home Screen"
+              >
+                <Text style={styles.homeTipBtnText}>Show me how</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.policyRow}>
