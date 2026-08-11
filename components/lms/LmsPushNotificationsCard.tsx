@@ -3,12 +3,12 @@ import {
   View,
   Text,
   StyleSheet,
-  Pressable,
+  Switch,
   ActivityIndicator,
   Platform,
   Alert,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -31,7 +31,7 @@ type Status =
   | 'on';
 
 /**
- * Opt-in card for LMS deadline Web Push (Home Screen web app only).
+ * Compact LMS deadline Web Push opt-in (Home Screen web app).
  */
 export function LmsPushNotificationsCard() {
   const theme = useTheme();
@@ -78,14 +78,17 @@ export function LmsPushNotificationsCard() {
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
           borderRadius: theme.radius.md,
-          padding: theme.spacing.md,
-          gap: theme.spacing.sm,
+          paddingVertical: 12,
+          paddingHorizontal: theme.spacing.md,
           backgroundColor: theme.colors.surface,
+          gap: 6,
         },
         row: {
           flexDirection: 'row',
           alignItems: 'center',
-          gap: theme.spacing.sm,
+          justifyContent: 'space-between',
+          gap: theme.spacing.md,
+          minHeight: 28,
         },
         title: {
           flex: 1,
@@ -93,37 +96,21 @@ export function LmsPushNotificationsCard() {
           fontSize: 15,
           color: theme.colors.text,
         },
-        body: {
+        hint: {
           fontFamily: theme.fontFamily.baiLight,
-          fontSize: 13,
-          color: theme.colors.textSecondary,
-          lineHeight: 18,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          lineHeight: 16,
         },
         error: {
           fontFamily: theme.fontFamily.baiMedium,
           fontSize: 12,
           color: theme.colors.error,
         },
-        btn: {
-          marginTop: theme.spacing.xs,
-          alignSelf: 'flex-start',
-          paddingVertical: 10,
-          paddingHorizontal: 14,
-          borderRadius: theme.radius.md,
-          backgroundColor: theme.colors.accent,
-          minWidth: 140,
-          alignItems: 'center',
-        },
-        btnMuted: {
-          backgroundColor: theme.colors.border,
-        },
-        btnText: {
-          fontFamily: theme.fontFamily.baiBold,
-          fontSize: 13,
-          color: theme.colors.white,
-        },
-        btnTextMuted: {
-          color: theme.colors.text,
+        switchWrap: {
+          minWidth: 52,
+          alignItems: 'flex-end',
+          justifyContent: 'center',
         },
       }),
     [theme]
@@ -137,11 +124,6 @@ export function LmsPushNotificationsCard() {
     setBusy(false);
     if (!res.ok) {
       setError(res.error);
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        /* keep inline error */
-      } else {
-        Alert.alert('Notifications', res.error);
-      }
       await refresh();
       return;
     }
@@ -162,10 +144,47 @@ export function LmsPushNotificationsCard() {
     await refresh();
   };
 
+  const onToggle = (value: boolean) => {
+    if (busy) return;
+
+    if (status === 'need_homescreen') {
+      if (Platform.OS === 'web') {
+        router.push('/(auth)/add-to-home-screen');
+      } else {
+        Alert.alert(
+          'Deadline Alerts',
+          'Add Top Tipster to your Home Screen, then open it from that icon to enable alerts.'
+        );
+      }
+      return;
+    }
+
+    if (status === 'denied') {
+      Alert.alert(
+        'Deadline Alerts',
+        'Notifications are blocked for this app. Enable them in your device settings.'
+      );
+      return;
+    }
+
+    if (status === 'not_configured') {
+      Alert.alert('Deadline Alerts', 'Push notifications are not configured on this deployment yet.');
+      return;
+    }
+
+    if (value) void onEnable();
+    else void onDisable();
+  };
+
   if (status === 'loading') {
     return (
       <View style={styles.card}>
-        <ActivityIndicator color={theme.colors.accent} />
+        <View style={styles.row}>
+          <Text style={styles.title}>Deadline Alerts</Text>
+          <View style={styles.switchWrap}>
+            <ActivityIndicator color={theme.colors.accent} />
+          </View>
+        </View>
       </View>
     );
   }
@@ -174,46 +193,43 @@ export function LmsPushNotificationsCard() {
     return null;
   }
 
-  let body =
-    'Get a nudge before the pick deadline if you have not selected — including the team you would be auto-assigned.';
-  let action: { label: string; onPress: () => void; muted?: boolean } | null = null;
+  const enabled = status === 'on';
 
-  if (status === 'not_configured') {
-    body = 'Push notifications are not configured on this deployment yet.';
-  } else if (status === 'need_homescreen') {
-    body =
-      'To enable alerts: Safari Share → Add to Home Screen, open Top Tipster from that icon, then tap Enable here.';
+  let hint: string | null = null;
+  if (status === 'need_homescreen') {
+    hint = 'Add to Home Screen first, then turn this on.';
   } else if (status === 'denied') {
-    body = 'Notifications are blocked for this app. Enable them in iOS Settings → Top Tipster.';
-  } else if (status === 'off') {
-    action = { label: 'Enable notifications', onPress: () => void onEnable() };
-  } else if (status === 'on') {
-    body = 'Deadline reminders are on for this device.';
-    action = { label: 'Turn off', onPress: () => void onDisable(), muted: true };
+    hint = 'Notifications are blocked in device settings.';
+  } else if (status === 'not_configured') {
+    hint = 'Push is not configured on this deployment yet.';
   }
 
   return (
     <View style={styles.card}>
       <View style={styles.row}>
-        <Ionicons name="notifications-outline" size={20} color={theme.colors.accent} />
-        <Text style={styles.title}>Pick deadline alerts</Text>
-      </View>
-      <Text style={styles.body}>{body}</Text>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {action ? (
-        <Pressable
-          style={[styles.btn, action.muted && styles.btnMuted]}
-          onPress={action.onPress}
-          disabled={busy}
-          accessibilityRole="button"
-        >
+        <Text style={styles.title}>Deadline Alerts</Text>
+        <View style={styles.switchWrap}>
           {busy ? (
-            <ActivityIndicator color={action.muted ? theme.colors.text : '#fff'} />
+            <ActivityIndicator color={theme.colors.accent} />
           ) : (
-            <Text style={[styles.btnText, action.muted && styles.btnTextMuted]}>{action.label}</Text>
+            <Switch
+              value={enabled}
+              onValueChange={onToggle}
+              disabled={busy}
+              trackColor={{
+                false: theme.colors.border,
+                true: theme.colors.accentDim,
+              }}
+              thumbColor={enabled ? theme.colors.accent : '#f4f3f4'}
+              ios_backgroundColor={theme.colors.border}
+              accessibilityLabel="Deadline Alerts"
+              accessibilityState={{ checked: enabled, disabled: busy }}
+            />
           )}
-        </Pressable>
-      ) : null}
+        </View>
+      </View>
+      {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+      {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
 }

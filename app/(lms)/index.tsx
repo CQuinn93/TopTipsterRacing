@@ -10,6 +10,8 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Animated,
+  Easing,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -40,7 +42,10 @@ import { LmsPushNotificationsCard } from '@/components/lms/LmsPushNotificationsC
 
 type HomeTab = 'competitions' | 'join' | 'table';
 
-const FIXTURE_CYCLE_MS = 3500;
+/** Pause between fixture slides (auto-advance). */
+const FIXTURE_CYCLE_MS = 6500;
+/** Exit / enter duration for the swipe-left transition. */
+const FIXTURE_SLIDE_MS = 380;
 const LMS_MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 
 export default function LmsHomeScreen() {
@@ -67,9 +72,13 @@ export default function LmsHomeScreen() {
   const [createGwId, setCreateGwId] = useState<string | null>(null);
   const [createGws, setCreateGws] = useState<LmsGameweek[]>([]);
   const [creating, setCreating] = useState(false);
+  const [fixtureCardWidth, setFixtureCardWidth] = useState(280);
   const homeLoadedRef = useRef(false);
   const createGwsLoadedRef = useRef(false);
   const lastManualRefreshAtRef = useRef<number | null>(null);
+  const fixtureSlideAnim = useRef(new Animated.Value(0)).current;
+  const fixtureAnimatingRef = useRef(false);
+  const fxIndexRef = useRef(0);
 
   useEffect(() => {
     if (tabParam === 'table' || tabParam === 'join' || tabParam === 'competitions') {
@@ -95,7 +104,10 @@ export default function LmsHomeScreen() {
       setPending(home.pending);
       setGw(home.nextUp.gameweek);
       setFixtures(home.nextUp.fixtures);
+      fxIndexRef.current = 0;
       setFxIndex(0);
+      fixtureSlideAnim.setValue(0);
+      fixtureAnimatingRef.current = false;
       setTab((prev) => {
         if (tabParam === 'table' || tabParam === 'join' || tabParam === 'competitions') {
           return tabParam;
@@ -161,16 +173,99 @@ export default function LmsHomeScreen() {
   );
 
   useEffect(() => {
-    if (upcomingFixtures.length < 2) return;
-    const id = setInterval(() => {
-      setFxIndex((i) => (i + 1) % upcomingFixtures.length);
-    }, FIXTURE_CYCLE_MS);
-    return () => clearInterval(id);
-  }, [upcomingFixtures.length]);
+    fxIndexRef.current = fxIndex;
+  }, [fxIndex]);
+
+  const goToFixture = useCallback(
+    (nextIndex: number, opts?: { animated?: boolean; direction?: 'left' | 'right' }) => {
+      const count = upcomingFixtures.length;
+      if (count < 1) return;
+      const target = ((nextIndex % count) + count) % count;
+      const animated = opts?.animated !== false;
+      const current = fxIndexRef.current;
+
+      if (target === current) return;
+      if (fixtureAnimatingRef.current) return;
+
+      if (!animated || count < 2) {
+        fxIndexRef.current = target;
+        setFxIndex(target);
+        fixtureSlideAnim.setValue(0);
+        return;
+      }
+
+      const direction =
+        opts?.direction ??
+        (target === (current + 1) % count || (current === count - 1 && target === 0)
+          ? 'left'
+          : target === (current - 1 + count) % count || (current === 0 && target === count - 1)
+            ? 'right'
+            : 'left');
+
+      const exitTo = direction === 'left' ? -1 : 1;
+      const enterFrom = direction === 'left' ? 1 : -1;
+
+      fixtureAnimatingRef.current = true;
+      Animated.timing(fixtureSlideAnim, {
+        toValue: exitTo,
+        duration: FIXTURE_SLIDE_MS,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished) {
+          fixtureAnimatingRef.current = false;
+          return;
+        }
+        fxIndexRef.current = target;
+        setFxIndex(target);
+        fixtureSlideAnim.setValue(enterFrom);
+        Animated.timing(fixtureSlideAnim, {
+          toValue: 0,
+          duration: FIXTURE_SLIDE_MS,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start(() => {
+          fixtureAnimatingRef.current = false;
+        });
+      });
+    },
+    [upcomingFixtures.length, fixtureSlideAnim]
+  );
 
   useEffect(() => {
-    if (fxIndex >= upcomingFixtures.length) setFxIndex(0);
-  }, [fxIndex, upcomingFixtures.length]);
+    if (upcomingFixtures.length < 2) return;
+    const id = setInterval(() => {
+      const next = (fxIndexRef.current + 1) % upcomingFixtures.length;
+      goToFixture(next, { direction: 'left' });
+    }, FIXTURE_CYCLE_MS);
+    return () => clearInterval(id);
+  }, [upcomingFixtures.length, goToFixture]);
+
+  useEffect(() => {
+    if (fxIndex >= upcomingFixtures.length) {
+      fxIndexRef.current = 0;
+      setFxIndex(0);
+      fixtureSlideAnim.setValue(0);
+    }
+  }, [fxIndex, upcomingFixtures.length, fixtureSlideAnim]);
+
+  const fixtureSlideStyle = useMemo(() => {
+    const travel = Math.max(120, fixtureCardWidth * 0.55);
+    return {
+      opacity: fixtureSlideAnim.interpolate({
+        inputRange: [-1, 0, 1],
+        outputRange: [0, 1, 0],
+      }),
+      transform: [
+        {
+          translateX: fixtureSlideAnim.interpolate({
+            inputRange: [-1, 0, 1],
+            outputRange: [-travel, 0, travel],
+          }),
+        },
+      ],
+    };
+  }, [fixtureSlideAnim, fixtureCardWidth]);
 
   const onJoin = async () => {
     if (!code.trim()) {
@@ -310,6 +405,10 @@ export default function LmsHomeScreen() {
           paddingHorizontal: theme.spacing.lg,
           paddingBottom: theme.spacing.md,
         },
+        deadlineAlertsWrap: {
+          paddingHorizontal: theme.spacing.lg,
+          paddingBottom: theme.spacing.md,
+        },
         spotlight: {
           backgroundColor: theme.colors.surfaceElevated,
           borderRadius: theme.radius.lg,
@@ -346,6 +445,10 @@ export default function LmsHomeScreen() {
         },
         cardTap: {
           paddingVertical: 6,
+          overflow: 'hidden',
+        },
+        cardSlide: {
+          width: '100%',
         },
         cardRow: {
           flexDirection: 'row',
@@ -734,48 +837,55 @@ export default function LmsHomeScreen() {
           {activeFixture ? (
             <Pressable
               style={styles.cardTap}
+              onLayout={(e) => {
+                const w = e.nativeEvent.layout.width;
+                if (w > 0 && Math.abs(w - fixtureCardWidth) > 1) setFixtureCardWidth(w);
+              }}
               onPress={() =>
-                setFxIndex((i) =>
-                  upcomingFixtures.length ? (i + 1) % upcomingFixtures.length : 0
+                goToFixture(
+                  upcomingFixtures.length ? (fxIndex + 1) % upcomingFixtures.length : 0,
+                  { direction: 'left' }
                 )
               }
               accessibilityRole="button"
               accessibilityLabel="Next fixture"
             >
-              <View style={styles.cardRow}>
-                <View style={styles.cardSide}>
-                  <TeamColourChip
-                    shortName={activeFixture.home_team?.short_name}
-                    name={activeFixture.home_team?.name}
-                    slug={activeFixture.home_team?.slug}
-                    size={44}
-                  />
-                  <Text style={styles.cardName} numberOfLines={1}>
-                    {activeFixture.home_team?.short_name ?? 'H'}
-                  </Text>
+              <Animated.View style={[styles.cardSlide, fixtureSlideStyle]}>
+                <View style={styles.cardRow}>
+                  <View style={styles.cardSide}>
+                    <TeamColourChip
+                      shortName={activeFixture.home_team?.short_name}
+                      name={activeFixture.home_team?.name}
+                      slug={activeFixture.home_team?.slug}
+                      size={44}
+                    />
+                    <Text style={styles.cardName} numberOfLines={1}>
+                      {activeFixture.home_team?.short_name ?? 'H'}
+                    </Text>
+                  </View>
+                  <View style={styles.cardMid}>
+                    <Text style={styles.cardVs}>vs</Text>
+                    <Text style={styles.cardTime}>
+                      {new Date(activeFixture.kickoff_at).toLocaleString(undefined, {
+                        weekday: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </Text>
+                  </View>
+                  <View style={styles.cardSide}>
+                    <TeamColourChip
+                      shortName={activeFixture.away_team?.short_name}
+                      name={activeFixture.away_team?.name}
+                      slug={activeFixture.away_team?.slug}
+                      size={44}
+                    />
+                    <Text style={styles.cardName} numberOfLines={1}>
+                      {activeFixture.away_team?.short_name ?? 'A'}
+                    </Text>
+                  </View>
                 </View>
-                <View style={styles.cardMid}>
-                  <Text style={styles.cardVs}>vs</Text>
-                  <Text style={styles.cardTime}>
-                    {new Date(activeFixture.kickoff_at).toLocaleString(undefined, {
-                      weekday: 'short',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </Text>
-                </View>
-                <View style={styles.cardSide}>
-                  <TeamColourChip
-                    shortName={activeFixture.away_team?.short_name}
-                    name={activeFixture.away_team?.name}
-                    slug={activeFixture.away_team?.slug}
-                    size={44}
-                  />
-                  <Text style={styles.cardName} numberOfLines={1}>
-                    {activeFixture.away_team?.short_name ?? 'A'}
-                  </Text>
-                </View>
-              </View>
+              </Animated.View>
             </Pressable>
           ) : (
             <Text style={styles.empty}>Fixtures not loaded yet.</Text>
@@ -786,7 +896,7 @@ export default function LmsHomeScreen() {
               {upcomingFixtures.map((f, i) => (
                 <Pressable
                   key={f.id}
-                  onPress={() => setFxIndex(i)}
+                  onPress={() => goToFixture(i)}
                   hitSlop={6}
                   accessibilityRole="button"
                   accessibilityLabel={`Show fixture ${i + 1}`}
@@ -892,6 +1002,9 @@ export default function LmsHomeScreen() {
       ) : (
         <>
           {renderNextUp()}
+          <View style={styles.deadlineAlertsWrap}>
+            <LmsPushNotificationsCard />
+          </View>
 
           <View style={styles.tabs}>
             {(
@@ -1099,8 +1212,6 @@ export default function LmsHomeScreen() {
                     </View>
                   )}
                 </View>
-
-                <LmsPushNotificationsCard />
               </>
             ) : null}
 
