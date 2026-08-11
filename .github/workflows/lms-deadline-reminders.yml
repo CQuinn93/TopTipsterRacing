@@ -1,0 +1,27 @@
+# Send LMS pick-deadline Web Push reminders (Home Screen / PWA subscribers).
+# Triggered by cron-job.org (recommended) or manually via workflow_dispatch.
+# Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY.
+# Optional: VAPID_SUBJECT.
+name: LMS deadline web-push reminders
+
+on:
+  workflow_dispatch:
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Send LMS deadline reminders
+        run: npx tsx scripts/send-lms-deadline-reminders.ts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}

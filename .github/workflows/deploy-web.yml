@@ -1,5 +1,6 @@
 # Build and deploy the web app to GitHub Pages.
 # Requires: Repository secrets SUPABASE_URL and SUPABASE_ANON_KEY (anon/public key, not service key).
+# For LMS Web Push: also set VAPID_PUBLIC_KEY (public half only; private key stays server-side).
 # In repo Settings → Pages, set Source to "GitHub Actions".
 name: Deploy web to GitHub Pages
 
@@ -55,6 +56,7 @@ jobs:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           EXPO_PUBLIC_WEB_BASE_URL: ''
+          EXPO_PUBLIC_VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
 
       - name: Add .nojekyll (required so _expo folder is served)
         run: touch dist/.nojekyll

@@ -131,15 +131,39 @@ Requires GitHub Secret **`Football_API`** (football-data.org token), plus the us
 
 ---
 
+### Job 5: LMS deadline web-push reminders (every 15 minutes)
+
+**COMMON tab**
+
+- **Title:** `LMS deadline reminders`
+- **URL:**  
+  `https://api.github.com/repos/OWNER/REPO/actions/workflows/lms-deadline-reminders.yml/dispatches`  
+  (or the numeric workflow ID once the workflow exists on GitHub — see Troubleshooting).
+- **Enable job:** On.
+- **Execution schedule:** **Custom** crontab: `*/15 * * * *` (every 15 minutes UTC).
+- **Schedule timezone:** UTC.
+
+**ADVANCED tab**
+
+- **Request method:** **POST**.
+- **Request headers:** Same as Job 1.
+- **Request body:** `{"ref":"BRANCH"}` (e.g. `{"ref":"main"}`).
+
+Then **CREATE** (or **Save**).
+
+Requires GitHub Secrets **`VAPID_PUBLIC_KEY`**, **`VAPID_PRIVATE_KEY`**, plus `SUPABASE_URL` / `SUPABASE_SERVICE_KEY`. Optional: `VAPID_SUBJECT`. See [WEB_PUSH.md](./WEB_PUSH.md).
+
+---
+
 ## 4. Summary
 
-| cron-job.org title      | Workflow file            | Schedule (UTC)              |
-|-------------------------|--------------------------|-----------------------------|
-| Update race results     | update-race-results.yml  | Every 10 min, 12:00–19:59   |
-| Pull races              | pull-races.yml           | 17:00 and 18:00 daily       |
-| Remove old races        | remove-old-races.yml     | 18:00 daily                 |
-| Sync LMS football data  | sync-lms-football.yml    | Every 6 hours (or as needed)|
-
+| cron-job.org title      | Workflow file                 | Schedule (UTC)              |
+|-------------------------|-------------------------------|-----------------------------|
+| Update race results     | update-race-results.yml       | Every 10 min, 12:00–19:59   |
+| Pull races              | pull-races.yml                | 17:00 and 18:00 daily       |
+| Remove old races        | remove-old-races.yml          | 18:00 daily                 |
+| Sync LMS football data  | sync-lms-football.yml         | Every 6 hours (or as needed)|
+| LMS deadline reminders  | lms-deadline-reminders.yml    | Every 15 minutes            |
 - **COMMON:** Title, URL (GitHub API dispatch URL), Schedule.
 - **ADVANCED:** Method = POST, Headers (Authorization with your PAT, Accept, X-GitHub-Api-Version, Content-Type), Body = `{"ref":"main"}` (or your branch).
 

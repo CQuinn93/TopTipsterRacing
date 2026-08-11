@@ -36,6 +36,7 @@ import { TeamColourChip } from '@/components/lms/TeamColourChip';
 import { LeagueTablePanel } from '@/components/lms/LeagueTablePanel';
 import { lmsDisplayTeamName } from '@/lib/lms/teamColours';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
+import { LmsPushNotificationsCard } from '@/components/lms/LmsPushNotificationsCard';
 
 type HomeTab = 'competitions' | 'join' | 'table';
 
@@ -1098,6 +1099,8 @@ export default function LmsHomeScreen() {
                     </View>
                   )}
                 </View>
+
+                <LmsPushNotificationsCard />
               </>
             ) : null}
 

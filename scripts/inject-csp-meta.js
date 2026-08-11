@@ -22,7 +22,7 @@ const base =
 const asset = (p) => `${base}${p.startsWith('/') ? p : `/${p}`}`;
 
 const cspMeta =
-  '<meta http-equiv="Content-Security-Policy" content="script-src \'self\' \'unsafe-eval\' \'unsafe-inline\'; style-src \'self\' \'unsafe-inline\';">';
+  '<meta http-equiv="Content-Security-Policy" content="script-src \'self\' \'unsafe-eval\' \'unsafe-inline\'; worker-src \'self\'; style-src \'self\' \'unsafe-inline\';">';
 
 const pwaHead = [
   '<meta name="theme-color" content="#0a0a0a" />',

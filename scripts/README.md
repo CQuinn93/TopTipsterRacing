@@ -18,6 +18,7 @@ These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/hor
 | **update-race-results.ts** | Gets races where `scheduled_time_utc` + 15 min < now and `is_finished = false`. Calls GET /race/{id}. Updates **horses** (position, sp, is_fav, etc.), **races.is_finished**. Replaces non-runner selections with FAV via RPC. FAV backfill (missing selections after deadline) is done by Supabase cron (migration 030). | **30 min after each race**; cron every 10–12 min. |
 | **remove-old-races.ts** | Deletes **race_days** where `race_date` is older than **5 days** (cascade deletes `races` and `horses`). Keeps DB small. | Daily, e.g. **18:00 UTC** – cron `0 18 * * *`. |
 | **sync-lms-football.ts** | Syncs Premier League **teams + fixtures/results** from [football-data.org](https://www.football-data.org/) into `lms_teams` / `lms_gameweeks` / `lms_fixtures`, then auto-settles finished gameweeks via `lms_settle_gameweek_internal`. May still store `crest_url` for a future restore, but the app UI uses colour chips (no crest display). Uses 2 API calls per run. | Every 6 hours (GitHub Action) or on demand. |
+| **send-lms-deadline-reminders.ts** | Web Push to Home Screen subscribers who have not picked before an LMS deadline (includes predicted auto-assign team). See [docs/WEB_PUSH.md](../docs/WEB_PUSH.md). | Every 15 min via GitHub Action `lms-deadline-reminders.yml`. |
 
 ## Database tables (migrations 010–011)
 
