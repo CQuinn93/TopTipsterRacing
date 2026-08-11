@@ -1,36 +1,57 @@
-import { useMemo } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
+import { useMemo, useState } from 'react';
+import { View, Text, StyleSheet, Pressable, ScrollView, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 
-const STEPS = [
+type TabKey = 'ios' | 'android';
+
+const SIMPLE_FONT =
+  Platform.OS === 'web'
+    ? 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+    : undefined;
+
+const IOS_SECTIONS = [
   {
-    title: 'Open Share',
-    body: 'In Safari, tap the Share button (the square with an arrow pointing up) at the bottom of the screen.',
+    title: 'Safari',
+    steps: [
+      'Press the Share button (square with an arrow pointing up), or the ••• menu if shown.',
+      'Tap Share.',
+      'Tap Add to Home Screen.',
+      'Tap Add. Open Top Tipster from the new Home Screen icon.',
+    ],
   },
   {
-    title: 'Add to Home Screen',
-    body: 'Scroll the share sheet if needed, then tap Add to Home Screen.',
+    title: 'Google / Chrome',
+    steps: [
+      'Select Share.',
+      'Tap Add to Home Screen.',
+      'Confirm, then open Top Tipster from the Home Screen icon.',
+    ],
   },
+] as const;
+
+const ANDROID_SECTIONS = [
   {
-    title: 'Confirm',
-    body: 'Tap Add. Top Tipster appears on your Home Screen like an app icon.',
-  },
-  {
-    title: 'Open from the icon',
-    body: 'Always launch Top Tipster from that icon (not a Safari tab) for the full app experience and notifications.',
+    title: 'Google / Chrome',
+    steps: [
+      'Select the three dots (⋮) in the browser menu.',
+      'Tap Install app or Add to Home screen / Create shortcut.',
+      'Tap Install.',
+      'Open Top Tipster from the new Home Screen icon.',
+    ],
   },
 ] as const;
 
 /**
- * Simple iOS / Safari guide for installing the PWA to the Home Screen.
+ * iOS + Android guide for installing the web app to the Home Screen.
  */
 export default function AddToHomeScreenGuide() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const [tab, setTab] = useState<TabKey>('ios');
 
   const styles = useMemo(
     () =>
@@ -52,8 +73,9 @@ export default function AddToHomeScreenGuide() {
         },
         title: {
           flex: 1,
-          fontFamily: theme.fontFamily.swish,
-          fontSize: 28,
+          fontFamily: SIMPLE_FONT ?? theme.fontFamily.input,
+          fontSize: 22,
+          fontWeight: '700',
           color: '#fafafa',
         },
         content: {
@@ -65,10 +87,49 @@ export default function AddToHomeScreenGuide() {
           alignSelf: 'center',
         },
         intro: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: SIMPLE_FONT ?? theme.fontFamily.input,
           fontSize: 15,
           color: theme.colors.textSecondary,
           lineHeight: 22,
+        },
+        tabs: {
+          flexDirection: 'row',
+          gap: theme.spacing.sm,
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          padding: 4,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+        },
+        tab: {
+          flex: 1,
+          paddingVertical: 10,
+          borderRadius: theme.radius.sm,
+          alignItems: 'center',
+        },
+        tabActive: {
+          backgroundColor: theme.colors.accentMuted,
+          borderWidth: 1,
+          borderColor: theme.colors.accent,
+        },
+        tabText: {
+          fontFamily: SIMPLE_FONT ?? theme.fontFamily.input,
+          fontSize: 14,
+          fontWeight: '600',
+          color: theme.colors.textMuted,
+        },
+        tabTextActive: {
+          color: theme.colors.accent,
+          fontWeight: '700',
+        },
+        section: {
+          gap: theme.spacing.md,
+        },
+        sectionTitle: {
+          fontFamily: SIMPLE_FONT ?? theme.fontFamily.input,
+          fontSize: 15,
+          fontWeight: '700',
+          color: '#fafafa',
         },
         step: {
           flexDirection: 'row',
@@ -84,35 +145,21 @@ export default function AddToHomeScreenGuide() {
           borderColor: theme.colors.accent,
           alignItems: 'center',
           justifyContent: 'center',
-          marginTop: 2,
+          marginTop: 1,
         },
         stepNumText: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: SIMPLE_FONT ?? theme.fontFamily.input,
           fontWeight: '700',
           fontSize: 13,
           color: theme.colors.accent,
         },
-        stepBody: {
-          flex: 1,
-          gap: 4,
-        },
-        stepTitle: {
-          fontFamily: theme.fontFamily.regular,
-          fontWeight: '700',
-          fontSize: 16,
-          color: '#fafafa',
-        },
         stepText: {
-          fontFamily: theme.fontFamily.regular,
+          flex: 1,
+          fontFamily: SIMPLE_FONT ?? theme.fontFamily.input,
           fontSize: 14,
           color: theme.colors.textSecondary,
           lineHeight: 20,
-        },
-        androidNote: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 13,
-          color: theme.colors.textMuted,
-          lineHeight: 19,
+          paddingTop: 4,
         },
         gotIt: {
           marginTop: theme.spacing.sm,
@@ -122,7 +169,7 @@ export default function AddToHomeScreenGuide() {
           alignItems: 'center',
         },
         gotItText: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: SIMPLE_FONT ?? theme.fontFamily.input,
           fontWeight: '700',
           fontSize: 16,
           color: theme.colors.white,
@@ -130,6 +177,8 @@ export default function AddToHomeScreenGuide() {
       }),
     [theme, insets.top, insets.bottom]
   );
+
+  const sections = tab === 'ios' ? IOS_SECTIONS : ANDROID_SECTIONS;
 
   return (
     <View style={styles.root}>
@@ -152,23 +201,44 @@ export default function AddToHomeScreenGuide() {
       </View>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.intro}>
-          For the best experience on iPhone — including deadline alerts — add Top Tipster to your
-          Home Screen from Safari.
+          For the best experience, add Top Tipster to your Home Screen. Pick your device below.
         </Text>
-        {STEPS.map((step, i) => (
-          <View key={step.title} style={styles.step}>
-            <View style={styles.stepNum}>
-              <Text style={styles.stepNumText}>{i + 1}</Text>
-            </View>
-            <View style={styles.stepBody}>
-              <Text style={styles.stepTitle}>{step.title}</Text>
-              <Text style={styles.stepText}>{step.body}</Text>
-            </View>
+
+        <View style={styles.tabs} accessibilityRole="tablist">
+          <Pressable
+            style={[styles.tab, tab === 'ios' && styles.tabActive]}
+            onPress={() => setTab('ios')}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: tab === 'ios' }}
+            accessibilityLabel="iOS instructions"
+          >
+            <Text style={[styles.tabText, tab === 'ios' && styles.tabTextActive]}>iOS</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.tab, tab === 'android' && styles.tabActive]}
+            onPress={() => setTab('android')}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: tab === 'android' }}
+            accessibilityLabel="Android instructions"
+          >
+            <Text style={[styles.tabText, tab === 'android' && styles.tabTextActive]}>Android</Text>
+          </Pressable>
+        </View>
+
+        {sections.map((section) => (
+          <View key={section.title} style={styles.section}>
+            <Text style={styles.sectionTitle}>{section.title}</Text>
+            {section.steps.map((body, i) => (
+              <View key={`${section.title}-${i}`} style={styles.step}>
+                <View style={styles.stepNum}>
+                  <Text style={styles.stepNumText}>{i + 1}</Text>
+                </View>
+                <Text style={styles.stepText}>{body}</Text>
+              </View>
+            ))}
           </View>
         ))}
-        <Text style={styles.androidNote}>
-          On Android Chrome: open the browser menu (⋮) → Install app or Add to Home screen.
-        </Text>
+
         <Pressable
           style={styles.gotIt}
           onPress={() => router.back()}

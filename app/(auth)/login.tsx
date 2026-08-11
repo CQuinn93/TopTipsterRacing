@@ -482,8 +482,7 @@ export default function LoginScreen() {
           {showHomeScreenTip ? (
             <View style={styles.homeTip}>
               <Text style={styles.homeTipText}>
-                For the best experience, add Top Tipster to your Home Screen (Safari Share → Add to
-                Home Screen).
+                For the best experience, add Top Tipster to your Home Screen.
               </Text>
               <TouchableOpacity
                 style={styles.homeTipBtn}
