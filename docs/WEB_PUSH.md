@@ -1,60 +1,93 @@
-# Web Push (LMS deadline reminders)
+# Web Push (LMS deadline + join-request reminders)
 
-Home Screen / PWA users can opt in to pick-deadline alerts. The payload includes the competition, gameweek, and the **auto-assign team** they would get if they skip (same A–Z unused pool team as `lms_auto_assign_missed_picks`).
+Home Screen / PWA users can opt in to alerts. Deadline reminders include the auto-assign team. Join-request alerts are **per manager** (creator vs Owner prefs are independent).
 
 ## One-time setup
 
-### 1. Apply the database migration
+### 1. Apply migrations
 
-Run Supabase migration `071_lms_web_push_reminders.sql` (subscriptions table, reminder RPC, dedupe log).
+- `071_lms_web_push_reminders.sql` — subscriptions + deadline reminder RPCs  
+- `072_lms_join_notify_prefs.sql` — per-user join notify prefs + recipient RPC  
 
-### 2. Generate VAPID keys
+### 2. Generate VAPID keys (once)
 
 ```bash
 npx web-push generate-vapid-keys
 ```
 
-You get a **public** and **private** key.
-
 ### 3. GitHub repository secrets
 
 | Secret | Used by |
 |--------|---------|
-| `VAPID_PUBLIC_KEY` | Web build (`EXPO_PUBLIC_VAPID_PUBLIC_KEY`) + reminder sender |
-| `VAPID_PRIVATE_KEY` | Reminder sender only (never ship to the client) |
-| `VAPID_SUBJECT` | Optional. `mailto:you@example.com` or `https://www.toptipster.ie` |
-| `SUPABASE_URL` | Already used |
-| `SUPABASE_SERVICE_KEY` | Already used |
-| `SUPABASE_ANON_KEY` | Already used for deploy |
+| `VAPID_PUBLIC_KEY` | Web build + deadline sender + Edge Function |
+| `VAPID_PRIVATE_KEY` | Deadline sender + Edge Function (never in the client) |
+| `VAPID_SUBJECT` | Optional (`mailto:…` or `https://www.toptipster.ie`) |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` / `SUPABASE_ANON_KEY` | Existing |
 
-Redeploy the web app after adding `VAPID_PUBLIC_KEY` so the client can subscribe.
+Redeploy the web app after adding `VAPID_PUBLIC_KEY`.
 
-### 4. Schedule (cron-job.org)
+### 4. Deadline reminders (cron-job.org)
 
-Trigger workflow `lms-deadline-reminders.yml` every **15 minutes** via cron-job.org (same pattern as your other jobs). See [cron-job-org-setup.md](./cron-job-org-setup.md) — Job 5.
+Every **15 minutes** → workflow `lms-deadline-reminders.yml`  
+See [cron-job-org-setup.md](./cron-job-org-setup.md) Job 5.
 
-Manual / local test:
+### 5. Instant join-request alerts (Edge Function)
+
+#### Deploy the function
 
 ```bash
-export SUPABASE_URL=...
-export SUPABASE_SERVICE_KEY=...
-export VAPID_PUBLIC_KEY=...
-export VAPID_PRIVATE_KEY=...
-npm run remind:lms-deadlines
+supabase functions deploy notify-lms-join-request
+supabase secrets set VAPID_PUBLIC_KEY="…" VAPID_PRIVATE_KEY="…" VAPID_SUBJECT="mailto:you@example.com"
 ```
 
-## User flow (iOS)
+(`SUPABASE_SERVICE_ROLE_KEY` is provided automatically to Edge Functions.)
 
-1. Safari → Share → **Add to Home Screen**
-2. Open the icon (standalone)
-3. LMS → Competitions → **Enable notifications**
-4. Allow the system permission prompt
+#### Database Webhook (Dashboard)
 
-Reminders fire about **2 hours** and **30 minutes** before `deadline_at` for active players with no pick and a stored subscription (once per window).
+1. Supabase → **Database** → **Webhooks** → **Create a new hook**  
+2. Name: `lms-join-request-push`  
+3. Table: `lms_join_requests` · Events: **Insert**  
+4. Type: **Supabase Edge Functions**  
+5. Edge Function: `notify-lms-join-request`  
+6. HTTP method: **POST**  
+7. Add header: **Authorization** = `Bearer <SERVICE_ROLE_KEY>`  
+   (or use “Add auth header with service key” if shown)  
+8. Timeout: **5000** ms (sending push can take a moment)  
+9. Create  
+
+Webhook payload should include `record.id` (the join request id). The function also accepts `{ "join_request_id": "…" }` for manual tests.
+
+#### Manual test
+
+```bash
+curl -X POST "$SUPABASE_URL/functions/v1/notify-lms-join-request" \
+  -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"join_request_id\":\"YOUR_PENDING_REQUEST_UUID\"}"
+```
+
+## Preference behaviour
+
+| Role | Default (no saved pref) | Toggle |
+|------|-------------------------|--------|
+| Competition **creator** | **On** | Admin → Join requests → “Notify me on join requests” |
+| **Owner** (not creator) | **Off** | Same toggle — only changes **their** alerts |
+
+Turning the switch off for yourself does **not** mute the other party.
+
+Recipients still need Home Screen + LMS home **Enable notifications**.
+
+## User flows
+
+**Deadline (player)**  
+Enable notifications → miss a pick → push ~2h and ~30m before deadline.
+
+**Join (manager)**  
+Creator enables notify (default on) → player requests join → Edge Function pushes within seconds.
 
 ## Files
 
-- Client: `lib/webPush*.ts`, `public/sw.js`, `components/lms/LmsPushNotificationsCard.tsx`
-- Sender: `scripts/send-lms-deadline-reminders.ts`
-- Workflow: `.github/workflows/lms-deadline-reminders.yml`
-- SQL: `supabase/migrations/071_lms_web_push_reminders.sql`
+- Client: `lib/webPush*.ts`, `public/sw.js`, `LmsPushNotificationsCard`, Admin toggle in `[competitionId].tsx`
+- Deadline sender: `scripts/send-lms-deadline-reminders.ts` + GitHub Action  
+- Join sender: `supabase/functions/notify-lms-join-request`  
+- SQL: `071_…`, `072_…`

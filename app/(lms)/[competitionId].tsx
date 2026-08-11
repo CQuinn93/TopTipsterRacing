@@ -28,6 +28,8 @@ import {
   lmsAdminSubmitPickForUser,
   lmsApproveJoinRequest,
   lmsCanManageCompetition,
+  lmsGetJoinNotifyPref,
+  lmsSetJoinNotifyPref,
   lmsGetCompetition,
   lmsGetCompetitionCurrentGameweek,
   lmsGetMyParticipant,
@@ -121,6 +123,8 @@ export default function LmsCompetitionDashboard() {
     }[]
   >([]);
   const [joinBusyId, setJoinBusyId] = useState<string | null>(null);
+  const [joinNotifyEnabled, setJoinNotifyEnabled] = useState(true);
+  const [joinNotifyBusy, setJoinNotifyBusy] = useState(false);
   const [adminPickUserId, setAdminPickUserId] = useState<string | null>(null);
   const [adminPickTeamId, setAdminPickTeamId] = useState<string | null>(null);
   const [adminPickUsedIds, setAdminPickUsedIds] = useState<string[]>([]);
@@ -453,12 +457,44 @@ export default function LmsCompetitionDashboard() {
     }
   }, [competitionId]);
 
+  const loadJoinNotifyPref = useCallback(async () => {
+    if (!competitionId) return;
+    try {
+      const res = await lmsGetJoinNotifyPref(competitionId);
+      if (res.success) setJoinNotifyEnabled(res.enabled);
+    } catch {
+      /* leave previous */
+    }
+  }, [competitionId]);
+
+  const onToggleJoinNotify = async (next: boolean) => {
+    if (!competitionId || joinNotifyBusy) return;
+    setJoinNotifyBusy(true);
+    const prev = joinNotifyEnabled;
+    setJoinNotifyEnabled(next);
+    try {
+      const res = await lmsSetJoinNotifyPref(competitionId, next);
+      if (!res.success) {
+        setJoinNotifyEnabled(prev);
+        Alert.alert('Error', res.error || 'Could not update notification preference');
+      } else {
+        setJoinNotifyEnabled(res.enabled);
+      }
+    } catch (e) {
+      setJoinNotifyEnabled(prev);
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not update preference');
+    } finally {
+      setJoinNotifyBusy(false);
+    }
+  };
   const loadSelectionSliceRef = useRef(loadSelectionSlice);
   loadSelectionSliceRef.current = loadSelectionSlice;
   const loadGameweeksSliceRef = useRef(loadGameweeksSlice);
   loadGameweeksSliceRef.current = loadGameweeksSlice;
   const loadPendingJoinsRef = useRef(loadPendingJoins);
   loadPendingJoinsRef.current = loadPendingJoins;
+  const loadJoinNotifyPrefRef = useRef(loadJoinNotifyPref);
+  loadJoinNotifyPrefRef.current = loadJoinNotifyPref;
 
   const reloadVisible = useCallback(async (mode: 'initial' | 'manual' = 'initial') => {
     if (!competitionId || !userId) return;
@@ -487,7 +523,10 @@ export default function LmsCompetitionDashboard() {
           })
         );
       }
-      if (t === 'admin') tasks.push(loadPendingJoinsRef.current());
+      if (t === 'admin') {
+        tasks.push(loadPendingJoinsRef.current());
+        tasks.push(loadJoinNotifyPrefRef.current());
+      }
       // Leaderboard standings + GW picks come from loadShell → loadLeaderboardExtras.
       await Promise.all(tasks);
     } catch (e) {
@@ -538,6 +577,7 @@ export default function LmsCompetitionDashboard() {
     }
     if (tab === 'admin' && canManage) {
       void loadPendingJoinsRef.current();
+      void loadJoinNotifyPrefRef.current();
     }
   }, [tab, canManage]);
 
@@ -1538,7 +1578,14 @@ export default function LmsCompetitionDashboard() {
           color: theme.colors.textSecondary,
         },
         adminToggleTextOn: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
           color: theme.colors.accent,
+        },
+        adminToggleTextOff: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          color: theme.colors.textSecondary,
         },
         adminSubTabs: {
           flexDirection: 'row',
@@ -2330,6 +2377,35 @@ export default function LmsCompetitionDashboard() {
                       Confirm or reject players who have requested to join this competition with a
                       code.
                     </Text>
+                    <View style={styles.adminRow}>
+                      <View style={styles.adminRowBody}>
+                        <Text style={styles.adminRowTitle}>Notify me on join requests</Text>
+                        <Text style={styles.adminRowMeta}>
+                          Only affects your device. Creators default on; Owners default off.
+                        </Text>
+                      </View>
+                      <Pressable
+                        style={[
+                          styles.adminToggle,
+                          joinNotifyEnabled ? styles.adminToggleOn : styles.adminToggleOff,
+                        ]}
+                        disabled={joinNotifyBusy}
+                        onPress={() => void onToggleJoinNotify(!joinNotifyEnabled)}
+                        accessibilityRole="switch"
+                        accessibilityState={{ checked: joinNotifyEnabled, disabled: joinNotifyBusy }}
+                        accessibilityLabel="Notify me on join requests"
+                      >
+                        <Text
+                          style={
+                            joinNotifyEnabled
+                              ? styles.adminToggleTextOn
+                              : styles.adminToggleTextOff
+                          }
+                        >
+                          {joinNotifyEnabled ? 'On' : 'Off'}
+                        </Text>
+                      </Pressable>
+                    </View>
                     <Text style={styles.poolTitle}>
                       Join requests · {pendingJoins.length} waiting
                     </Text>

@@ -973,6 +973,40 @@ export async function lmsCanManageCompetition(competitionId: string): Promise<{
   };
 }
 
+export async function lmsGetJoinNotifyPref(competitionId: string): Promise<{
+  success: boolean;
+  enabled: boolean;
+  error?: string;
+}> {
+  const { data, error } = await db.rpc('lms_get_join_notify_pref', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  const row = (data ?? {}) as { success?: boolean; enabled?: boolean; error?: string };
+  return {
+    success: !!row.success,
+    enabled: !!row.enabled,
+    error: row.error,
+  };
+}
+
+export async function lmsSetJoinNotifyPref(
+  competitionId: string,
+  enabled: boolean
+): Promise<{ success: boolean; enabled: boolean; error?: string }> {
+  const { data, error } = await db.rpc('lms_set_join_notify_pref', {
+    p_competition_id: competitionId,
+    p_enabled: enabled,
+  });
+  if (error) throw error;
+  const row = (data ?? {}) as { success?: boolean; enabled?: boolean; error?: string };
+  return {
+    success: !!row.success,
+    enabled: !!row.enabled,
+    error: row.error,
+  };
+}
+
 export async function lmsAdminSubmitPickForUser(
   competitionId: string,
   userId: string,
