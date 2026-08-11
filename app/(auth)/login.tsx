@@ -202,7 +202,10 @@ export default function LoginScreen() {
           gap: theme.spacing.sm,
         },
         homeTipText: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily:
+            Platform.OS === 'web'
+              ? 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+              : theme.fontFamily.input,
           fontSize: 13,
           color: '#a3a3a3',
           textAlign: 'center',
@@ -214,7 +217,10 @@ export default function LoginScreen() {
           paddingHorizontal: 14,
         },
         homeTipBtnText: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily:
+            Platform.OS === 'web'
+              ? 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif'
+              : theme.fontFamily.input,
           fontSize: 14,
           fontWeight: '700',
           color: theme.colors.accent,
