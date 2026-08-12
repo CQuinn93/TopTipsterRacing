@@ -34,3 +34,7 @@ export async function unsubscribeWebPush(
 export async function getActiveWebPushSubscription(): Promise<null> {
   return null;
 }
+
+export async function sendWebPushTest(): Promise<{ ok: false; error: string }> {
+  return { ok: false, error: 'Test push is only available in the browser Home Screen app.' };
+}

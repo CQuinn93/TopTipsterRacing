@@ -42,6 +42,7 @@ export function LmsPushNotificationsCard() {
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testStatus, setTestStatus] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -130,6 +131,12 @@ export function LmsPushNotificationsCard() {
           fontSize: 12,
           color: theme.colors.accent,
         },
+        statusLine: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          marginTop: 2,
+        },
       }),
     [theme]
   );
@@ -198,10 +205,12 @@ export function LmsPushNotificationsCard() {
     if (testing || busy) return;
     setTesting(true);
     setError(null);
+    setTestStatus('Calling notify-web-push-test…');
     try {
       const res = await sendWebPushTest();
       if (!res.ok) {
         setError(res.error || 'Test notification failed.');
+        setTestStatus('Failed — see message below.');
         Alert.alert(
           'Test notification',
           res.error ||
@@ -209,6 +218,7 @@ export function LmsPushNotificationsCard() {
         );
         return;
       }
+      setTestStatus(`Server sent ${res.sent ?? 1} push(es). Check for a banner.`);
       Alert.alert(
         'Test notification',
         `Sent (${res.sent ?? 1}). If you do not see a banner within a few seconds, check Focus / notification settings for this app.`
@@ -288,6 +298,7 @@ export function LmsPushNotificationsCard() {
           )}
         </TouchableOpacity>
       ) : null}
+      {testStatus ? <Text style={styles.statusLine}>{testStatus}</Text> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
