@@ -198,17 +198,24 @@ export function LmsPushNotificationsCard() {
     if (testing || busy) return;
     setTesting(true);
     setError(null);
-    const res = await sendWebPushTest();
-    setTesting(false);
-    if (!res.ok) {
-      setError(res.error || 'Test notification failed.');
-      Alert.alert('Test notification', res.error || 'Failed. Check Deadline Alerts is on and VAPID secrets are correct.');
-      return;
+    try {
+      const res = await sendWebPushTest();
+      if (!res.ok) {
+        setError(res.error || 'Test notification failed.');
+        Alert.alert(
+          'Test notification',
+          res.error ||
+            'Failed. Check Deadline Alerts is on, VAPID secrets are correct, and notify-web-push-test is deployed.'
+        );
+        return;
+      }
+      Alert.alert(
+        'Test notification',
+        `Sent (${res.sent ?? 1}). If you do not see a banner within a few seconds, check Focus / notification settings for this app.`
+      );
+    } finally {
+      setTesting(false);
     }
-    Alert.alert(
-      'Test notification',
-      `Sent (${res.sent ?? 1}). If you do not see a banner within a few seconds, check Focus / notification settings for this app.`
-    );
   };
 
   if (status === 'loading') {
