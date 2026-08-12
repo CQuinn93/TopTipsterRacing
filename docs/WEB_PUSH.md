@@ -77,6 +77,21 @@ Turning the switch off for yourself does **not** mute the other party.
 
 Recipients still need Home Screen + LMS home **Enable notifications**.
 
+## Test notification (debug shared delivery)
+
+Deploy:
+
+```bash
+supabase functions deploy notify-web-push-test
+```
+
+(Uses the same `VAPID_*` secrets as join notify.)
+
+On the Home Screen app → LMS home → turn **Deadline Alerts** on → tap **Send test notification**.
+
+- Success → PWA + subscription + VAPID + service worker are fine; debug join webhook / deadline cron next.
+- Failure → fix shared delivery before join/deadline logic.
+
 ## User flows
 
 **Deadline (player)**  

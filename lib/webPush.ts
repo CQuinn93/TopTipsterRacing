@@ -25,3 +25,42 @@ export const unsubscribeWebPush = impl.unsubscribeWebPush as (
 export const getActiveWebPushSubscription = impl.getActiveWebPushSubscription as () => Promise<{
   endpoint: string;
 } | null>;
+
+export async function sendWebPushTest(): Promise<{
+  ok: boolean;
+  error?: string;
+  sent?: number;
+  failed?: number;
+  message?: string;
+}> {
+  if (Platform.OS !== 'web') {
+    return { ok: false, error: 'Test push is only available in the Home Screen web app.' };
+  }
+  const { supabase } = await import('@/lib/supabase');
+  const { data, error } = await supabase.functions.invoke('notify-web-push-test', { body: {} });
+  if (error) {
+    return { ok: false, error: error.message || 'Could not call test notification function.' };
+  }
+  const row = (data ?? {}) as {
+    ok?: boolean;
+    error?: string;
+    message?: string;
+    sent?: number;
+    failed?: number;
+    errors?: string[];
+  };
+  if (row.error === 'no_subscription') {
+    return { ok: false, error: row.message || 'No push subscription saved yet.' };
+  }
+  if (row.error === 'VAPID keys not configured' || row.error?.includes('VAPID')) {
+    return { ok: false, error: row.error };
+  }
+  if (typeof row.error === 'string' && row.ok !== true && !row.sent) {
+    return { ok: false, error: row.error };
+  }
+  if (row.ok === true || (row.sent != null && row.sent > 0)) {
+    return { ok: true, sent: row.sent, failed: row.failed };
+  }
+  const detail = row.errors?.[0] || row.message || row.error || 'Push send failed.';
+  return { ok: false, error: detail, sent: row.sent, failed: row.failed };
+}

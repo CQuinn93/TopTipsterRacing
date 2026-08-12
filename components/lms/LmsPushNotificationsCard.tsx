@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Platform,
   Alert,
+  TouchableOpacity,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -17,6 +18,7 @@ import {
   getWebPushPermission,
   isRunningAsInstalledWebApp,
   isWebPushSupported,
+  sendWebPushTest,
   subscribeWebPush,
   unsubscribeWebPush,
 } from '@/lib/webPush';
@@ -31,13 +33,14 @@ type Status =
   | 'on';
 
 /**
- * Compact LMS deadline Web Push opt-in (Home Screen web app).
+ * Compact LMS deadline Web Push opt-in (Home Screen web app) + test send.
  */
 export function LmsPushNotificationsCard() {
   const theme = useTheme();
   const { userId } = useAuth();
   const [status, setStatus] = useState<Status>('loading');
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -112,6 +115,21 @@ export function LmsPushNotificationsCard() {
           alignItems: 'flex-end',
           justifyContent: 'center',
         },
+        testBtn: {
+          alignSelf: 'flex-start',
+          marginTop: 4,
+          paddingVertical: 6,
+          paddingHorizontal: 10,
+          borderRadius: theme.radius.sm,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.background,
+        },
+        testBtnText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.accent,
+        },
       }),
     [theme]
   );
@@ -145,7 +163,7 @@ export function LmsPushNotificationsCard() {
   };
 
   const onToggle = (value: boolean) => {
-    if (busy) return;
+    if (busy || testing) return;
 
     if (status === 'need_homescreen') {
       if (Platform.OS === 'web') {
@@ -176,6 +194,23 @@ export function LmsPushNotificationsCard() {
     else void onDisable();
   };
 
+  const onSendTest = async () => {
+    if (testing || busy) return;
+    setTesting(true);
+    setError(null);
+    const res = await sendWebPushTest();
+    setTesting(false);
+    if (!res.ok) {
+      setError(res.error || 'Test notification failed.');
+      Alert.alert('Test notification', res.error || 'Failed. Check Deadline Alerts is on and VAPID secrets are correct.');
+      return;
+    }
+    Alert.alert(
+      'Test notification',
+      `Sent (${res.sent ?? 1}). If you do not see a banner within a few seconds, check Focus / notification settings for this app.`
+    );
+  };
+
   if (status === 'loading') {
     return (
       <View style={styles.card}>
@@ -202,6 +237,8 @@ export function LmsPushNotificationsCard() {
     hint = 'Notifications are blocked in device settings.';
   } else if (status === 'not_configured') {
     hint = 'Push is not configured on this deployment yet.';
+  } else if (enabled) {
+    hint = 'Uses the same device channel as join-request alerts.';
   }
 
   return (
@@ -215,7 +252,7 @@ export function LmsPushNotificationsCard() {
             <Switch
               value={enabled}
               onValueChange={onToggle}
-              disabled={busy}
+              disabled={busy || testing}
               trackColor={{
                 false: theme.colors.border,
                 true: theme.colors.accentDim,
@@ -229,6 +266,21 @@ export function LmsPushNotificationsCard() {
         </View>
       </View>
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+      {enabled ? (
+        <TouchableOpacity
+          style={styles.testBtn}
+          onPress={() => void onSendTest()}
+          disabled={testing || busy}
+          accessibilityRole="button"
+          accessibilityLabel="Send test notification"
+        >
+          {testing ? (
+            <ActivityIndicator color={theme.colors.accent} />
+          ) : (
+            <Text style={styles.testBtnText}>Send test notification</Text>
+          )}
+        </TouchableOpacity>
+      ) : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
