@@ -127,18 +127,57 @@ export async function lmsRequestJoin(accessCode: string): Promise<{
   competition_name?: string;
   competition_id?: string;
   status?: string;
+  join_request_id?: string;
 }> {
   const { data, error } = await db.rpc('lms_request_join', {
     p_access_code: accessCode.trim().toUpperCase(),
   });
   if (error) throw error;
-  return (data ?? { success: false, error: 'unknown' }) as {
+  const result = (data ?? { success: false, error: 'unknown' }) as {
     success: boolean;
     error?: string;
     competition_name?: string;
     competition_id?: string;
     status?: string;
+    join_request_id?: string;
   };
+
+  if (result.success) {
+    let joinRequestId = result.join_request_id ?? null;
+    // Fallback if migration 074 not applied yet (RPC may omit join_request_id).
+    if (!joinRequestId && result.competition_id) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const uid = sessionData.session?.user?.id;
+      if (uid) {
+        const { data: jr } = await db
+          .from('lms_join_requests')
+          .select('id')
+          .eq('competition_id', result.competition_id)
+          .eq('user_id', uid)
+          .eq('status', 'pending')
+          .maybeSingle();
+        joinRequestId = (jr as { id?: string } | null)?.id ?? null;
+      }
+    }
+    if (joinRequestId) {
+      result.join_request_id = joinRequestId;
+      void supabase.functions
+        .invoke('notify-lms-join-request', {
+          body: { join_request_id: joinRequestId },
+        })
+        .then(({ data: fnData, error: fnErr }) => {
+          if (fnErr) console.warn('[lms] notify-lms-join-request', fnErr.message);
+          else console.log('[lms] notify-lms-join-request', fnData);
+        })
+        .catch((e) => {
+          console.warn('[lms] notify-lms-join-request failed', e);
+        });
+    } else {
+      console.warn('[lms] join succeeded but no join_request_id to notify with');
+    }
+  }
+
+  return result;
 }
 
 export async function lmsSubmitPick(params: {

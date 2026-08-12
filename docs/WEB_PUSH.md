@@ -33,29 +33,20 @@ See [cron-job-org-setup.md](./cron-job-org-setup.md) Job 5.
 
 ### 5. Instant join-request alerts (Edge Function)
 
-#### Deploy the function
+After a successful join code submit, the **web app** calls `notify-lms-join-request` with the new `join_request_id` (same auth pattern as the test push). A Database Webhook is optional backup.
+
+#### Deploy
 
 ```bash
+# Apply migration 074 (returns join_request_id), then:
 supabase functions deploy notify-lms-join-request
-supabase secrets set VAPID_PUBLIC_KEY="…" VAPID_PRIVATE_KEY="…" VAPID_SUBJECT="mailto:you@example.com"
 ```
 
-(`SUPABASE_SERVICE_ROLE_KEY` is provided automatically to Edge Functions.)
+Notification copy:
+> **New join request**  
+> `<username> has requested to join <competition>. Please visit the admin panel within the app to accept or reject them.`
 
-#### Database Webhook (Dashboard)
-
-1. Supabase → **Database** → **Webhooks** → **Create a new hook**  
-2. Name: `lms-join-request-push`  
-3. Table: `lms_join_requests` · Events: **Insert**  
-4. Type: **Supabase Edge Functions**  
-5. Edge Function: `notify-lms-join-request`  
-6. HTTP method: **POST**  
-7. Add header: **Authorization** = `Bearer <SERVICE_ROLE_KEY>`  
-   (or use “Add auth header with service key” if shown)  
-8. Timeout: **5000** ms (sending push can take a moment)  
-9. Create  
-
-Webhook payload should include `record.id` (the join request id). The function also accepts `{ "join_request_id": "…" }` for manual tests.
+Managers still need Home Screen + **Deadline Alerts** on (shared subscription). Creators default to join-notify on; Owners default off until they toggle it.
 
 #### Manual test
 

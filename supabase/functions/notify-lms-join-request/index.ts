@@ -1,12 +1,14 @@
 /**
- * Instant Web Push when an LMS join request is created (pending).
+ * Instant Web Push when an LMS join request is pending.
  *
- * Trigger via Supabase Database Webhook on INSERT to public.lms_join_requests
- * (see docs/WEB_PUSH.md). Also accepts a manual POST with { join_request_id }.
+ * Preferred: client invokes after successful lms_request_join (same pattern as
+ * notify-web-push-test). Optional: Database Webhook on INSERT with service role.
+ *
+ * Auth: service role / CRON_SECRET, OR signed-in user who owns the pending request
+ * (or competition creator / Owner).
  *
  * Secrets: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, optional VAPID_SUBJECT,
- * SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY. Optional CRON_SECRET / webhook
- * Authorization bearer = service role.
+ * SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY.
  */
 // @ts-nocheck
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -41,7 +43,6 @@ function extractJoinRequestId(payload: unknown): string | null {
   if (typeof p.record === "object" && p.record && typeof (p.record as { id?: string }).id === "string") {
     return (p.record as { id: string }).id;
   }
-  // Database Webhooks sometimes nest under `payload.record`
   if (typeof p.payload === "object" && p.payload) {
     const inner = p.payload as Record<string, unknown>;
     if (typeof inner.record === "object" && inner.record && typeof (inner.record as { id?: string }).id === "string") {
@@ -58,16 +59,17 @@ Deno.serve(async (req) => {
 
   try {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
     const cronSecret = Deno.env.get("CRON_SECRET");
     const auth = req.headers.get("Authorization") ?? "";
     const headerSecret = req.headers.get("x-cron-secret") ?? "";
-    const okAuth =
-      (serviceKey && auth === `Bearer ${serviceKey}`) ||
-      (cronSecret && headerSecret === cronSecret) ||
-      // Supabase Database Webhooks can send the service role as Authorization
-      (serviceKey && auth.toLowerCase().startsWith("bearer ") && auth.slice(7) === serviceKey);
+    const bearerToken = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
 
-    if (!okAuth) {
+    const isServiceRole =
+      Boolean(serviceKey) && (auth === `Bearer ${serviceKey}` || bearerToken === serviceKey);
+    const isCron = Boolean(cronSecret) && headerSecret === cronSecret;
+
+    if (!isServiceRole && !isCron && !bearerToken) {
       return json(401, { error: "Unauthorized" });
     }
 
@@ -77,6 +79,11 @@ Deno.serve(async (req) => {
     const vapidSubject = Deno.env.get("VAPID_SUBJECT") || "mailto:admin@toptipster.ie";
     if (!vapidPublic || !vapidPrivate) {
       return json(500, { error: "VAPID keys not configured" });
+    }
+    if (vapidPublic === vapidPrivate) {
+      return json(500, {
+        error: "VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY must be different values",
+      });
     }
 
     webpush.setVapidDetails(vapidSubject, vapidPublic, vapidPrivate);
@@ -105,6 +112,38 @@ Deno.serve(async (req) => {
       return json(200, { ok: true, skipped: "not_pending" });
     }
 
+    if (!isServiceRole && !isCron) {
+      if (!anonKey) {
+        return json(500, { error: "SUPABASE_ANON_KEY not configured" });
+      }
+      const userClient = createClient(supabaseUrl, anonKey, {
+        global: { headers: { Authorization: `Bearer ${bearerToken}` } },
+      });
+      const { data: userData, error: userErr } = await userClient.auth.getUser();
+      if (userErr || !userData?.user) {
+        return json(401, { error: "Unauthorized" });
+      }
+      const uid = userData.user.id;
+      if (uid !== jr.user_id) {
+        const { data: compRow } = await admin
+          .from("lms_competitions")
+          .select("created_by_user_id")
+          .eq("id", jr.competition_id)
+          .maybeSingle();
+        const { data: profileRow } = await admin
+          .from("profiles")
+          .select("role")
+          .eq("id", uid)
+          .maybeSingle();
+        const isManager =
+          (compRow as { created_by_user_id?: string } | null)?.created_by_user_id === uid ||
+          (profileRow as { role?: string } | null)?.role === "Owner";
+        if (!isManager) {
+          return json(403, { error: "forbidden" });
+        }
+      }
+    }
+
     const { data: comp, error: compErr } = await admin
       .from("lms_competitions")
       .select("id, name")
@@ -128,11 +167,12 @@ Deno.serve(async (req) => {
     if (recErr) throw recErr;
 
     const rows = (recipients ?? []) as Recipient[];
-    // Never notify the joiner about their own request
     const targets = rows.filter((r) => r.user_id !== jr.user_id);
 
     const title = "New join request";
-    const bodyText = `${username} wants to join ${competitionName}.`;
+    const bodyText =
+      `${username} has requested to join ${competitionName}. ` +
+      `Please visit the admin panel within the app to accept or reject them.`;
     const payload = JSON.stringify({
       title,
       body: bodyText,
