@@ -990,6 +990,30 @@ export async function lmsGetJoinNotifyPref(competitionId: string): Promise<{
   };
 }
 
+export async function lmsGetCompetitionJoinCodes(competitionId: string): Promise<{
+  success: boolean;
+  join_code: string | null;
+  active_rejoin_code: string | null;
+  error?: string;
+}> {
+  const { data, error } = await db.rpc('lms_get_competition_join_codes', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  const row = (data ?? {}) as {
+    success?: boolean;
+    join_code?: string | null;
+    active_rejoin_code?: string | null;
+    error?: string;
+  };
+  return {
+    success: !!row.success,
+    join_code: row.join_code ?? null,
+    active_rejoin_code: row.active_rejoin_code ?? null,
+    error: row.error,
+  };
+}
+
 export async function lmsSetJoinNotifyPref(
   competitionId: string,
   enabled: boolean

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSidebar } from '@/contexts/SidebarContext';
@@ -28,6 +29,7 @@ import {
   lmsAdminSubmitPickForUser,
   lmsApproveJoinRequest,
   lmsCanManageCompetition,
+  lmsGetCompetitionJoinCodes,
   lmsGetJoinNotifyPref,
   lmsSetJoinNotifyPref,
   lmsGetCompetition,
@@ -125,6 +127,8 @@ export default function LmsCompetitionDashboard() {
   const [joinBusyId, setJoinBusyId] = useState<string | null>(null);
   const [joinNotifyEnabled, setJoinNotifyEnabled] = useState(true);
   const [joinNotifyBusy, setJoinNotifyBusy] = useState(false);
+  const [joinCode, setJoinCode] = useState<string | null>(null);
+  const [rejoinCode, setRejoinCode] = useState<string | null>(null);
   const [adminPickUserId, setAdminPickUserId] = useState<string | null>(null);
   const [adminPickTeamId, setAdminPickTeamId] = useState<string | null>(null);
   const [adminPickUsedIds, setAdminPickUsedIds] = useState<string[]>([]);
@@ -467,6 +471,36 @@ export default function LmsCompetitionDashboard() {
     }
   }, [competitionId]);
 
+  const loadJoinCodes = useCallback(async () => {
+    if (!competitionId) return;
+    try {
+      const res = await lmsGetCompetitionJoinCodes(competitionId);
+      if (res.success) {
+        setJoinCode(res.join_code);
+        setRejoinCode(res.active_rejoin_code);
+      }
+    } catch {
+      /* leave previous */
+    }
+  }, [competitionId]);
+
+  const copyAccessCode = async (code: string | null, label: string) => {
+    if (!code) {
+      Alert.alert(`No ${label}`, `This competition does not have a ${label} yet.`);
+      return;
+    }
+    try {
+      await Clipboard.setStringAsync(code);
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(`Copied ${label}: ${code}`);
+      } else {
+        Alert.alert('Copied', `${label} ${code} copied to clipboard.`);
+      }
+    } catch {
+      Alert.alert('Copy failed', `Could not copy the ${label}. Try selecting it manually.`);
+    }
+  };
+
   const onToggleJoinNotify = async (next: boolean) => {
     if (!competitionId || joinNotifyBusy) return;
     setJoinNotifyBusy(true);
@@ -495,6 +529,8 @@ export default function LmsCompetitionDashboard() {
   loadPendingJoinsRef.current = loadPendingJoins;
   const loadJoinNotifyPrefRef = useRef(loadJoinNotifyPref);
   loadJoinNotifyPrefRef.current = loadJoinNotifyPref;
+  const loadJoinCodesRef = useRef(loadJoinCodes);
+  loadJoinCodesRef.current = loadJoinCodes;
 
   const reloadVisible = useCallback(async (mode: 'initial' | 'manual' = 'initial') => {
     if (!competitionId || !userId) return;
@@ -526,6 +562,7 @@ export default function LmsCompetitionDashboard() {
       if (t === 'admin') {
         tasks.push(loadPendingJoinsRef.current());
         tasks.push(loadJoinNotifyPrefRef.current());
+        tasks.push(loadJoinCodesRef.current());
       }
       // Leaderboard standings + GW picks come from loadShell → loadLeaderboardExtras.
       await Promise.all(tasks);
@@ -578,6 +615,7 @@ export default function LmsCompetitionDashboard() {
     if (tab === 'admin' && canManage) {
       void loadPendingJoinsRef.current();
       void loadJoinNotifyPrefRef.current();
+      void loadJoinCodesRef.current();
     }
   }, [tab, canManage]);
 
@@ -1592,6 +1630,43 @@ export default function LmsCompetitionDashboard() {
           flexWrap: 'wrap',
           gap: 8,
         },
+        joinCodeCard: {
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.md,
+          padding: theme.spacing.md,
+          backgroundColor: theme.colors.surface,
+          gap: theme.spacing.sm,
+        },
+        joinCodeLabel: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          textTransform: 'uppercase',
+          letterSpacing: 0.6,
+        },
+        joinCodeRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: theme.spacing.md,
+        },
+        joinCodeValue: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 28,
+          letterSpacing: 4,
+          color: theme.colors.text,
+        },
+        joinCodeHint: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+        },
+        rejoinMeta: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 12,
+          color: theme.colors.textSecondary,
+        },
         adminSubTab: {
           flexGrow: 1,
           flexBasis: '30%',
@@ -2341,6 +2416,39 @@ export default function LmsCompetitionDashboard() {
 
             {tab === 'admin' && canManage ? (
               <>
+                <View style={styles.joinCodeCard}>
+                  <Text style={styles.joinCodeLabel}>Join code</Text>
+                  <Pressable
+                    style={styles.joinCodeRow}
+                    onPress={() => void copyAccessCode(joinCode, 'join code')}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      joinCode ? `Copy join code ${joinCode}` : 'No join code available'
+                    }
+                  >
+                    <View>
+                      <Text style={styles.joinCodeValue}>{joinCode ?? '————'}</Text>
+                      <Text style={styles.joinCodeHint}>
+                        {joinCode ? 'Tap to copy · share with players' : 'No join code yet'}
+                      </Text>
+                    </View>
+                    {joinCode ? (
+                      <Ionicons name="copy-outline" size={22} color={theme.colors.accent} />
+                    ) : null}
+                  </Pressable>
+                  {rejoinCode ? (
+                    <Pressable
+                      onPress={() => void copyAccessCode(rejoinCode, 'rejoin code')}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Copy rejoin code ${rejoinCode}`}
+                    >
+                      <Text style={styles.rejoinMeta}>
+                        Active rejoin code: {rejoinCode} · tap to copy
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+
                 <View style={styles.adminSubTabs}>
                   {(
                     [
