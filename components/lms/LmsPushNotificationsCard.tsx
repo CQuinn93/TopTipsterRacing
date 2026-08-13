@@ -17,6 +17,7 @@ import {
   getVapidPublicKey,
   getWebPushPermission,
   isRunningAsInstalledWebApp,
+  isWebPushBoundToCurrentUser,
   isWebPushSupported,
   sendWebPushTest,
   subscribeWebPush,
@@ -68,8 +69,13 @@ export function LmsPushNotificationsCard() {
       return;
     }
     const sub = await getActiveWebPushSubscription();
-    setStatus(sub ? 'on' : 'off');
-  }, []);
+    if (!sub) {
+      setStatus('off');
+      return;
+    }
+    const bound = await isWebPushBoundToCurrentUser();
+    setStatus(bound ? 'on' : 'off');
+  }, [userId]);
 
   useEffect(() => {
     void refresh();

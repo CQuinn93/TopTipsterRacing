@@ -91,8 +91,9 @@ export async function subscribeWebPush(
   }
 
   try {
-    const reg = await ensureServiceWorker();
-    if (!reg) return { ok: false, error: 'Could not register the notification service.' };
+    const registered = await ensureServiceWorker();
+    if (!registered) return { ok: false, error: 'Could not register the notification service.' };
+    const reg = await navigator.serviceWorker.ready;
 
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
@@ -115,24 +116,8 @@ export async function subscribeWebPush(
       return { ok: false, error: 'Invalid push subscription from the browser.' };
     }
 
-    await (supabase as any)
-      .from('web_push_subscriptions')
-      .delete()
-      .eq('user_id', userId)
-      .neq('endpoint', endpoint);
-
-    const { error } = await (supabase as any).from('web_push_subscriptions').upsert(
-      {
-        user_id: userId,
-        endpoint,
-        p256dh,
-        auth,
-        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'endpoint' }
-    );
-    if (error) return { ok: false, error: error.message };
+    const bound = await bindEndpointToCurrentUser(endpoint, p256dh, auth);
+    if (!bound.ok) return bound;
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Could not enable notifications.';
@@ -140,23 +125,69 @@ export async function subscribeWebPush(
   }
 }
 
+async function bindEndpointToCurrentUser(
+  endpoint: string,
+  p256dh: string,
+  auth: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data, error } = await (supabase as any).rpc('web_push_bind_device', {
+    p_endpoint: endpoint,
+    p_p256dh: p256dh,
+    p_auth: auth,
+    p_user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
+  });
+  if (error) return { ok: false, error: error.message };
+  if (data && data.success === false) {
+    return { ok: false, error: data.error || 'Could not save this device.' };
+  }
+  return { ok: true };
+}
+
+/** Re-attach this phone's existing OS subscription to whoever is logged in now. */
+export async function bindWebPushDeviceToCurrentUser(): Promise<void> {
+  if (!isWebPushSupported() || !isRunningAsInstalledWebApp()) return;
+  if (getWebPushPermission() !== 'granted') return;
+  const sub = await getActiveWebPushSubscription();
+  if (!sub) return;
+  const json = sub.toJSON();
+  const endpoint = json.endpoint;
+  const p256dh = json.keys?.p256dh;
+  const auth = json.keys?.auth;
+  if (!endpoint || !p256dh || !auth) return;
+  await bindEndpointToCurrentUser(endpoint, p256dh, auth);
+}
+
+/** Stop sending to this phone for the current account; keep OS permission for the next login. */
+export async function unbindWebPushDevice(): Promise<void> {
+  if (!isWebPushSupported()) return;
+  const sub = await getActiveWebPushSubscription();
+  if (!sub?.endpoint) return;
+  await (supabase as any).rpc('web_push_unbind_device', { p_endpoint: sub.endpoint });
+}
+
+export async function isWebPushBoundToCurrentUser(): Promise<boolean> {
+  const sub = await getActiveWebPushSubscription();
+  if (!sub?.endpoint) return false;
+  const { data, error } = await (supabase as any)
+    .from('web_push_subscriptions')
+    .select('endpoint')
+    .eq('endpoint', sub.endpoint)
+    .maybeSingle();
+  if (error) return false;
+  return Boolean(data?.endpoint);
+}
+
 export async function unsubscribeWebPush(
-  userId: string
+  _userId: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const sub = await getActiveWebPushSubscription();
     if (sub) {
       const endpoint = sub.endpoint;
-      await sub.unsubscribe();
-      if (userId && endpoint) {
-        await (supabase as any)
-          .from('web_push_subscriptions')
-          .delete()
-          .eq('user_id', userId)
-          .eq('endpoint', endpoint);
+      if (endpoint) {
+        await (supabase as any).rpc('web_push_unbind_device', { p_endpoint: endpoint });
       }
-    } else if (userId) {
-      await (supabase as any).from('web_push_subscriptions').delete().eq('user_id', userId);
+      await sub.unsubscribe();
     }
     return { ok: true };
   } catch (e) {

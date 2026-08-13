@@ -31,6 +31,14 @@ export async function unsubscribeWebPush(
   return { ok: true };
 }
 
+export async function bindWebPushDeviceToCurrentUser(): Promise<void> {}
+
+export async function unbindWebPushDevice(): Promise<void> {}
+
+export async function isWebPushBoundToCurrentUser(): Promise<boolean> {
+  return false;
+}
+
 export async function getActiveWebPushSubscription(): Promise<null> {
   return null;
 }

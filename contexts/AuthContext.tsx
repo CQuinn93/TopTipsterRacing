@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { cancelAllSelectionReminders } from '@/lib/selectionReminderNotifications';
+import { bindWebPushDeviceToCurrentUser, unbindWebPushDevice } from '@/lib/webPush';
 
 type AuthContextType = {
   session: Session | null;
@@ -31,6 +32,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!cancelled) {
           setSession(s ?? null);
           setIsLoading(false);
+          if (s?.user?.id) void bindWebPushDeviceToCurrentUser();
         }
         clearTimeoutAndDone();
       },
@@ -44,6 +46,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, s) => {
       setSession(s ?? null);
+      if (s?.user?.id) {
+        void bindWebPushDeviceToCurrentUser();
+      }
     });
 
     return () => {
@@ -54,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    await unbindWebPushDevice();
     await cancelAllSelectionReminders();
     await supabase.auth.signOut();
   };
