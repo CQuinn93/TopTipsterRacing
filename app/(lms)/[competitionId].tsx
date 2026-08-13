@@ -834,18 +834,50 @@ export default function LmsCompetitionDashboard() {
     [leaderboard]
   );
 
-  const rankedStandings = useMemo(() => {
-    const rank = (s: string) => {
-      if (s === 'winner') return 0;
-      if (s === 'active') return 1;
-      return 2;
-    };
-    return [...leaderboard].sort((a, b) => {
-      const d = rank(a.status) - rank(b.status);
-      if (d !== 0) return d;
-      return (a.username || a.user_id).localeCompare(b.username || b.user_id);
-    });
-  }, [leaderboard]);
+  const standingSections = useMemo(() => {
+    const byName = (a: LmsParticipant, b: LmsParticipant) =>
+      (a.username || a.user_id).localeCompare(b.username || b.user_id);
+
+    const survivors = leaderboard
+      .filter((p) => p.status === 'active' || p.status === 'winner')
+      .sort((a, b) => {
+        if (a.status === 'winner' && b.status !== 'winner') return -1;
+        if (b.status === 'winner' && a.status !== 'winner') return 1;
+        return byName(a, b);
+      });
+
+    const currentGwId = currentGw?.id ?? null;
+    const outThisWeek = leaderboard
+      .filter(
+        (p) =>
+          p.status === 'eliminated' &&
+          !!currentGwId &&
+          p.eliminated_gameweek_id === currentGwId
+      )
+      .sort(byName);
+
+    const eliminated = leaderboard
+      .filter(
+        (p) =>
+          p.status === 'eliminated' &&
+          (!currentGwId || p.eliminated_gameweek_id !== currentGwId)
+      )
+      .sort(byName);
+
+    return { survivors, outThisWeek, eliminated };
+  }, [leaderboard, currentGw?.id]);
+
+  const gwNumberById = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const g of gameweeks) map.set(g.id, g.number);
+    if (currentGw) map.set(currentGw.id, currentGw.number);
+    for (const h of historyPicks) {
+      if (h.gameweek_id && h.gameweek_number != null) {
+        map.set(h.gameweek_id, h.gameweek_number);
+      }
+    }
+    return map;
+  }, [gameweeks, currentGw, historyPicks]);
 
   const currentPickTeam = useMemo(
     () => (pick ? teams.find((t) => t.id === pick.team_id) ?? null : null),
@@ -1490,13 +1522,23 @@ export default function LmsCompetitionDashboard() {
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: theme.colors.border,
         },
-        lbRank: {
-          width: 28,
-          fontFamily: theme.fontFamily.baiBold,
-          fontSize: 14,
-          color: theme.colors.textMuted,
+        standingSection: {
+          marginTop: theme.spacing.sm,
+          marginBottom: theme.spacing.xs,
         },
-        lbBody: { flex: 1 },
+        standingSectionTitle: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 11,
+          letterSpacing: 1.1,
+          textTransform: 'uppercase',
+          color: theme.colors.textMuted,
+          marginBottom: 4,
+        },
+        standingSectionCount: {
+          fontFamily: theme.fontFamily.baiMedium,
+          color: theme.colors.textSecondary,
+        },
+        lbBody: { flex: 1, minWidth: 0 },
         lbNameRow: {
           flexDirection: 'row',
           alignItems: 'center',
@@ -1511,8 +1553,14 @@ export default function LmsCompetitionDashboard() {
         lbYou: {
           color: theme.colors.accent,
         },
+        lbOutMeta: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          marginTop: 2,
+        },
         lbDrawer: {
-          paddingLeft: 38,
+          paddingLeft: 8,
           paddingBottom: 12,
           gap: 6,
         },
@@ -1853,6 +1901,103 @@ export default function LmsCompetitionDashboard() {
     );
   };
 
+  const renderStandingRow = (p: LmsParticipant, opts?: { showOutGw?: boolean }) => {
+    const isYou = p.user_id === userId;
+    const userPick = pickByUserId.get(p.user_id);
+    const expanded = expandedUserId === p.user_id;
+    const history = historyByUserId.get(p.user_id) ?? [];
+    const outGw =
+      opts?.showOutGw && p.eliminated_gameweek_id
+        ? gwNumberById.get(p.eliminated_gameweek_id)
+        : null;
+    const statusText =
+      p.status === 'active' ? 'Alive' : p.status === 'winner' ? 'Winner' : 'Out';
+
+    return (
+      <View key={p.id} style={styles.lbBlock}>
+        <Pressable
+          style={styles.lbRow}
+          onPress={() => setExpandedUserId((prev) => (prev === p.user_id ? null : p.user_id))}
+          accessibilityRole="button"
+          accessibilityState={{ expanded }}
+          accessibilityLabel={`${p.username || 'Player'} history`}
+        >
+          <View style={styles.lbBody}>
+            <View style={styles.lbNameRow}>
+              <Text style={[styles.lbName, isYou && styles.lbYou]} numberOfLines={1}>
+                {p.username || p.user_id.slice(0, 8)}
+                {isYou ? ' (you)' : ''}
+              </Text>
+              <Ionicons
+                name={expanded ? 'chevron-up' : 'chevron-down'}
+                size={14}
+                color={theme.colors.textMuted}
+              />
+            </View>
+            {outGw != null ? <Text style={styles.lbOutMeta}>Out GW{outGw}</Text> : null}
+          </View>
+          {p.status !== 'eliminated' && currentGw ? (
+            picksRevealed && userPick?.team ? (
+              <View style={styles.lbPick}>
+                <TeamColourChip
+                  shortName={userPick.team.short_name}
+                  name={userPick.team.name}
+                  slug={userPick.team.slug}
+                  size={22}
+                />
+                <Text style={styles.lbPickName} numberOfLines={1}>
+                  {userPick.team.short_name || lmsDisplayTeamName(userPick.team.name)}
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.lbPickHidden}>{picksRevealed ? 'No pick' : 'Hidden'}</Text>
+            )
+          ) : null}
+          <Text style={[styles.lbStatus, { color: statusColor(p.status) }]}>{statusText}</Text>
+        </Pressable>
+        {expanded ? (
+          <View style={styles.lbDrawer}>
+            {historyLoadingUserId === p.user_id ? (
+              <ActivityIndicator color={theme.colors.accent} />
+            ) : history.length === 0 ? (
+              <Text style={styles.lbDrawerEmpty}>No completed gameweek picks yet.</Text>
+            ) : (
+              history.map((h) => (
+                <View key={`${h.gameweek_id}-${h.team_id}`} style={styles.lbHistoryRow}>
+                  <Text style={styles.lbHistoryGw}>GW{h.gameweek_number}</Text>
+                  <TeamColourChip
+                    shortName={h.team?.short_name}
+                    name={h.team?.name}
+                    slug={h.team?.slug}
+                    size={20}
+                  />
+                  <Text style={styles.lbHistoryName} numberOfLines={1}>
+                    {lmsDisplayTeamName(h.team?.name) || 'Unknown team'}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.lbHistoryResult,
+                      {
+                        color:
+                          h.result === 'correct'
+                            ? theme.colors.accent
+                            : h.result === 'incorrect'
+                              ? theme.colors.error
+                              : theme.colors.textMuted,
+                      },
+                    ]}
+                  >
+                    {h.result === 'correct' ? 'Won' : h.result === 'incorrect' ? 'Out' : h.result}
+                  </Text>
+                </View>
+              ))
+            )}
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
   return (
     <View style={styles.root}>
       <View style={styles.header}>
@@ -1915,7 +2060,7 @@ export default function LmsCompetitionDashboard() {
               [
                 { key: 'gameweeks' as const, label: 'Gameweeks' },
                 { key: 'selection' as const, label: 'Selection' },
-                { key: 'leaderboard' as const, label: 'Leaderboard' },
+                { key: 'leaderboard' as const, label: 'Standing' },
                 ...(canManage ? [{ key: 'admin' as const, label: 'Admin' }] : []),
               ] as { key: TabKey; label: string }[]
             ).map((t) => {
@@ -2293,123 +2438,65 @@ export default function LmsCompetitionDashboard() {
             {tab === 'leaderboard' ? (
               <>
                 <Text style={styles.sectionIntro}>
-                  Last player standing wins. Tap a player to see teams they used in completed
-                  gameweeks.
+                  Still standing wins. Tap a player for their used teams.
                   {currentGw
                     ? picksRevealed
                       ? ` Showing GW${currentGw.number} picks.`
-                      : ` Picks for GW${currentGw.number} stay hidden until the first match kicks off.`
+                      : ` GW${currentGw.number} picks stay hidden until the first kickoff.`
                     : ''}
                 </Text>
-                {rankedStandings.length === 0 ? (
+                {leaderboard.length === 0 ? (
                   <Text style={styles.muted}>No players in this competition yet.</Text>
                 ) : (
-                  rankedStandings.map((p, i) => {
-                    const isYou = p.user_id === userId;
-                    const userPick = pickByUserId.get(p.user_id);
-                    const expanded = expandedUserId === p.user_id;
-                    const history = historyByUserId.get(p.user_id) ?? [];
-                    return (
-                      <View key={p.id} style={styles.lbBlock}>
-                        <Pressable
-                          style={styles.lbRow}
-                          onPress={() =>
-                            setExpandedUserId((prev) => (prev === p.user_id ? null : p.user_id))
-                          }
-                          accessibilityRole="button"
-                          accessibilityState={{ expanded }}
-                          accessibilityLabel={`${p.username || 'Player'} history`}
-                        >
-                          <Text style={styles.lbRank}>{i + 1}</Text>
-                          <View style={styles.lbBody}>
-                            <View style={styles.lbNameRow}>
-                              <Text style={[styles.lbName, isYou && styles.lbYou]} numberOfLines={1}>
-                                {p.username || p.user_id.slice(0, 8)}
-                                {isYou ? ' (you)' : ''}
-                              </Text>
-                              <Ionicons
-                                name={expanded ? 'chevron-up' : 'chevron-down'}
-                                size={14}
-                                color={theme.colors.textMuted}
-                              />
-                            </View>
-                          </View>
-                          {currentGw ? (
-                            picksRevealed && userPick?.team ? (
-                              <View style={styles.lbPick}>
-                                <TeamColourChip
-                                  shortName={userPick.team.short_name}
-                                  name={userPick.team.name}
-                                  slug={userPick.team.slug}
-                                  size={22}
-                                />
-                                <Text style={styles.lbPickName} numberOfLines={1}>
-                                  {userPick.team.short_name ||
-                                    lmsDisplayTeamName(userPick.team.name)}
-                                </Text>
-                              </View>
-                            ) : (
-                              <Text style={styles.lbPickHidden}>
-                                {picksRevealed ? 'No pick' : 'Hidden'}
-                              </Text>
-                            )
-                          ) : null}
-                          <Text style={[styles.lbStatus, { color: statusColor(p.status) }]}>
-                            {p.status === 'active'
-                              ? 'Alive'
-                              : p.status === 'winner'
-                                ? 'Winner'
-                                : 'Out'}
+                  <>
+                    {standingSections.survivors.length > 0 ? (
+                      <View style={styles.standingSection}>
+                        <Text style={styles.standingSectionTitle}>
+                          {standingSections.survivors.every((p) => p.status === 'winner')
+                            ? standingSections.survivors.length === 1
+                              ? 'Champion'
+                              : 'Champions'
+                            : 'Still standing'}
+                          <Text style={styles.standingSectionCount}>
+                            {' '}
+                            · {standingSections.survivors.length}
                           </Text>
-                        </Pressable>
-                        {expanded ? (
-                          <View style={styles.lbDrawer}>
-                            {historyLoadingUserId === p.user_id ? (
-                              <ActivityIndicator color={theme.colors.accent} />
-                            ) : history.length === 0 ? (
-                              <Text style={styles.lbDrawerEmpty}>
-                                No completed gameweek picks yet.
-                              </Text>
-                            ) : (
-                              history.map((h) => (
-                                <View key={`${h.gameweek_id}-${h.team_id}`} style={styles.lbHistoryRow}>
-                                  <Text style={styles.lbHistoryGw}>GW{h.gameweek_number}</Text>
-                                  <TeamColourChip
-                                    shortName={h.team?.short_name}
-                                    name={h.team?.name}
-                                    slug={h.team?.slug}
-                                    size={20}
-                                  />
-                                  <Text style={styles.lbHistoryName} numberOfLines={1}>
-                                    {lmsDisplayTeamName(h.team?.name) || 'Unknown team'}
-                                  </Text>
-                                  <Text
-                                    style={[
-                                      styles.lbHistoryResult,
-                                      {
-                                        color:
-                                          h.result === 'correct'
-                                            ? theme.colors.accent
-                                            : h.result === 'incorrect'
-                                              ? theme.colors.error
-                                              : theme.colors.textMuted,
-                                      },
-                                    ]}
-                                  >
-                                    {h.result === 'correct'
-                                      ? 'Won'
-                                      : h.result === 'incorrect'
-                                        ? 'Out'
-                                        : h.result}
-                                  </Text>
-                                </View>
-                              ))
-                            )}
-                          </View>
-                        ) : null}
+                        </Text>
+                        {standingSections.survivors.map((p) => renderStandingRow(p))}
                       </View>
-                    );
-                  })
+                    ) : null}
+
+                    {standingSections.outThisWeek.length > 0 ? (
+                      <View style={styles.standingSection}>
+                        <Text style={styles.standingSectionTitle}>
+                          Out this week
+                          {currentGw ? ` · GW${currentGw.number}` : ''}
+                          <Text style={styles.standingSectionCount}>
+                            {' '}
+                            · {standingSections.outThisWeek.length}
+                          </Text>
+                        </Text>
+                        {standingSections.outThisWeek.map((p) =>
+                          renderStandingRow(p, { showOutGw: true })
+                        )}
+                      </View>
+                    ) : null}
+
+                    {standingSections.eliminated.length > 0 ? (
+                      <View style={styles.standingSection}>
+                        <Text style={styles.standingSectionTitle}>
+                          Eliminated
+                          <Text style={styles.standingSectionCount}>
+                            {' '}
+                            · {standingSections.eliminated.length}
+                          </Text>
+                        </Text>
+                        {standingSections.eliminated.map((p) =>
+                          renderStandingRow(p, { showOutGw: true })
+                        )}
+                      </View>
+                    ) : null}
+                  </>
                 )}
               </>
             ) : null}
