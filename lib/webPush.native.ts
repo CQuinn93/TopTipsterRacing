@@ -35,6 +35,8 @@ export async function bindWebPushDeviceToCurrentUser(): Promise<void> {}
 
 export async function unbindWebPushDevice(): Promise<void> {}
 
+export async function unbindAllWebPushDevices(): Promise<void> {}
+
 export async function isWebPushBoundToCurrentUser(): Promise<boolean> {
   return false;
 }

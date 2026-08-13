@@ -165,6 +165,11 @@ export async function unbindWebPushDevice(): Promise<void> {
   await (supabase as any).rpc('web_push_unbind_device', { p_endpoint: sub.endpoint });
 }
 
+/** Drop every saved phone for this account (lost-device / sign out everywhere). */
+export async function unbindAllWebPushDevices(): Promise<void> {
+  await (supabase as any).rpc('web_push_unbind_all_devices');
+}
+
 export async function isWebPushBoundToCurrentUser(): Promise<boolean> {
   const sub = await getActiveWebPushSubscription();
   if (!sub?.endpoint) return false;

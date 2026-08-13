@@ -2,13 +2,14 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { cancelAllSelectionReminders } from '@/lib/selectionReminderNotifications';
-import { bindWebPushDeviceToCurrentUser, unbindWebPushDevice } from '@/lib/webPush';
+import { bindWebPushDeviceToCurrentUser, unbindAllWebPushDevices, unbindWebPushDevice } from '@/lib/webPush';
 
 type AuthContextType = {
   session: Session | null;
   userId: string | null;
   isLoading: boolean;
   signOut: () => Promise<void>;
+  signOutAllDevices: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -61,7 +62,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     await unbindWebPushDevice();
     await cancelAllSelectionReminders();
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: 'local' });
+  };
+
+  const signOutAllDevices = async () => {
+    await unbindAllWebPushDevices();
+    await cancelAllSelectionReminders();
+    await supabase.auth.signOut({ scope: 'global' });
   };
 
   return (
@@ -71,6 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         userId: session?.user?.id ?? null,
         isLoading,
         signOut,
+        signOutAllDevices,
       }}
     >
       {children}

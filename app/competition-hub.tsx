@@ -167,13 +167,14 @@ export default function CompetitionHubScreen() {
   const theme = useTheme();
   const isDark = true;
   const insets = useSafeAreaInsets();
-  const { userId, signOut } = useAuth();
+  const { userId, signOut, signOutAllDevices } = useAuth();
   const { width, height } = useWindowDimensions();
   const params = useLocalSearchParams<{ tab?: string }>();
   const [displayName, setDisplayName] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [signingOutAll, setSigningOutAll] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const initialTab = String(params.tab ?? '').trim();
   const [tab, setTab] = useState<HubTab>(
@@ -322,6 +323,43 @@ export default function CompetitionHubScreen() {
         style: 'destructive',
         onPress: () => {
           void runSignOut();
+        },
+      },
+    ]);
+  };
+
+  const handleSignOutAllDevices = () => {
+    const message =
+      'This signs you out everywhere (phones, tablets, browsers) and stops notifications on those devices. Continue?';
+    const confirmed =
+      Platform.OS === 'web' ? typeof window !== 'undefined' && window.confirm(message) : null;
+
+    const run = async () => {
+      setSigningOutAll(true);
+      try {
+        await signOutAllDevices();
+        router.replace('/(auth)/login');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Could not sign out of all devices';
+        if (Platform.OS === 'web' && typeof window !== 'undefined') window.alert(msg);
+        else Alert.alert('Error', msg);
+      } finally {
+        setSigningOutAll(false);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (confirmed) void run();
+      return;
+    }
+
+    Alert.alert('Sign out of all devices', message, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign out everywhere',
+        style: 'destructive',
+        onPress: () => {
+          void run();
         },
       },
     ]);
@@ -721,6 +759,23 @@ export default function CompetitionHubScreen() {
           fontWeight: '700',
           color: theme.colors.error,
         },
+        signOutAllBtn: {
+          alignSelf: 'center',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingVertical: 12,
+          paddingHorizontal: 18,
+          borderRadius: theme.radius.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+        },
+        signOutAllBtnText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          fontWeight: '700',
+          color: theme.colors.text,
+        },
         footer: {
           paddingTop: theme.spacing.sm,
           paddingBottom: Math.max(insets.bottom, theme.spacing.md),
@@ -882,13 +937,33 @@ export default function CompetitionHubScreen() {
                 <View style={styles.accountCard}>
                   <Text style={styles.panelLabel}>Your account</Text>
                   <Text style={styles.accountBlurb}>
+                    Lost a phone? Sign out of every device and stop notifications on those devices.
+                    You will need to sign in again on phones you still use.
+                  </Text>
+                  <Pressable
+                    style={styles.signOutAllBtn}
+                    onPress={handleSignOutAllDevices}
+                    disabled={signingOutAll || signingOut || deletingAccount}
+                    accessibilityRole="button"
+                    accessibilityLabel="Sign out of all devices"
+                  >
+                    {signingOutAll ? (
+                      <ActivityIndicator size="small" color={theme.colors.text} />
+                    ) : (
+                      <>
+                        <Ionicons name="phone-portrait-outline" size={18} color={theme.colors.text} />
+                        <Text style={styles.signOutAllBtnText}>Sign out of all devices</Text>
+                      </>
+                    )}
+                  </Pressable>
+                  <Text style={styles.accountBlurb}>
                     Delete your account permanently if you no longer want to use Top Tipster. This
                     removes your profile and competition data and cannot be undone.
                   </Text>
                   <Pressable
                     style={styles.deleteBtn}
                     onPress={handleDeleteAccount}
-                    disabled={deletingAccount}
+                    disabled={deletingAccount || signingOutAll}
                     accessibilityRole="button"
                     accessibilityLabel="Delete account"
                   >

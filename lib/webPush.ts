@@ -25,6 +25,7 @@ export const unsubscribeWebPush = impl.unsubscribeWebPush as (
 ) => Promise<{ ok: true } | { ok: false; error: string }>;
 export const bindWebPushDeviceToCurrentUser = impl.bindWebPushDeviceToCurrentUser as () => Promise<void>;
 export const unbindWebPushDevice = impl.unbindWebPushDevice as () => Promise<void>;
+export const unbindAllWebPushDevices = impl.unbindAllWebPushDevices as () => Promise<void>;
 export const isWebPushBoundToCurrentUser = impl.isWebPushBoundToCurrentUser as () => Promise<boolean>;
 export const getActiveWebPushSubscription = impl.getActiveWebPushSubscription as () => Promise<{
   endpoint: string;
