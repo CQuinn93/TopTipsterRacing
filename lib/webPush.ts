@@ -30,10 +30,3 @@ export const isWebPushBoundToCurrentUser = impl.isWebPushBoundToCurrentUser as (
 export const getActiveWebPushSubscription = impl.getActiveWebPushSubscription as () => Promise<{
   endpoint: string;
 } | null>;
-export const sendWebPushTest = impl.sendWebPushTest as () => Promise<{
-  ok: boolean;
-  error?: string;
-  sent?: number;
-  failed?: number;
-  message?: string;
-}>;

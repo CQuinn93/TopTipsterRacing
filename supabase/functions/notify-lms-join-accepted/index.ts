@@ -1,11 +1,9 @@
 /**
- * Instant Web Push when an LMS join request is pending.
+ * Instant Web Push to the player when an admin accepts their LMS join request.
  *
- * Preferred: client invokes after successful lms_request_join.
- * Optional: Database Webhook on INSERT with service role.
+ * Preferred: client invokes after successful lms_admin_approve_join.
  *
- * Auth: service role / CRON_SECRET, OR signed-in user who owns the pending request
- * (or competition creator / Owner).
+ * Auth: service role / CRON_SECRET, OR signed-in manager (creator / Owner).
  *
  * Secrets: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, optional VAPID_SUBJECT,
  * SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY.
@@ -21,13 +19,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-cron-secret",
 };
 
-type Recipient = {
-  user_id: string;
-  endpoint: string;
-  p256dh: string;
-  auth: string;
-};
-
 function json(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     status,
@@ -38,16 +29,9 @@ function json(status: number, body: Record<string, unknown>) {
 function extractJoinRequestId(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null;
   const p = payload as Record<string, unknown>;
-
   if (typeof p.join_request_id === "string") return p.join_request_id;
   if (typeof p.record === "object" && p.record && typeof (p.record as { id?: string }).id === "string") {
     return (p.record as { id: string }).id;
-  }
-  if (typeof p.payload === "object" && p.payload) {
-    const inner = p.payload as Record<string, unknown>;
-    if (typeof inner.record === "object" && inner.record && typeof (inner.record as { id?: string }).id === "string") {
-      return (inner.record as { id: string }).id;
-    }
   }
   return null;
 }
@@ -108,8 +92,8 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (jrErr) throw jrErr;
     if (!jr) return json(404, { error: "join_request_not_found" });
-    if (jr.status !== "pending") {
-      return json(200, { ok: true, skipped: "not_pending" });
+    if (jr.status !== "approved") {
+      return json(200, { ok: true, skipped: "not_approved" });
     }
 
     if (!isServiceRole && !isCron) {
@@ -124,23 +108,21 @@ Deno.serve(async (req) => {
         return json(401, { error: "Unauthorized" });
       }
       const uid = userData.user.id;
-      if (uid !== jr.user_id) {
-        const { data: compRow } = await admin
-          .from("lms_competitions")
-          .select("created_by_user_id")
-          .eq("id", jr.competition_id)
-          .maybeSingle();
-        const { data: profileRow } = await admin
-          .from("profiles")
-          .select("role")
-          .eq("id", uid)
-          .maybeSingle();
-        const isManager =
-          (compRow as { created_by_user_id?: string } | null)?.created_by_user_id === uid ||
-          (profileRow as { role?: string } | null)?.role === "Owner";
-        if (!isManager) {
-          return json(403, { error: "forbidden" });
-        }
+      const { data: compRow } = await admin
+        .from("lms_competitions")
+        .select("created_by_user_id")
+        .eq("id", jr.competition_id)
+        .maybeSingle();
+      const { data: profileRow } = await admin
+        .from("profiles")
+        .select("role")
+        .eq("id", uid)
+        .maybeSingle();
+      const isManager =
+        (compRow as { created_by_user_id?: string } | null)?.created_by_user_id === uid ||
+        (profileRow as { role?: string } | null)?.role === "Owner";
+      if (!isManager) {
+        return json(403, { error: "forbidden" });
       }
     }
 
@@ -151,28 +133,23 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (compErr) throw compErr;
 
-    const { data: profile } = await admin
-      .from("profiles")
-      .select("username")
-      .eq("id", jr.user_id)
-      .maybeSingle();
+    const competitionName = (comp as { name?: string } | null)?.name || "the competition";
 
-    const username = (profile as { username?: string | null } | null)?.username?.trim() || "Someone";
-    const competitionName = (comp as { name?: string } | null)?.name || "your competition";
+    const { data: subs, error: subErr } = await admin
+      .from("web_push_subscriptions")
+      .select("endpoint, p256dh, auth")
+      .eq("user_id", jr.user_id);
+    if (subErr) throw subErr;
 
-    const { data: recipients, error: recErr } = await admin.rpc(
-      "lms_list_join_notify_recipients",
-      { p_competition_id: jr.competition_id },
-    );
-    if (recErr) throw recErr;
+    const rows = (subs ?? []) as { endpoint: string; p256dh: string; auth: string }[];
+    if (rows.length === 0) {
+      return json(200, { ok: true, skipped: "no_subscription", join_request_id: joinRequestId });
+    }
 
-    const rows = (recipients ?? []) as Recipient[];
-    const targets = rows.filter((r) => r.user_id !== jr.user_id);
-
-    const title = "New join request";
+    const title = "Join request accepted";
     const bodyText =
-      `${username} has requested to join ${competitionName}. ` +
-      `Please visit the admin panel within the app to accept or reject them.`;
+      `Your request to join ${competitionName} has been accepted. ` +
+      `You can open the competition and start playing.`;
     const payload = JSON.stringify({
       title,
       body: bodyText,
@@ -186,7 +163,7 @@ Deno.serve(async (req) => {
     let failed = 0;
     let pruned = 0;
 
-    for (const row of targets) {
+    for (const row of rows) {
       try {
         await webpush.sendNotification(
           {
@@ -194,7 +171,7 @@ Deno.serve(async (req) => {
             keys: { p256dh: row.p256dh, auth: row.auth },
           },
           payload,
-          { TTL: 60 * 60 },
+          { TTL: 60 * 60 * 24 },
         );
         sent += 1;
       } catch (e: unknown) {
@@ -213,7 +190,7 @@ Deno.serve(async (req) => {
     return json(200, {
       ok: true,
       join_request_id: joinRequestId,
-      recipients: targets.length,
+      recipients: rows.length,
       sent,
       failed,
       pruned,

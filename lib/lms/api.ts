@@ -1109,7 +1109,26 @@ export async function lmsAdminApproveJoin(adminCode: string, requestId: string) 
     p_request_id: requestId,
   });
   if (error) throw error;
-  return data as { success: boolean; error?: string };
+  const result = (data ?? { success: false, error: 'unknown' }) as {
+    success: boolean;
+    error?: string;
+  };
+
+  if (result.success) {
+    void supabase.functions
+      .invoke('notify-lms-join-accepted', {
+        body: { join_request_id: requestId },
+      })
+      .then(({ data: fnData, error: fnErr }) => {
+        if (fnErr) console.warn('[lms] notify-lms-join-accepted', fnErr.message);
+        else console.log('[lms] notify-lms-join-accepted', fnData);
+      })
+      .catch((e) => {
+        console.warn('[lms] notify-lms-join-accepted failed', e);
+      });
+  }
+
+  return result;
 }
 
 export async function lmsAdminRejectJoin(adminCode: string, requestId: string) {

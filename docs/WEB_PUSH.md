@@ -33,7 +33,7 @@ See [cron-job-org-setup.md](./cron-job-org-setup.md) Job 5.
 
 ### 5. Instant join-request alerts (Edge Function)
 
-After a successful join code submit, the **web app** calls `notify-lms-join-request` with the new `join_request_id` (same auth pattern as the test push). A Database Webhook is optional backup.
+After a successful join code submit, the **web app** calls `notify-lms-join-request` with the new `join_request_id`. A Database Webhook is optional backup.
 
 #### Deploy
 
@@ -57,6 +57,18 @@ curl -X POST "$SUPABASE_URL/functions/v1/notify-lms-join-request" \
   -d "{\"join_request_id\":\"YOUR_PENDING_REQUEST_UUID\"}"
 ```
 
+### 6. Join accepted alerts (Edge Function)
+
+After an admin accepts a request, the app calls `notify-lms-join-accepted` so the **player** gets a push (if they have Deadline Alerts on).
+
+```bash
+supabase functions deploy notify-lms-join-accepted
+```
+
+Notification copy:
+> **Join request accepted**  
+> `Your request to join <competition> has been accepted. You can open the competition and start playing.`
+
 ## Preference behaviour
 
 | Role | Default (no saved pref) | Toggle |
@@ -68,21 +80,6 @@ Turning the switch off for yourself does **not** mute the other party.
 
 Recipients still need Home Screen + LMS home **Enable notifications**.
 
-## Test notification (debug shared delivery)
-
-Deploy:
-
-```bash
-supabase functions deploy notify-web-push-test
-```
-
-(Uses the same `VAPID_*` secrets as join notify.)
-
-On the Home Screen app → LMS home → turn **Deadline Alerts** on → tap **Send test notification**.
-
-- Success → PWA + subscription + VAPID + service worker are fine; debug join webhook / deadline cron next.
-- Failure → fix shared delivery before join/deadline logic.
-
 ## User flows
 
 **Deadline (player)**  
@@ -91,9 +88,13 @@ Enable notifications → miss a pick → push ~2h and ~30m before deadline.
 **Join (manager)**  
 Creator enables notify (default on) → player requests join → Edge Function pushes within seconds.
 
+**Join accepted (player)**  
+Admin accepts → player gets a push if Deadline Alerts is on.
+
 ## Files
 
 - Client: `lib/webPush*.ts`, `public/sw.js`, `LmsPushNotificationsCard`, Admin toggle in `[competitionId].tsx`
 - Deadline sender: `scripts/send-lms-deadline-reminders.ts` + GitHub Action  
-- Join sender: `supabase/functions/notify-lms-join-request`  
+- Join request sender: `supabase/functions/notify-lms-join-request`  
+- Join accepted sender: `supabase/functions/notify-lms-join-accepted`  
 - SQL: `071_…`, `072_…`

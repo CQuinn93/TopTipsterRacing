@@ -280,10 +280,15 @@ export default function LmsHomeScreen() {
         return;
       }
       setCode('');
-      Alert.alert(
-        'Request sent',
-        `Your request to join ${res.competition_name ?? 'the competition'} is pending admin approval.`
-      );
+      const compName = res.competition_name?.trim() || 'the competition';
+      const joinMsg =
+        `You have successfully requested to join ${compName}. ` +
+        `The admin will be notified and will review your request.`;
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(joinMsg);
+      } else {
+        Alert.alert('Request sent', joinMsg);
+      }
       await load();
       setTab('competitions');
     } catch (e) {

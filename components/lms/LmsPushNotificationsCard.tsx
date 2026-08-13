@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   Platform,
   Alert,
-  TouchableOpacity,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -19,7 +18,6 @@ import {
   isRunningAsInstalledWebApp,
   isWebPushBoundToCurrentUser,
   isWebPushSupported,
-  sendWebPushTest,
   subscribeWebPush,
   unsubscribeWebPush,
 } from '@/lib/webPush';
@@ -33,17 +31,13 @@ type Status =
   | 'off'
   | 'on';
 
-/**
- * Compact LMS deadline Web Push opt-in (Home Screen web app) + test send.
- */
+/** Compact LMS deadline Web Push opt-in (Home Screen web app). */
 export function LmsPushNotificationsCard() {
   const theme = useTheme();
   const { userId } = useAuth();
   const [status, setStatus] = useState<Status>('loading');
   const [busy, setBusy] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [testStatus, setTestStatus] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -122,27 +116,6 @@ export function LmsPushNotificationsCard() {
           alignItems: 'flex-end',
           justifyContent: 'center',
         },
-        testBtn: {
-          alignSelf: 'flex-start',
-          marginTop: 4,
-          paddingVertical: 6,
-          paddingHorizontal: 10,
-          borderRadius: theme.radius.sm,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.background,
-        },
-        testBtnText: {
-          fontFamily: theme.fontFamily.baiMedium,
-          fontSize: 12,
-          color: theme.colors.accent,
-        },
-        statusLine: {
-          fontFamily: theme.fontFamily.baiLight,
-          fontSize: 11,
-          color: theme.colors.textMuted,
-          marginTop: 2,
-        },
       }),
     [theme]
   );
@@ -176,7 +149,7 @@ export function LmsPushNotificationsCard() {
   };
 
   const onToggle = (value: boolean) => {
-    if (busy || testing) return;
+    if (busy) return;
 
     if (status === 'need_homescreen') {
       if (Platform.OS === 'web') {
@@ -205,33 +178,6 @@ export function LmsPushNotificationsCard() {
 
     if (value) void onEnable();
     else void onDisable();
-  };
-
-  const onSendTest = async () => {
-    if (testing || busy) return;
-    setTesting(true);
-    setError(null);
-    setTestStatus('Calling notify-web-push-test…');
-    try {
-      const res = await sendWebPushTest();
-      if (!res.ok) {
-        setError(res.error || 'Test notification failed.');
-        setTestStatus('Failed — see message below.');
-        Alert.alert(
-          'Test notification',
-          res.error ||
-            'Failed. Check Deadline Alerts is on, VAPID secrets are correct, and notify-web-push-test is deployed.'
-        );
-        return;
-      }
-      setTestStatus(`Server sent ${res.sent ?? 1} push(es). Check for a banner.`);
-      Alert.alert(
-        'Test notification',
-        `Sent (${res.sent ?? 1}). If you do not see a banner within a few seconds, check Focus / notification settings for this app.`
-      );
-    } finally {
-      setTesting(false);
-    }
   };
 
   if (status === 'loading') {
@@ -275,7 +221,7 @@ export function LmsPushNotificationsCard() {
             <Switch
               value={enabled}
               onValueChange={onToggle}
-              disabled={busy || testing}
+              disabled={busy}
               trackColor={{
                 false: theme.colors.border,
                 true: theme.colors.accentDim,
@@ -289,22 +235,6 @@ export function LmsPushNotificationsCard() {
         </View>
       </View>
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}
-      {enabled ? (
-        <TouchableOpacity
-          style={styles.testBtn}
-          onPress={() => void onSendTest()}
-          disabled={testing || busy}
-          accessibilityRole="button"
-          accessibilityLabel="Send test notification"
-        >
-          {testing ? (
-            <ActivityIndicator color={theme.colors.accent} />
-          ) : (
-            <Text style={styles.testBtnText}>Send test notification</Text>
-          )}
-        </TouchableOpacity>
-      ) : null}
-      {testStatus ? <Text style={styles.statusLine}>{testStatus}</Text> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
