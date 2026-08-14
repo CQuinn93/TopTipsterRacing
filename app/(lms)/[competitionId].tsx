@@ -32,6 +32,8 @@ import {
   lmsGetCompetitionJoinCodes,
   lmsGetJoinNotifyPref,
   lmsSetJoinNotifyPref,
+  lmsListCompetitionManagers,
+  lmsSetCompetitionManager,
   lmsGetCompetition,
   lmsGetCompetitionCurrentGameweek,
   lmsGetMyParticipant,
@@ -112,6 +114,11 @@ export default function LmsCompetitionDashboard() {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [canManage, setCanManage] = useState(false);
+  const [canHandleJoins, setCanHandleJoins] = useState(false);
+  const [isCompManager, setIsCompManager] = useState(false);
+  const [createdByUserId, setCreatedByUserId] = useState<string | null>(null);
+  const [managerUserIds, setManagerUserIds] = useState<Set<string>>(new Set());
+  const [managerBusyId, setManagerBusyId] = useState<string | null>(null);
   const [poolTeamIds, setPoolTeamIds] = useState<string[]>([]);
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminSubTab, setAdminSubTab] = useState<'joins' | 'pool' | 'picks'>('joins');
@@ -437,6 +444,9 @@ export default function LmsCompetitionDashboard() {
     setCurrentGw(gw);
     setLeaderboard(parts);
     setCanManage(!!manage.can_manage);
+    setCanHandleJoins(!!manage.can_handle_joins);
+    setIsCompManager(!!manage.is_manager);
+    setCreatedByUserId(manage.created_by_user_id ?? null);
     currentGwIdRef.current = gw?.id ?? null;
 
     // Reset dependent slices when shell reloads (focus / pull-to-refresh).
@@ -449,7 +459,18 @@ export default function LmsCompetitionDashboard() {
     setExpandedUserId(null);
 
     await loadLeaderboardExtrasRef.current(gw, { force: true });
+    void loadCompetitionManagersRef.current();
   }, [competitionId, userId]);
+
+  const loadCompetitionManagers = useCallback(async () => {
+    if (!competitionId) return;
+    try {
+      const rows = await lmsListCompetitionManagers(competitionId);
+      setManagerUserIds(new Set(rows.map((r) => r.user_id)));
+    } catch {
+      /* leave previous */
+    }
+  }, [competitionId]);
 
   const loadPendingJoins = useCallback(async () => {
     if (!competitionId) return;
@@ -521,6 +542,37 @@ export default function LmsCompetitionDashboard() {
       setJoinNotifyBusy(false);
     }
   };
+
+  const onToggleManager = async (targetUserId: string, next: boolean) => {
+    if (!competitionId || managerBusyId) return;
+    setManagerBusyId(targetUserId);
+    const prev = managerUserIds;
+    const nextSet = new Set(prev);
+    if (next) nextSet.add(targetUserId);
+    else nextSet.delete(targetUserId);
+    setManagerUserIds(nextSet);
+    try {
+      const res = await lmsSetCompetitionManager(competitionId, targetUserId, next);
+      if (!res.success) {
+        setManagerUserIds(prev);
+        const msg =
+          res.error === 'manager_limit'
+            ? `You can assign up to ${res.max ?? 3} managers.`
+            : res.error === 'not_a_participant'
+              ? 'That player is not in this competition.'
+              : res.error === 'already_creator'
+                ? 'The competition creator is already an admin.'
+                : res.error || 'Could not update manager';
+        Alert.alert('Managers', msg);
+      }
+    } catch (e) {
+      setManagerUserIds(prev);
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not update manager');
+    } finally {
+      setManagerBusyId(null);
+    }
+  };
+
   const loadSelectionSliceRef = useRef(loadSelectionSlice);
   loadSelectionSliceRef.current = loadSelectionSlice;
   const loadGameweeksSliceRef = useRef(loadGameweeksSlice);
@@ -531,6 +583,8 @@ export default function LmsCompetitionDashboard() {
   loadJoinNotifyPrefRef.current = loadJoinNotifyPref;
   const loadJoinCodesRef = useRef(loadJoinCodes);
   loadJoinCodesRef.current = loadJoinCodes;
+  const loadCompetitionManagersRef = useRef(loadCompetitionManagers);
+  loadCompetitionManagersRef.current = loadCompetitionManagers;
 
   const reloadVisible = useCallback(async (mode: 'initial' | 'manual' = 'initial') => {
     if (!competitionId || !userId) return;
@@ -563,6 +617,7 @@ export default function LmsCompetitionDashboard() {
         tasks.push(loadPendingJoinsRef.current());
         tasks.push(loadJoinNotifyPrefRef.current());
         tasks.push(loadJoinCodesRef.current());
+        tasks.push(loadCompetitionManagersRef.current());
       }
       // Leaderboard standings + GW picks come from loadShell → loadLeaderboardExtras.
       await Promise.all(tasks);
@@ -612,12 +667,13 @@ export default function LmsCompetitionDashboard() {
         Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load fixtures');
       });
     }
-    if (tab === 'admin' && canManage) {
+    if (tab === 'admin' && canHandleJoins) {
       void loadPendingJoinsRef.current();
       void loadJoinNotifyPrefRef.current();
       void loadJoinCodesRef.current();
+      void loadCompetitionManagersRef.current();
     }
-  }, [tab, canManage]);
+  }, [tab, canHandleJoins]);
 
   useEffect(() => {
     if (tab !== 'gameweeks') return;
@@ -638,10 +694,16 @@ export default function LmsCompetitionDashboard() {
   }, [expandedUserId, loadHistoryForUser]);
 
   useEffect(() => {
-    if (!canManage && tab === 'admin') {
+    if (!canHandleJoins && tab === 'admin') {
       setTab('leaderboard');
     }
-  }, [canManage, tab]);
+  }, [canHandleJoins, tab]);
+
+  useEffect(() => {
+    if (canHandleJoins && !canManage && adminSubTab !== 'joins') {
+      setAdminSubTab('joins');
+    }
+  }, [canHandleJoins, canManage, adminSubTab]);
 
   const formByTeamId = useMemo(() => {
     const map = new Map<string, ReturnType<typeof lmsTeamFormFromFixtures>>();
@@ -1223,7 +1285,7 @@ export default function LmsCompetitionDashboard() {
         },
         tabText: {
           fontFamily: theme.fontFamily.baiSemiBold,
-          fontSize: canManage ? 12 : 13,
+          fontSize: canHandleJoins ? 12 : 13,
           color: theme.colors.textMuted,
         },
         tabTextActive: {
@@ -1553,6 +1615,21 @@ export default function LmsCompetitionDashboard() {
         lbYou: {
           color: theme.colors.accent,
         },
+        standingRoleChip: {
+          paddingVertical: 1,
+          paddingHorizontal: 6,
+          borderRadius: theme.radius.sm,
+          backgroundColor: theme.colors.accentMuted,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.accent,
+        },
+        standingRoleChipText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 9,
+          letterSpacing: 0.4,
+          textTransform: 'uppercase',
+          color: theme.colors.accent,
+        },
         lbOutMeta: {
           fontFamily: theme.fontFamily.baiLight,
           fontSize: 11,
@@ -1804,7 +1881,7 @@ export default function LmsCompetitionDashboard() {
           textAlign: 'right',
         },
       }),
-    [theme, insets.top, insets.bottom, canManage]
+    [theme, insets.top, insets.bottom, canManage, canHandleJoins]
   );
 
   const renderFixtureRow = (f: LmsFixture, i: number, list: LmsFixture[]) => {
@@ -1928,6 +2005,11 @@ export default function LmsCompetitionDashboard() {
                 {p.username || p.user_id.slice(0, 8)}
                 {isYou ? ' (you)' : ''}
               </Text>
+              {managerUserIds.has(p.user_id) ? (
+                <View style={styles.standingRoleChip}>
+                  <Text style={styles.standingRoleChipText}>Manager</Text>
+                </View>
+              ) : null}
               <Ionicons
                 name={expanded ? 'chevron-up' : 'chevron-down'}
                 size={14}
@@ -2061,7 +2143,7 @@ export default function LmsCompetitionDashboard() {
                 { key: 'gameweeks' as const, label: 'Gameweeks' },
                 { key: 'selection' as const, label: 'Selection' },
                 { key: 'leaderboard' as const, label: 'Standing' },
-                ...(canManage ? [{ key: 'admin' as const, label: 'Admin' }] : []),
+                ...(canHandleJoins ? [{ key: 'admin' as const, label: 'Admin' }] : []),
               ] as { key: TabKey; label: string }[]
             ).map((t) => {
               const active = tab === t.key;
@@ -2501,7 +2583,7 @@ export default function LmsCompetitionDashboard() {
               </>
             ) : null}
 
-            {tab === 'admin' && canManage ? (
+            {tab === 'admin' && canHandleJoins ? (
               <>
                 <View style={styles.joinCodeCard}>
                   <Text style={styles.joinCodeLabel}>Join code</Text>
@@ -2536,35 +2618,42 @@ export default function LmsCompetitionDashboard() {
                   ) : null}
                 </View>
 
-                <View style={styles.adminSubTabs}>
-                  {(
-                    [
-                      { key: 'joins' as const, label: 'Join requests' },
-                      { key: 'pool' as const, label: 'Team pool' },
-                      { key: 'picks' as const, label: 'Pick for user' },
-                    ] as const
-                  ).map((t) => {
-                    const active = adminSubTab === t.key;
-                    return (
-                      <Pressable
-                        key={t.key}
-                        style={[styles.adminSubTab, active && styles.adminSubTabActive]}
-                        onPress={() => setAdminSubTab(t.key)}
-                        accessibilityRole="tab"
-                        accessibilityState={{ selected: active }}
-                      >
-                        <Text
-                          style={[
-                            styles.adminSubTabText,
-                            active && styles.adminSubTabTextActive,
-                          ]}
+                {canManage ? (
+                  <View style={styles.adminSubTabs}>
+                    {(
+                      [
+                        { key: 'joins' as const, label: 'Join requests' },
+                        { key: 'pool' as const, label: 'Team pool' },
+                        { key: 'picks' as const, label: 'Pick for user' },
+                      ] as const
+                    ).map((t) => {
+                      const active = adminSubTab === t.key;
+                      return (
+                        <Pressable
+                          key={t.key}
+                          style={[styles.adminSubTab, active && styles.adminSubTabActive]}
+                          onPress={() => setAdminSubTab(t.key)}
+                          accessibilityRole="tab"
+                          accessibilityState={{ selected: active }}
                         >
-                          {t.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                          <Text
+                            style={[
+                              styles.adminSubTabText,
+                              active && styles.adminSubTabTextActive,
+                            ]}
+                          >
+                            {t.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : isCompManager ? (
+                  <Text style={styles.sectionIntro}>
+                    As a competition manager you can accept join requests and get alerts when
+                    players ask to join.
+                  </Text>
+                ) : null}
 
                 {adminSubTab === 'joins' ? (
                   <>
@@ -2576,7 +2665,8 @@ export default function LmsCompetitionDashboard() {
                       <View style={styles.adminRowBody}>
                         <Text style={styles.adminRowTitle}>Notify me on join requests</Text>
                         <Text style={styles.adminRowMeta}>
-                          Only affects your device. Creators default on; Owners default off.
+                          Only affects this device. Creators and managers default on; Owners
+                          default off.
                         </Text>
                       </View>
                       <Pressable
@@ -2601,6 +2691,61 @@ export default function LmsCompetitionDashboard() {
                         </Text>
                       </Pressable>
                     </View>
+                    {canManage ? (
+                      <>
+                        <Text style={styles.poolTitle}>
+                          Competition managers · {managerUserIds.size}/3
+                        </Text>
+                        <Text style={styles.sectionIntro}>
+                          Assign a player to accept join requests and receive join alerts. They
+                          cannot change the team pool or pick for others.
+                        </Text>
+                        {leaderboard
+                          .filter((p) => p.user_id !== createdByUserId)
+                          .map((p) => {
+                            const enabled = managerUserIds.has(p.user_id);
+                            const busy = managerBusyId === p.user_id;
+                            return (
+                              <View key={p.id} style={styles.adminRow}>
+                                <View style={styles.adminRowBody}>
+                                  <Text style={styles.adminRowTitle}>
+                                    {p.username || p.user_id.slice(0, 8)}
+                                    {p.user_id === userId ? ' (you)' : ''}
+                                  </Text>
+                                  <Text style={styles.adminRowMeta}>
+                                    {enabled ? 'Can accept join requests' : 'Player'}
+                                  </Text>
+                                </View>
+                                <Pressable
+                                  style={[
+                                    styles.adminToggle,
+                                    enabled ? styles.adminToggleOn : styles.adminToggleOff,
+                                  ]}
+                                  disabled={busy}
+                                  onPress={() => void onToggleManager(p.user_id, !enabled)}
+                                  accessibilityRole="switch"
+                                  accessibilityState={{ checked: enabled, disabled: busy }}
+                                  accessibilityLabel={`Manager ${p.username || 'player'}`}
+                                >
+                                  {busy ? (
+                                    <ActivityIndicator size="small" color={theme.colors.accent} />
+                                  ) : (
+                                    <Text
+                                      style={
+                                        enabled
+                                          ? styles.adminToggleTextOn
+                                          : styles.adminToggleTextOff
+                                      }
+                                    >
+                                      {enabled ? 'Manager' : 'Assign'}
+                                    </Text>
+                                  )}
+                                </Pressable>
+                              </View>
+                            );
+                          })}
+                      </>
+                    ) : null}
                     <Text style={styles.poolTitle}>
                       Join requests · {pendingJoins.length} waiting
                     </Text>
@@ -2649,7 +2794,7 @@ export default function LmsCompetitionDashboard() {
                       })
                     )}
                   </>
-                ) : adminSubTab === 'pool' ? (
+                ) : adminSubTab === 'pool' && canManage ? (
                   <>
                     <Text style={styles.sectionIntro}>
                       Choose which clubs are eligible in this competition. Late-start or small
@@ -2692,7 +2837,7 @@ export default function LmsCompetitionDashboard() {
                       );
                     })}
                   </>
-                ) : (
+                ) : adminSubTab === 'picks' && canManage ? (
                   <>
                     <Text style={styles.sectionIntro}>
                       Submit a gameweek pick on behalf of an active player before the deadline.
@@ -2831,25 +2976,27 @@ export default function LmsCompetitionDashboard() {
                   </>
                 )}
 
-                <View style={styles.dangerZone}>
-                  <Text style={styles.poolTitle}>Danger zone</Text>
-                  <Text style={styles.muted}>
-                    Permanently delete this competition and all related picks, players, and codes.
-                  </Text>
-                  <Pressable
-                    style={[styles.dangerBtn, adminBusy && styles.dangerBtnDisabled]}
-                    disabled={adminBusy}
-                    onPress={onDeleteCompetition}
-                    accessibilityRole="button"
-                    accessibilityLabel="Delete competition"
-                  >
-                    {adminBusy ? (
-                      <ActivityIndicator color={theme.colors.error} />
-                    ) : (
-                      <Text style={styles.dangerBtnText}>Delete competition</Text>
-                    )}
-                  </Pressable>
-                </View>
+                {canManage ? (
+                  <View style={styles.dangerZone}>
+                    <Text style={styles.poolTitle}>Danger zone</Text>
+                    <Text style={styles.muted}>
+                      Permanently delete this competition and all related picks, players, and codes.
+                    </Text>
+                    <Pressable
+                      style={[styles.dangerBtn, adminBusy && styles.dangerBtnDisabled]}
+                      disabled={adminBusy}
+                      onPress={onDeleteCompetition}
+                      accessibilityRole="button"
+                      accessibilityLabel="Delete competition"
+                    >
+                      {adminBusy ? (
+                        <ActivityIndicator color={theme.colors.error} />
+                      ) : (
+                        <Text style={styles.dangerBtnText}>Delete competition</Text>
+                      )}
+                    </Pressable>
+                  </View>
+                ) : null}
               </>
             ) : null}
 

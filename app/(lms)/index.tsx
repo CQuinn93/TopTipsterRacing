@@ -1181,6 +1181,10 @@ export default function LmsHomeScreen() {
                                   <View style={styles.manageChip}>
                                     <Text style={styles.manageChipText}>Owner</Text>
                                   </View>
+                                ) : c.isManager || c.canHandleJoins ? (
+                                  <View style={styles.manageChip}>
+                                    <Text style={styles.manageChipText}>Manager</Text>
+                                  </View>
                                 ) : null}
                               </View>
                               <Text style={styles.rowMeta}>{remainLabel}</Text>

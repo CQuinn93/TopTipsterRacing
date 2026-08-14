@@ -773,7 +773,9 @@ export type LmsCompetitionHomeSummary = LmsCompetitionRow & {
   pickTeam: LmsTeam | null;
   pickAvailable: boolean;
   isCreator: boolean;
+  isManager: boolean;
   canManage: boolean;
+  canHandleJoins: boolean;
 };
 
 export type LmsHomePayload = {
@@ -824,7 +826,9 @@ export async function lmsGetHome(season = '2026/27'): Promise<LmsHomePayload> {
     pickTeam: c.pick_team ?? null,
     pickAvailable: !!c.pick_available,
     isCreator: !!(c as { is_creator?: boolean }).is_creator,
+    isManager: !!(c as { is_manager?: boolean }).is_manager,
     canManage: !!(c as { can_manage?: boolean }).can_manage,
+    canHandleJoins: !!(c as { can_handle_joins?: boolean }).can_handle_joins,
   }));
 
   return {
@@ -990,7 +994,9 @@ export async function lmsAdminListPendingForCompetition(
 export async function lmsCanManageCompetition(competitionId: string): Promise<{
   success: boolean;
   can_manage: boolean;
+  can_handle_joins: boolean;
   is_creator: boolean;
+  is_manager: boolean;
   created_by_user_id: string | null;
   error?: string;
 }> {
@@ -998,18 +1004,75 @@ export async function lmsCanManageCompetition(competitionId: string): Promise<{
     p_competition_id: competitionId,
   });
   if (error) throw error;
-  return (data ?? {
-    success: false,
-    can_manage: false,
-    is_creator: false,
-    created_by_user_id: null,
-  }) as {
-    success: boolean;
-    can_manage: boolean;
-    is_creator: boolean;
-    created_by_user_id: string | null;
+  const row = (data ?? {}) as {
+    success?: boolean;
+    can_manage?: boolean;
+    can_handle_joins?: boolean;
+    is_creator?: boolean;
+    is_manager?: boolean;
+    created_by_user_id?: string | null;
     error?: string;
   };
+  return {
+    success: !!row.success,
+    can_manage: !!row.can_manage,
+    can_handle_joins: !!row.can_handle_joins,
+    is_creator: !!row.is_creator,
+    is_manager: !!row.is_manager,
+    created_by_user_id: row.created_by_user_id ?? null,
+    error: row.error,
+  };
+}
+
+export type LmsCompetitionManagerRow = {
+  user_id: string;
+  username: string | null;
+  assigned_at?: string;
+};
+
+export async function lmsListCompetitionManagers(
+  competitionId: string
+): Promise<LmsCompetitionManagerRow[]> {
+  const { data, error } = await db.rpc('lms_list_competition_managers', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  return asArray<LmsCompetitionManagerRow>(data);
+}
+
+export async function lmsSetCompetitionManager(
+  competitionId: string,
+  userId: string,
+  enabled: boolean
+): Promise<{ success: boolean; enabled?: boolean; error?: string; max?: number }> {
+  const { data, error } = await db.rpc('lms_set_competition_manager', {
+    p_competition_id: competitionId,
+    p_user_id: userId,
+    p_enabled: enabled,
+  });
+  if (error) throw error;
+  const result = (data ?? { success: false, error: 'unknown' }) as {
+    success: boolean;
+    enabled?: boolean;
+    error?: string;
+    max?: number;
+  };
+
+  if (result.success && enabled) {
+    void supabase.functions
+      .invoke('notify-lms-manager-assigned', {
+        body: { competition_id: competitionId, user_id: userId },
+      })
+      .then(({ data: fnData, error: fnErr }) => {
+        if (fnErr) console.warn('[lms] notify-lms-manager-assigned', fnErr.message);
+        else console.log('[lms] notify-lms-manager-assigned', fnData);
+      })
+      .catch((e) => {
+        console.warn('[lms] notify-lms-manager-assigned failed', e);
+      });
+  }
+
+  return result;
 }
 
 export async function lmsGetJoinNotifyPref(competitionId: string): Promise<{

@@ -8,6 +8,7 @@ Home Screen / PWA users can opt in to alerts. Deadline reminders include the aut
 
 - `071_lms_web_push_reminders.sql` — subscriptions + deadline reminder RPCs  
 - `072_lms_join_notify_prefs.sql` — per-user join notify prefs + recipient RPC  
+- `077_lms_competition_managers.sql` — per-competition join managers + notify recipients  
 
 ### 2. Generate VAPID keys (once)
 
@@ -69,11 +70,28 @@ Notification copy:
 > **Join request accepted**  
 > `Your request to join <competition> has been accepted. You can open the competition and start playing.`
 
+- `077_lms_competition_managers.sql` — per-competition managers (join deputies)
+
+### 7. Competition manager assigned (Edge Function)
+
+After a creator/Owner assigns a player as manager, the app calls `notify-lms-manager-assigned`.
+
+```bash
+supabase functions deploy notify-lms-manager-assigned
+```
+
+Notification copy:
+> **Competition manager**  
+> `You have been assigned as a manager for <competition>. You can accept join requests and get alerts when players ask to join.`
+
+Assigned managers default to join-notify **on**. They still need Home Screen + Deadline Alerts.
+
 ## Preference behaviour
 
 | Role | Default (no saved pref) | Toggle |
 |------|-------------------------|--------|
 | Competition **creator** | **On** | Admin → Join requests → “Notify me on join requests” |
+| Assigned **manager** | **On** | Same toggle |
 | **Owner** (not creator) | **Off** | Same toggle — only changes **their** alerts |
 
 Turning the switch off for yourself does **not** mute the other party.
