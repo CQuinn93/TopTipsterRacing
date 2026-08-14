@@ -824,6 +824,16 @@ export default function LmsCompetitionDashboard() {
     return map;
   }, [pickGwFixtures]);
 
+  /** H = home, A = away for the team in this gameweek's fixture. */
+  const venueByTeamId = useMemo(() => {
+    const map = new Map<string, 'H' | 'A'>();
+    for (const f of pickGwFixtures) {
+      map.set(f.home_team_id, 'H');
+      map.set(f.away_team_id, 'A');
+    }
+    return map;
+  }, [pickGwFixtures]);
+
   /** Unused competition-pool teams shown on Selection (pickable + greyed). */
   const selectionTeams = useMemo(() => {
     const used = new Set(usedIds);
@@ -2545,6 +2555,19 @@ export default function LmsCompetitionDashboard() {
                         const opponent = opponentByTeamId.get(t.id);
                         const opponentLabel =
                           opponent?.short_name || opponent?.name || null;
+                        const venue = venueByTeamId.get(t.id);
+                        const opponentVenue = opponent
+                          ? venueByTeamId.get(opponent.id)
+                          : undefined;
+                        const teamLabel = venue
+                          ? `${lmsDisplayTeamName(t.name)} (${venue})`
+                          : lmsDisplayTeamName(t.name);
+                        const vsLabel =
+                          opponentLabel && opponentVenue
+                            ? `vs ${opponentLabel} (${opponentVenue})`
+                            : opponentLabel
+                              ? `vs ${opponentLabel}`
+                              : null;
                         return (
                           <Pressable
                             key={t.id}
@@ -2562,10 +2585,10 @@ export default function LmsCompetitionDashboard() {
                             accessibilityState={{ disabled: !pickable, selected }}
                             accessibilityLabel={
                               !pickable
-                                ? `${lmsDisplayTeamName(t.name)} unavailable: ${note ?? 'No game'}`
-                                : opponentLabel
-                                  ? `Select ${lmsDisplayTeamName(t.name)} versus ${opponentLabel}`
-                                  : `Select ${lmsDisplayTeamName(t.name)}`
+                                ? `${teamLabel} unavailable: ${note ?? 'No game'}`
+                                : vsLabel
+                                  ? `Select ${teamLabel} ${vsLabel}`
+                                  : `Select ${teamLabel}`
                             }
                           >
                             <TeamColourChip shortName={t.short_name} name={t.name} slug={t.slug} size={28} />
@@ -2577,9 +2600,9 @@ export default function LmsCompetitionDashboard() {
                                 ]}
                                 numberOfLines={2}
                               >
-                                {lmsDisplayTeamName(t.name)}
+                                {teamLabel}
                               </Text>
-                              {opponentLabel ? (
+                              {vsLabel ? (
                                 <Text
                                   style={[
                                     styles.teamTileVs,
@@ -2587,7 +2610,7 @@ export default function LmsCompetitionDashboard() {
                                   ]}
                                   numberOfLines={1}
                                 >
-                                  vs {opponentLabel}
+                                  {vsLabel}
                                 </Text>
                               ) : null}
                               {!pickable && note ? (
@@ -3105,6 +3128,19 @@ export default function LmsCompetitionDashboard() {
                                 const opponent = opponentByTeamId.get(t.id);
                                 const opponentLabel =
                                   opponent?.short_name || opponent?.name || null;
+                                const venue = venueByTeamId.get(t.id);
+                                const opponentVenue = opponent
+                                  ? venueByTeamId.get(opponent.id)
+                                  : undefined;
+                                const teamLabel = venue
+                                  ? `${lmsDisplayTeamName(t.name)} (${venue})`
+                                  : lmsDisplayTeamName(t.name);
+                                const vsLabel =
+                                  opponentLabel && opponentVenue
+                                    ? `vs ${opponentLabel} (${opponentVenue})`
+                                    : opponentLabel
+                                      ? `vs ${opponentLabel}`
+                                      : null;
                                 return (
                                   <Pressable
                                     key={t.id}
@@ -3129,9 +3165,9 @@ export default function LmsCompetitionDashboard() {
                                         ]}
                                         numberOfLines={2}
                                       >
-                                        {lmsDisplayTeamName(t.name)}
+                                        {teamLabel}
                                       </Text>
-                                      {opponentLabel ? (
+                                      {vsLabel ? (
                                         <Text
                                           style={[
                                             styles.teamTileVs,
@@ -3139,7 +3175,7 @@ export default function LmsCompetitionDashboard() {
                                           ]}
                                           numberOfLines={1}
                                         >
-                                          vs {opponentLabel}
+                                          {vsLabel}
                                         </Text>
                                       ) : null}
                                     </View>
