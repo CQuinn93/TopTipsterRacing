@@ -1,10 +1,9 @@
 /**
- * Instant Web Push to the player when an admin accepts their LMS join request.
+ * Instant Web Push when a player is assigned as an LMS competition manager.
  *
- * Preferred: client invokes after successful lms_admin_approve_join.
+ * Preferred: client invokes after successful lms_set_competition_manager(..., true).
  *
- * Auth: service role / CRON_SECRET, OR signed-in user who can handle joins
- * (creator / Owner / assigned competition manager).
+ * Auth: service role / CRON_SECRET, OR signed-in creator/Owner of the competition.
  *
  * Secrets: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, optional VAPID_SUBJECT,
  * SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY.
@@ -27,14 +26,24 @@ function json(status: number, body: Record<string, unknown>) {
   });
 }
 
-function extractJoinRequestId(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") return null;
-  const p = payload as Record<string, unknown>;
-  if (typeof p.join_request_id === "string") return p.join_request_id;
-  if (typeof p.record === "object" && p.record && typeof (p.record as { id?: string }).id === "string") {
-    return (p.record as { id: string }).id;
+function extractIds(payload: unknown): { competitionId: string | null; userId: string | null } {
+  if (!payload || typeof payload !== "object") {
+    return { competitionId: null, userId: null };
   }
-  return null;
+  const p = payload as Record<string, unknown>;
+  const competitionId =
+    typeof p.competition_id === "string"
+      ? p.competition_id
+      : typeof p.record === "object" && p.record && typeof (p.record as { competition_id?: string }).competition_id === "string"
+        ? (p.record as { competition_id: string }).competition_id
+        : null;
+  const userId =
+    typeof p.user_id === "string"
+      ? p.user_id
+      : typeof p.record === "object" && p.record && typeof (p.record as { user_id?: string }).user_id === "string"
+        ? (p.record as { user_id: string }).user_id
+        : null;
+  return { competitionId, userId };
 }
 
 Deno.serve(async (req) => {
@@ -81,20 +90,20 @@ Deno.serve(async (req) => {
       body = {};
     }
 
-    const joinRequestId = extractJoinRequestId(body);
-    if (!joinRequestId) {
-      return json(400, { error: "missing_join_request_id" });
+    const { competitionId, userId } = extractIds(body);
+    if (!competitionId || !userId) {
+      return json(400, { error: "missing_competition_or_user" });
     }
 
-    const { data: jr, error: jrErr } = await admin
-      .from("lms_join_requests")
-      .select("id, competition_id, user_id, status")
-      .eq("id", joinRequestId)
+    const { data: assignment, error: asErr } = await admin
+      .from("lms_competition_managers")
+      .select("competition_id, user_id")
+      .eq("competition_id", competitionId)
+      .eq("user_id", userId)
       .maybeSingle();
-    if (jrErr) throw jrErr;
-    if (!jr) return json(404, { error: "join_request_not_found" });
-    if (jr.status !== "approved") {
-      return json(200, { ok: true, skipped: "not_approved" });
+    if (asErr) throw asErr;
+    if (!assignment) {
+      return json(200, { ok: true, skipped: "not_assigned" });
     }
 
     if (!isServiceRole && !isCron) {
@@ -104,14 +113,10 @@ Deno.serve(async (req) => {
       const userClient = createClient(supabaseUrl, anonKey, {
         global: { headers: { Authorization: `Bearer ${bearerToken}` } },
       });
-      const { data: userData, error: userErr } = await userClient.auth.getUser();
-      if (userErr || !userData?.user) {
-        return json(401, { error: "Unauthorized" });
-      }
-      const { data: canHandle, error: permErr } = await userClient.rpc("lms_can_handle_joins", {
-        p_competition_id: jr.competition_id,
+      const { data: perm, error: permErr } = await userClient.rpc("lms_can_manage_competition", {
+        p_competition_id: competitionId,
       });
-      if (permErr || canHandle !== true) {
+      if (permErr || perm !== true) {
         return json(403, { error: "forbidden" });
       }
     }
@@ -119,7 +124,7 @@ Deno.serve(async (req) => {
     const { data: comp, error: compErr } = await admin
       .from("lms_competitions")
       .select("id, name")
-      .eq("id", jr.competition_id)
+      .eq("id", competitionId)
       .maybeSingle();
     if (compErr) throw compErr;
 
@@ -128,25 +133,30 @@ Deno.serve(async (req) => {
     const { data: subs, error: subErr } = await admin
       .from("web_push_subscriptions")
       .select("endpoint, p256dh, auth")
-      .eq("user_id", jr.user_id);
+      .eq("user_id", userId);
     if (subErr) throw subErr;
 
     const rows = (subs ?? []) as { endpoint: string; p256dh: string; auth: string }[];
     if (rows.length === 0) {
-      return json(200, { ok: true, skipped: "no_subscription", join_request_id: joinRequestId });
+      return json(200, {
+        ok: true,
+        skipped: "no_subscription",
+        competition_id: competitionId,
+        user_id: userId,
+      });
     }
 
-    const title = "Join request accepted";
+    const title = "Competition manager";
     const bodyText =
-      `Your request to join ${competitionName} has been accepted. ` +
-      `You can open the competition and start playing.`;
+      `You have been assigned as a manager for ${competitionName}. ` +
+      `You can accept join requests and get alerts when players ask to join.`;
     const payload = JSON.stringify({
       title,
       body: bodyText,
       icon: "/apple-touch-icon.png",
       badge: "/favicon.png",
-      competitionId: jr.competition_id,
-      url: `/${jr.competition_id}`,
+      competitionId,
+      url: `/${competitionId}`,
     });
 
     let sent = 0;
@@ -179,7 +189,8 @@ Deno.serve(async (req) => {
 
     return json(200, {
       ok: true,
-      join_request_id: joinRequestId,
+      competition_id: competitionId,
+      user_id: userId,
       recipients: rows.length,
       sent,
       failed,
