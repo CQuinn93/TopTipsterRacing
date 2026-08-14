@@ -32,8 +32,10 @@ import {
   lmsGetCompetitionJoinCodes,
   lmsGetJoinNotifyPref,
   lmsSetJoinNotifyPref,
+  lmsListAssignableManagers,
   lmsListCompetitionManagers,
   lmsSetCompetitionManager,
+  type LmsAssignableManagerRow,
   lmsGetCompetition,
   lmsGetCompetitionCurrentGameweek,
   lmsGetMyParticipant,
@@ -118,10 +120,11 @@ export default function LmsCompetitionDashboard() {
   const [isCompManager, setIsCompManager] = useState(false);
   const [createdByUserId, setCreatedByUserId] = useState<string | null>(null);
   const [managerUserIds, setManagerUserIds] = useState<Set<string>>(new Set());
+  const [assignablePlayers, setAssignablePlayers] = useState<LmsAssignableManagerRow[]>([]);
   const [managerBusyId, setManagerBusyId] = useState<string | null>(null);
   const [poolTeamIds, setPoolTeamIds] = useState<string[]>([]);
   const [adminBusy, setAdminBusy] = useState(false);
-  const [adminSubTab, setAdminSubTab] = useState<'joins' | 'pool' | 'picks'>('joins');
+  const [adminSubTab, setAdminSubTab] = useState<'joins' | 'pool' | 'users'>('joins');
   const [pendingJoins, setPendingJoins] = useState<
     {
       id: string;
@@ -140,6 +143,7 @@ export default function LmsCompetitionDashboard() {
   const [adminPickTeamId, setAdminPickTeamId] = useState<string | null>(null);
   const [adminPickUsedIds, setAdminPickUsedIds] = useState<string[]>([]);
   const [adminPickLoadingUser, setAdminPickLoadingUser] = useState(false);
+  const [manageUserDropdownOpen, setManageUserDropdownOpen] = useState(false);
   const [historyLoadingUserId, setHistoryLoadingUserId] = useState<string | null>(null);
 
   const competitionRef = useRef<LmsCompetition | null>(null);
@@ -468,9 +472,28 @@ export default function LmsCompetitionDashboard() {
       const rows = await lmsListCompetitionManagers(competitionId);
       setManagerUserIds(new Set(rows.map((r) => r.user_id)));
     } catch {
-      /* leave previous */
+      /* leave previous manager chips */
     }
-  }, [competitionId]);
+    try {
+      const players = await lmsListAssignableManagers(competitionId);
+      setAssignablePlayers(players);
+    } catch {
+      try {
+        const parts = await lmsListParticipants(competitionId);
+        setAssignablePlayers(
+          parts.map((p) => ({
+            user_id: p.user_id,
+            username: p.username ?? null,
+            status: p.status,
+            is_creator: createdByUserId != null && p.user_id === createdByUserId,
+            is_manager: false,
+          }))
+        );
+      } catch {
+        setAssignablePlayers([]);
+      }
+    }
+  }, [competitionId, createdByUserId]);
 
   const loadPendingJoins = useCallback(async () => {
     if (!competitionId) return;
@@ -564,6 +587,8 @@ export default function LmsCompetitionDashboard() {
                 ? 'The competition creator is already an admin.'
                 : res.error || 'Could not update manager';
         Alert.alert('Managers', msg);
+      } else {
+        void loadCompetitionManagers();
       }
     } catch (e) {
       setManagerUserIds(prev);
@@ -705,6 +730,10 @@ export default function LmsCompetitionDashboard() {
     }
   }, [canHandleJoins, canManage, adminSubTab]);
 
+  useEffect(() => {
+    if (adminSubTab !== 'users') setManageUserDropdownOpen(false);
+  }, [adminSubTab]);
+
   const formByTeamId = useMemo(() => {
     const map = new Map<string, ReturnType<typeof lmsTeamFormFromFixtures>>();
     for (const t of teams) {
@@ -843,9 +872,28 @@ export default function LmsCompetitionDashboard() {
 
   const usedTeamIdSet = useMemo(() => new Set(usedIds), [usedIds]);
 
-  const adminActiveParticipants = useMemo(
-    () => leaderboard.filter((p) => p.status === 'active'),
-    [leaderboard]
+  const manageUserPlayers = useMemo(() => {
+    if (assignablePlayers.length) {
+      return assignablePlayers.map((p) => ({
+        user_id: p.user_id,
+        username: p.username ?? null,
+        status: p.status ?? 'active',
+        is_creator: !!p.is_creator,
+        is_manager: !!p.is_manager || managerUserIds.has(p.user_id),
+      }));
+    }
+    return leaderboard.map((p) => ({
+      user_id: p.user_id,
+      username: p.username ?? null,
+      status: p.status,
+      is_creator: createdByUserId != null && p.user_id === createdByUserId,
+      is_manager: managerUserIds.has(p.user_id),
+    }));
+  }, [assignablePlayers, leaderboard, createdByUserId, managerUserIds]);
+
+  const selectedManageUser = useMemo(
+    () => manageUserPlayers.find((p) => p.user_id === adminPickUserId) ?? null,
+    [manageUserPlayers, adminPickUserId]
   );
 
   const adminPickTeams = useMemo(() => {
@@ -1720,6 +1768,67 @@ export default function LmsCompetitionDashboard() {
           fontSize: 11,
           color: theme.colors.textMuted,
         },
+        playerNameRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          flex: 1,
+          minWidth: 0,
+        },
+        manageDropdownTrigger: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+          paddingVertical: 12,
+          paddingHorizontal: 12,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.md,
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        manageDropdownValue: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 15,
+          color: theme.colors.text,
+          flexShrink: 1,
+        },
+        manageDropdownPlaceholder: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 15,
+          color: theme.colors.textMuted,
+          flexShrink: 1,
+        },
+        manageDropdownMenu: {
+          marginTop: 6,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.md,
+          backgroundColor: theme.colors.surface,
+          overflow: 'hidden',
+        },
+        manageDropdownScroll: {
+          maxHeight: 260,
+        },
+        manageDropdownOption: {
+          paddingVertical: 10,
+          paddingHorizontal: 12,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+          gap: 2,
+        },
+        manageDropdownOptionActive: {
+          backgroundColor: theme.colors.accentMuted,
+        },
+        manageDropdownOptionText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 14,
+          color: theme.colors.text,
+          flexShrink: 1,
+        },
+        manageDropdownOptionTextActive: {
+          color: theme.colors.accent,
+        },
         adminToggle: {
           paddingVertical: 6,
           paddingHorizontal: 10,
@@ -2006,9 +2115,12 @@ export default function LmsCompetitionDashboard() {
                 {isYou ? ' (you)' : ''}
               </Text>
               {managerUserIds.has(p.user_id) ? (
-                <View style={styles.standingRoleChip}>
-                  <Text style={styles.standingRoleChipText}>Manager</Text>
-                </View>
+                <Ionicons
+                  name="star"
+                  size={14}
+                  color={theme.colors.accent}
+                  accessibilityLabel="Manager"
+                />
               ) : null}
               <Ionicons
                 name={expanded ? 'chevron-up' : 'chevron-down'}
@@ -2624,7 +2736,7 @@ export default function LmsCompetitionDashboard() {
                       [
                         { key: 'joins' as const, label: 'Join requests' },
                         { key: 'pool' as const, label: 'Team pool' },
-                        { key: 'picks' as const, label: 'Pick for user' },
+                        { key: 'users' as const, label: 'Manage user' },
                       ] as const
                     ).map((t) => {
                       const active = adminSubTab === t.key;
@@ -2691,60 +2803,10 @@ export default function LmsCompetitionDashboard() {
                         </Text>
                       </Pressable>
                     </View>
-                    {canManage ? (
-                      <>
-                        <Text style={styles.poolTitle}>
-                          Competition managers · {managerUserIds.size}/3
-                        </Text>
-                        <Text style={styles.sectionIntro}>
-                          Assign a player to accept join requests and receive join alerts. They
-                          cannot change the team pool or pick for others.
-                        </Text>
-                        {leaderboard
-                          .filter((p) => p.user_id !== createdByUserId)
-                          .map((p) => {
-                            const enabled = managerUserIds.has(p.user_id);
-                            const busy = managerBusyId === p.user_id;
-                            return (
-                              <View key={p.id} style={styles.adminRow}>
-                                <View style={styles.adminRowBody}>
-                                  <Text style={styles.adminRowTitle}>
-                                    {p.username || p.user_id.slice(0, 8)}
-                                    {p.user_id === userId ? ' (you)' : ''}
-                                  </Text>
-                                  <Text style={styles.adminRowMeta}>
-                                    {enabled ? 'Can accept join requests' : 'Player'}
-                                  </Text>
-                                </View>
-                                <Pressable
-                                  style={[
-                                    styles.adminToggle,
-                                    enabled ? styles.adminToggleOn : styles.adminToggleOff,
-                                  ]}
-                                  disabled={busy}
-                                  onPress={() => void onToggleManager(p.user_id, !enabled)}
-                                  accessibilityRole="switch"
-                                  accessibilityState={{ checked: enabled, disabled: busy }}
-                                  accessibilityLabel={`Manager ${p.username || 'player'}`}
-                                >
-                                  {busy ? (
-                                    <ActivityIndicator size="small" color={theme.colors.accent} />
-                                  ) : (
-                                    <Text
-                                      style={
-                                        enabled
-                                          ? styles.adminToggleTextOn
-                                          : styles.adminToggleTextOff
-                                      }
-                                    >
-                                      {enabled ? 'Manager' : 'Assign'}
-                                    </Text>
-                                  )}
-                                </Pressable>
-                              </View>
-                            );
-                          })}
-                      </>
+                    {canManage && managerUserIds.size > 0 ? (
+                      <Text style={styles.muted}>
+                        Managers · {managerUserIds.size}/3 · assign in Manage user
+                      </Text>
                     ) : null}
                     <Text style={styles.poolTitle}>
                       Join requests · {pendingJoins.length} waiting
@@ -2837,144 +2899,283 @@ export default function LmsCompetitionDashboard() {
                       );
                     })}
                   </>
-                ) : adminSubTab === 'picks' && canManage ? (
+                ) : adminSubTab === 'users' && canManage ? (
                   <>
                     <Text style={styles.sectionIntro}>
-                      Submit a gameweek pick on behalf of an active player before the deadline.
+                      Select a player to assign them as a manager or submit a pick on their behalf.
                     </Text>
-                    {!currentGw ? (
-                      <Text style={styles.muted}>No open gameweek for picks yet.</Text>
-                    ) : deadlinePassed ? (
+                    <Text style={styles.poolTitle}>
+                      Player · managers {managerUserIds.size}/3
+                    </Text>
+                    {manageUserPlayers.length === 0 ? (
                       <Text style={styles.muted}>
-                        Picks are closed for GW{currentGw.number}. Admin picks unlock again next
-                        gameweek before the deadline.
+                        No players in this competition yet. Accept join requests first.
                       </Text>
                     ) : (
-                      <>
-                        <Text style={styles.poolTitle}>Player · GW{currentGw.number}</Text>
-                        {adminActiveParticipants.length === 0 ? (
-                          <Text style={styles.muted}>No active players to pick for.</Text>
-                        ) : (
-                          <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            style={styles.filterScroll}
-                            contentContainerStyle={styles.filterRow}
-                            nestedScrollEnabled
-                          >
-                            {adminActiveParticipants.map((p) => {
-                              const active = adminPickUserId === p.user_id;
-                              return (
-                                <Pressable
-                                  key={p.user_id}
-                                  style={[styles.filterChip, active && styles.filterChipActive]}
-                                  onPress={() => void onSelectAdminPickUser(p.user_id)}
-                                  disabled={adminBusy || adminPickLoadingUser}
-                                >
-                                  <Text
+                      <View>
+                        <Pressable
+                          style={styles.manageDropdownTrigger}
+                          onPress={() => setManageUserDropdownOpen((open) => !open)}
+                          disabled={adminBusy || adminPickLoadingUser}
+                          accessibilityRole="button"
+                          accessibilityLabel="Select player"
+                          accessibilityState={{ expanded: manageUserDropdownOpen }}
+                        >
+                          <View style={styles.playerNameRow}>
+                            <Text
+                              style={
+                                selectedManageUser
+                                  ? styles.manageDropdownValue
+                                  : styles.manageDropdownPlaceholder
+                              }
+                              numberOfLines={1}
+                            >
+                              {selectedManageUser
+                                ? `${selectedManageUser.username || selectedManageUser.user_id.slice(0, 8)}${
+                                    selectedManageUser.user_id === userId ? ' (you)' : ''
+                                  }`
+                                : 'Select a player'}
+                            </Text>
+                            {selectedManageUser?.is_manager ? (
+                              <Ionicons
+                                name="star"
+                                size={14}
+                                color={theme.colors.accent}
+                                accessibilityLabel="Manager"
+                              />
+                            ) : null}
+                          </View>
+                          <Ionicons
+                            name={manageUserDropdownOpen ? 'chevron-up' : 'chevron-down'}
+                            size={18}
+                            color={theme.colors.textMuted}
+                          />
+                        </Pressable>
+                        {manageUserDropdownOpen ? (
+                          <View style={styles.manageDropdownMenu}>
+                            <ScrollView
+                              nestedScrollEnabled
+                              keyboardShouldPersistTaps="handled"
+                              style={styles.manageDropdownScroll}
+                            >
+                              {manageUserPlayers.map((p) => {
+                                const active = adminPickUserId === p.user_id;
+                                const label = p.username || p.user_id.slice(0, 8);
+                                return (
+                                  <Pressable
+                                    key={p.user_id}
                                     style={[
-                                      styles.filterChipText,
-                                      active && styles.filterChipTextActive,
+                                      styles.manageDropdownOption,
+                                      active && styles.manageDropdownOptionActive,
                                     ]}
+                                    onPress={() => {
+                                      setManageUserDropdownOpen(false);
+                                      void onSelectAdminPickUser(p.user_id);
+                                    }}
+                                    accessibilityRole="button"
+                                    accessibilityState={{ selected: active }}
+                                    accessibilityLabel={label}
                                   >
-                                    {p.username || p.user_id.slice(0, 8)}
-                                  </Text>
-                                </Pressable>
-                              );
-                            })}
-                          </ScrollView>
-                        )}
-
-                        {adminPickLoadingUser ? (
-                          <ActivityIndicator color={theme.colors.accent} />
-                        ) : adminPickUserId ? (
-                          <>
-                            <Text style={styles.poolTitle}>Team</Text>
-                            {adminPickTeams.length === 0 ? (
-                              <Text style={styles.muted}>
-                                No unused pool teams playing this gameweek for that player.
-                              </Text>
-                            ) : (
-                              <>
-                                <View style={styles.teamGrid}>
-                                  {adminPickTeams.map((t) => {
-                                    const selected = adminPickTeamId === t.id;
-                                    const opponent = opponentByTeamId.get(t.id);
-                                    const opponentLabel =
-                                      opponent?.short_name || opponent?.name || null;
-                                    return (
-                                      <Pressable
-                                        key={t.id}
+                                    <View style={styles.playerNameRow}>
+                                      <Text
                                         style={[
-                                          styles.teamTile,
-                                          selected && styles.teamTileSelected,
+                                          styles.manageDropdownOptionText,
+                                          active && styles.manageDropdownOptionTextActive,
                                         ]}
-                                        onPress={() => setAdminPickTeamId(t.id)}
-                                        disabled={adminBusy}
+                                        numberOfLines={1}
                                       >
-                                        <TeamColourChip
-                                          shortName={t.short_name}
-                                          name={t.name}
-                                          slug={t.slug}
-                                          size={28}
+                                        {label}
+                                        {p.user_id === userId ? ' (you)' : ''}
+                                      </Text>
+                                      {p.is_manager ? (
+                                        <Ionicons
+                                          name="star"
+                                          size={14}
+                                          color={theme.colors.accent}
+                                          accessibilityLabel="Manager"
                                         />
-                                        <View style={styles.teamTileTextCol}>
-                                          <Text
-                                            style={[
-                                              styles.teamTileName,
-                                              selected && styles.teamTileNameSelected,
-                                            ]}
-                                            numberOfLines={2}
-                                          >
-                                            {lmsDisplayTeamName(t.name)}
-                                          </Text>
-                                          {opponentLabel ? (
-                                            <Text
-                                              style={[
-                                                styles.teamTileVs,
-                                                selected && styles.teamTileVsSelected,
-                                              ]}
-                                              numberOfLines={1}
-                                            >
-                                              vs {opponentLabel}
-                                            </Text>
-                                          ) : null}
-                                        </View>
-                                        {selected ? (
-                                          <Ionicons
-                                            name="checkmark-circle"
-                                            size={18}
-                                            color={theme.colors.accent}
-                                          />
-                                        ) : null}
-                                      </Pressable>
-                                    );
-                                  })}
-                                </View>
-                                <Pressable
-                                  style={[
-                                    styles.primaryBtn,
-                                    (!adminPickTeamId || adminBusy) && styles.primaryBtnDisabled,
-                                  ]}
-                                  disabled={!adminPickTeamId || adminBusy}
-                                  onPress={() => void onAdminSubmitPick()}
-                                >
-                                  {adminBusy ? (
-                                    <ActivityIndicator color={theme.colors.white} />
-                                  ) : (
-                                    <Text style={styles.primaryBtnText}>Submit pick</Text>
-                                  )}
-                                </Pressable>
-                              </>
-                            )}
-                          </>
-                        ) : adminActiveParticipants.length > 0 ? (
-                          <Text style={styles.muted}>Select a player above.</Text>
+                                      ) : null}
+                                    </View>
+                                    <Text style={styles.adminRowMeta}>
+                                      {p.is_creator ? 'Creator' : p.is_manager ? 'Manager' : 'Player'}
+                                    </Text>
+                                  </Pressable>
+                                );
+                              })}
+                            </ScrollView>
+                          </View>
                         ) : null}
-                      </>
+                      </View>
                     )}
+
+                    {adminPickLoadingUser ? (
+                      <ActivityIndicator color={theme.colors.accent} />
+                    ) : selectedManageUser ? (
+                      <>
+                        <View style={styles.adminRow}>
+                          <View style={styles.adminRowBody}>
+                            <View style={styles.playerNameRow}>
+                              <Text style={styles.adminRowTitle}>
+                                {selectedManageUser.username || selectedManageUser.user_id.slice(0, 8)}
+                                {selectedManageUser.user_id === userId ? ' (you)' : ''}
+                              </Text>
+                              {selectedManageUser.is_manager ? (
+                                <Ionicons
+                                  name="star"
+                                  size={14}
+                                  color={theme.colors.accent}
+                                  accessibilityLabel="Manager"
+                                />
+                              ) : null}
+                            </View>
+                            <Text style={styles.adminRowMeta}>
+                              {selectedManageUser.is_creator
+                                ? 'Competition creator — already an admin'
+                                : selectedManageUser.is_manager
+                                  ? 'Can accept join requests and get join alerts'
+                                  : 'Player — assign to handle join requests'}
+                            </Text>
+                          </View>
+                          {selectedManageUser.is_creator ? (
+                            <View style={[styles.adminToggle, styles.adminToggleOn]}>
+                              <Text style={styles.adminToggleTextOn}>Creator</Text>
+                            </View>
+                          ) : (
+                            <Pressable
+                              style={[
+                                styles.adminToggle,
+                                selectedManageUser.is_manager
+                                  ? styles.adminToggleOn
+                                  : styles.adminToggleOff,
+                              ]}
+                              disabled={managerBusyId === selectedManageUser.user_id}
+                              onPress={() =>
+                                void onToggleManager(
+                                  selectedManageUser.user_id,
+                                  !selectedManageUser.is_manager
+                                )
+                              }
+                              accessibilityRole="switch"
+                              accessibilityState={{
+                                checked: selectedManageUser.is_manager,
+                                disabled: managerBusyId === selectedManageUser.user_id,
+                              }}
+                              accessibilityLabel="Assign as manager"
+                            >
+                              {managerBusyId === selectedManageUser.user_id ? (
+                                <ActivityIndicator size="small" color={theme.colors.accent} />
+                              ) : (
+                                <Text
+                                  style={
+                                    selectedManageUser.is_manager
+                                      ? styles.adminToggleTextOn
+                                      : styles.adminToggleTextOff
+                                  }
+                                >
+                                  {selectedManageUser.is_manager ? 'Manager' : 'Assign'}
+                                </Text>
+                              )}
+                            </Pressable>
+                          )}
+                        </View>
+
+                        <Text style={styles.poolTitle}>
+                          Pick{currentGw ? ` · GW${currentGw.number}` : ''}
+                        </Text>
+                        {selectedManageUser.status !== 'active' ? (
+                          <Text style={styles.muted}>
+                            This player is not active, so you cannot submit a pick for them.
+                          </Text>
+                        ) : !currentGw ? (
+                          <Text style={styles.muted}>No open gameweek for picks yet.</Text>
+                        ) : deadlinePassed ? (
+                          <Text style={styles.muted}>
+                            Picks are closed for GW{currentGw.number}. Admin picks unlock again next
+                            gameweek before the deadline.
+                          </Text>
+                        ) : adminPickTeams.length === 0 ? (
+                          <Text style={styles.muted}>
+                            No unused pool teams playing this gameweek for that player.
+                          </Text>
+                        ) : (
+                          <>
+                            <View style={styles.teamGrid}>
+                              {adminPickTeams.map((t) => {
+                                const selected = adminPickTeamId === t.id;
+                                const opponent = opponentByTeamId.get(t.id);
+                                const opponentLabel =
+                                  opponent?.short_name || opponent?.name || null;
+                                return (
+                                  <Pressable
+                                    key={t.id}
+                                    style={[
+                                      styles.teamTile,
+                                      selected && styles.teamTileSelected,
+                                    ]}
+                                    onPress={() => setAdminPickTeamId(t.id)}
+                                    disabled={adminBusy}
+                                  >
+                                    <TeamColourChip
+                                      shortName={t.short_name}
+                                      name={t.name}
+                                      slug={t.slug}
+                                      size={28}
+                                    />
+                                    <View style={styles.teamTileTextCol}>
+                                      <Text
+                                        style={[
+                                          styles.teamTileName,
+                                          selected && styles.teamTileNameSelected,
+                                        ]}
+                                        numberOfLines={2}
+                                      >
+                                        {lmsDisplayTeamName(t.name)}
+                                      </Text>
+                                      {opponentLabel ? (
+                                        <Text
+                                          style={[
+                                            styles.teamTileVs,
+                                            selected && styles.teamTileVsSelected,
+                                          ]}
+                                          numberOfLines={1}
+                                        >
+                                          vs {opponentLabel}
+                                        </Text>
+                                      ) : null}
+                                    </View>
+                                    {selected ? (
+                                      <Ionicons
+                                        name="checkmark-circle"
+                                        size={18}
+                                        color={theme.colors.accent}
+                                      />
+                                    ) : null}
+                                  </Pressable>
+                                );
+                              })}
+                            </View>
+                            <Pressable
+                              style={[
+                                styles.primaryBtn,
+                                (!adminPickTeamId || adminBusy) && styles.primaryBtnDisabled,
+                              ]}
+                              disabled={!adminPickTeamId || adminBusy}
+                              onPress={() => void onAdminSubmitPick()}
+                            >
+                              {adminBusy ? (
+                                <ActivityIndicator color={theme.colors.white} />
+                              ) : (
+                                <Text style={styles.primaryBtnText}>Submit pick</Text>
+                              )}
+                            </Pressable>
+                          </>
+                        )}
+                      </>
+                    ) : manageUserPlayers.length > 0 ? (
+                      <Text style={styles.muted}>Select a player above.</Text>
+                    ) : null}
                   </>
-                )}
+                ) : null}
 
                 {canManage ? (
                   <View style={styles.dangerZone}>

@@ -1030,6 +1030,14 @@ export type LmsCompetitionManagerRow = {
   assigned_at?: string;
 };
 
+export type LmsAssignableManagerRow = {
+  user_id: string;
+  username: string | null;
+  status?: string;
+  is_creator?: boolean;
+  is_manager?: boolean;
+};
+
 export async function lmsListCompetitionManagers(
   competitionId: string
 ): Promise<LmsCompetitionManagerRow[]> {
@@ -1038,6 +1046,16 @@ export async function lmsListCompetitionManagers(
   });
   if (error) throw error;
   return asArray<LmsCompetitionManagerRow>(data);
+}
+
+export async function lmsListAssignableManagers(
+  competitionId: string
+): Promise<LmsAssignableManagerRow[]> {
+  const { data, error } = await db.rpc('lms_list_assignable_managers', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  return asArray<LmsAssignableManagerRow>(data);
 }
 
 export async function lmsSetCompetitionManager(
