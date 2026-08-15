@@ -283,7 +283,8 @@ export default function LmsHomeScreen() {
       const compName = res.competition_name?.trim() || 'the competition';
       const joinMsg =
         `You have successfully requested to join ${compName}. ` +
-        `The admin will be notified and will review your request.`;
+        `Please contact one of the admins for this competition so they can verify you. ` +
+        `Once verified, the admin will accept your request.`;
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
         window.alert(joinMsg);
       } else {
