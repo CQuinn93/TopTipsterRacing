@@ -1167,6 +1167,23 @@ export async function lmsAdminSubmitPickForUser(
   return (data ?? { success: false, error: 'unknown' }) as { success: boolean; error?: string };
 }
 
+/** Creator/Owner only — remove a player (and their picks) from the competition. */
+export async function lmsAdminRemoveParticipant(
+  competitionId: string,
+  userId: string
+): Promise<{ success: boolean; error?: string; username?: string | null }> {
+  const { data, error } = await db.rpc('lms_admin_remove_participant', {
+    p_competition_id: competitionId,
+    p_user_id: userId,
+  });
+  if (error) throw error;
+  return (data ?? { success: false, error: 'unknown' }) as {
+    success: boolean;
+    error?: string;
+    username?: string | null;
+  };
+}
+
 /** Session-auth create (p_code ignored by tablet_code_admin_user_id). */
 export async function lmsCreateCompetition(
   name: string,

@@ -26,6 +26,7 @@ import {
   lmsAdminSetCompetitionTeam,
   lmsAdminDeleteCompetition,
   lmsAdminListPendingForCompetition,
+  lmsAdminRemoveParticipant,
   lmsAdminSubmitPickForUser,
   lmsApproveJoinRequest,
   lmsCanManageCompetition,
@@ -1197,6 +1198,63 @@ export default function LmsCompetitionDashboard() {
     void apply();
   };
 
+  const onRemoveParticipant = (target: {
+    user_id: string;
+    username: string | null;
+    is_creator: boolean;
+  }) => {
+    if (target.is_creator) {
+      Alert.alert('Cannot remove', 'The competition creator cannot be removed.');
+      return;
+    }
+    const label = target.username || target.user_id.slice(0, 8);
+    confirmDestructive(
+      'Remove player?',
+      `${label} will be removed from this competition. Their picks and any manager role will be cleared. They can request to join again with a code if needed.`,
+      'Remove',
+      () => {
+        void (async () => {
+          setAdminBusy(true);
+          try {
+            const res = await lmsAdminRemoveParticipant(competitionId, target.user_id);
+            if (!res.success) {
+              const msg =
+                res.error === 'cannot_remove_creator'
+                  ? 'The competition creator cannot be removed.'
+                  : res.error === 'not_a_participant'
+                    ? 'That player is not in this competition.'
+                    : res.error === 'unauthorized'
+                      ? 'Only the creator or Owner can remove players.'
+                      : res.error ?? 'Unknown error';
+              Alert.alert('Could not remove', msg);
+              return;
+            }
+            if (adminPickUserId === target.user_id) {
+              setAdminPickUserId(null);
+              setAdminPickTeamId(null);
+              setAdminPickUsedIds([]);
+            }
+            setManagerUserIds((prev) => {
+              if (!prev.has(target.user_id)) return prev;
+              const next = new Set(prev);
+              next.delete(target.user_id);
+              return next;
+            });
+            await reloadVisible();
+            Alert.alert('Removed', `${label} has been removed from this competition.`);
+          } catch (e) {
+            Alert.alert(
+              'Error',
+              e instanceof Error ? e.message : 'Could not remove player'
+            );
+          } finally {
+            setAdminBusy(false);
+          }
+        })();
+      }
+    );
+  };
+
   const onDeleteCompetition = () => {
     confirmDestructive(
       'Delete competition?',
@@ -1971,6 +2029,13 @@ export default function LmsCompetitionDashboard() {
         dangerZone: {
           marginTop: theme.spacing.md,
           paddingTop: theme.spacing.lg,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.colors.border,
+          gap: theme.spacing.sm,
+        },
+        removePlayerZone: {
+          marginTop: theme.spacing.lg,
+          paddingTop: theme.spacing.md,
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: theme.colors.border,
           gap: theme.spacing.sm,
@@ -2925,7 +2990,8 @@ export default function LmsCompetitionDashboard() {
                 ) : adminSubTab === 'users' && canManage ? (
                   <>
                     <Text style={styles.sectionIntro}>
-                      Select a player to assign them as a manager or submit a pick on their behalf.
+                      Select a player to assign them as a manager, submit a pick on their behalf, or
+                      remove them from the competition.
                     </Text>
                     <Text style={styles.poolTitle}>
                       Player · managers {managerUserIds.size}/3
@@ -3206,6 +3272,31 @@ export default function LmsCompetitionDashboard() {
                             </Pressable>
                           </>
                         )}
+
+                        {!selectedManageUser.is_creator ? (
+                          <View style={styles.removePlayerZone}>
+                            <Text style={styles.poolTitle}>Remove player</Text>
+                            <Text style={styles.muted}>
+                              Use this if someone was accepted by mistake. Clears their picks and
+                              manager role. Competition managers cannot do this.
+                            </Text>
+                            <Pressable
+                              style={[styles.dangerBtn, adminBusy && styles.dangerBtnDisabled]}
+                              disabled={adminBusy}
+                              onPress={() => onRemoveParticipant(selectedManageUser)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Remove ${
+                                selectedManageUser.username || 'player'
+                              } from competition`}
+                            >
+                              {adminBusy ? (
+                                <ActivityIndicator color={theme.colors.error} />
+                              ) : (
+                                <Text style={styles.dangerBtnText}>Remove from competition</Text>
+                              )}
+                            </Pressable>
+                          </View>
+                        ) : null}
                       </>
                     ) : manageUserPlayers.length > 0 ? (
                       <Text style={styles.muted}>Select a player above.</Text>
