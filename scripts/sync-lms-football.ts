@@ -143,7 +143,7 @@ async function main() {
   });
 
   // ---------------------------------------------------------------------------
-  // Step 1: Sync PL teams from football-data.org into `lms_teams`
+  // Step 1: Ensure PL teams exist in `lms_teams` (insert missing only)
   // ---------------------------------------------------------------------------
   console.log('[lms-sync] Fetching PL teams…');
   const teamsPayload = await fdGet<{ teams: FdTeam[] }>(
