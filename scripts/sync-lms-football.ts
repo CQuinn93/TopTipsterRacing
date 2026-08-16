@@ -152,7 +152,7 @@ async function main() {
   const fdTeams = teamsPayload.teams ?? [];
   console.log(`[lms-sync] API teams: ${fdTeams.length}`);
 
-  // Load current DB teams so we can update existing rows instead of duplicating them
+  // Load current DB teams so we can skip existing clubs instead of rewriting them
   const { data: existingTeams, error: teamsErr } = await supabase
     .from('lms_teams')
     .select('id, name, short_name, slug, external_id');
@@ -169,9 +169,13 @@ async function main() {
     byName.set(t.name.trim().toLowerCase(), t);
   }
 
-  // Upsert each Premier League club from the API response
+  // Insert missing Premier League clubs only — season roster is fixed, so skip
+  // existing rows (avoids 20 redundant updates every sync). Still link external_id
+  // once if a club was matched by slug/name without it.
   // (UI icons come from assets/Icons via TeamColourChip — not remote crest URLs)
-  let teamsUpserted = 0;
+  let teamsInserted = 0;
+  let teamsSkipped = 0;
+  let teamsLinked = 0;
   for (const ft of fdTeams) {
     const slug = slugify(ft.shortName || ft.name);
     const shortName = (ft.tla || ft.shortName || ft.name).slice(0, 3).toUpperCase();
@@ -182,44 +186,43 @@ async function main() {
       byName.get(ft.name.trim().toLowerCase());
 
     if (existing) {
-      // Already in DB → update names / external id
+      if (existing.external_id === ft.id) {
+        teamsSkipped += 1;
+        continue;
+      }
+      // Matched by slug/name but missing/wrong API id — one-time link only
       const { error } = await supabase
         .from('lms_teams')
-        .update({
-          name: ft.name,
-          short_name: shortName,
-          slug: existing.slug || slug,
-          external_id: ft.id,
-        })
+        .update({ external_id: ft.id })
         .eq('id', existing.id);
       if (error) throw error;
       existing.external_id = ft.id;
-      existing.name = ft.name;
-      existing.short_name = shortName;
       byExternal.set(ft.id, existing);
-      bySlug.set(existing.slug, existing);
-      byName.set(existing.name.trim().toLowerCase(), existing);
-    } else {
-      // New club → insert
-      const { data, error } = await supabase
-        .from('lms_teams')
-        .insert({
-          name: ft.name,
-          short_name: shortName,
-          slug,
-          external_id: ft.id,
-        })
-        .select('id, name, short_name, slug, external_id')
-        .single();
-      if (error) throw error;
-      const row = data as LmsTeamRow;
-      byExternal.set(ft.id, row);
-      bySlug.set(row.slug, row);
-      byName.set(row.name.trim().toLowerCase(), row);
+      teamsLinked += 1;
+      continue;
     }
-    teamsUpserted += 1;
+
+    // New club → insert
+    const { data, error } = await supabase
+      .from('lms_teams')
+      .insert({
+        name: ft.name,
+        short_name: shortName,
+        slug,
+        external_id: ft.id,
+      })
+      .select('id, name, short_name, slug, external_id')
+      .single();
+    if (error) throw error;
+    const row = data as LmsTeamRow;
+    byExternal.set(ft.id, row);
+    bySlug.set(row.slug, row);
+    byName.set(row.name.trim().toLowerCase(), row);
+    teamsInserted += 1;
   }
-  console.log(`[lms-sync] Teams upserted/updated: ${teamsUpserted}`);
+  console.log(
+    `[lms-sync] Teams inserted: ${teamsInserted}; linked: ${teamsLinked}; skipped (already present): ${teamsSkipped}`
+  );
 
   // Remove leftover teams not in this PL season response (seed / old clubs)
   const keepExternalIds = new Set(fdTeams.map((t) => t.id));
@@ -516,7 +519,9 @@ async function main() {
   }
 
   console.log('[lms-sync] Done.', {
-    teamsUpserted,
+    teamsInserted,
+    teamsLinked,
+    teamsSkipped,
     fixturesUpserted,
     fixturesSkipped,
     autoAssigned,
