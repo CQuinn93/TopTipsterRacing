@@ -108,12 +108,14 @@ export default function LmsRulesScreen() {
       </View>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.rule}>
-          Each gameweek, pick one Premier League team to win. Draws and defeats eliminate you.
+          Each gameweek, pick one Premier League team to win. Draws and defeats eliminate you,
+          unless the league granted extra lives — then a loss consumes one extra life first.
         </Text>
         <Text style={styles.rule}>You may only use each club once in a competition.</Text>
         <Text style={styles.rule}>
           The pick deadline is 20 minutes before the first kick-off of that gameweek. Miss it and the
           next unused team from the list below that is playing that gameweek is assigned for you.
+          If you still have no pick, you are eliminated even with extra lives remaining.
         </Text>
         <Text style={styles.sectionLabel}>Automatic selection order</Text>
         <Text style={styles.rule}>

@@ -69,6 +69,8 @@ export default function LmsHomeScreen() {
   const [isStaff, setIsStaff] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
+  const [createEntry, setCreateEntry] = useState('');
+  const [createExtraLives, setCreateExtraLives] = useState(0);
   const [createGwId, setCreateGwId] = useState<string | null>(null);
   const [createGws, setCreateGws] = useState<LmsGameweek[]>([]);
   const [creating, setCreating] = useState(false);
@@ -310,12 +312,20 @@ export default function LmsHomeScreen() {
     }
     setCreating(true);
     try {
-      const res = await lmsCreateCompetition(createName.trim(), createGwId, '2026/27');
+      const res = await lmsCreateCompetition(
+        createName.trim(),
+        createGwId,
+        '2026/27',
+        createEntry.trim() || undefined,
+        createExtraLives
+      );
       if (!res.success) {
         Alert.alert('Failed', res.error ?? 'Could not create competition');
         return;
       }
       setCreateName('');
+      setCreateEntry('');
+      setCreateExtraLives(0);
       setShowCreate(false);
       Alert.alert(
         'Created',
@@ -661,6 +671,12 @@ export default function LmsHomeScreen() {
           letterSpacing: 1,
           textTransform: 'uppercase',
           color: theme.colors.textMuted,
+        },
+        createHint: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          lineHeight: 16,
         },
         createGwScroll: {
           marginHorizontal: -4,
@@ -1127,6 +1143,49 @@ export default function LmsHomeScreen() {
                               );
                             })}
                           </ScrollView>
+                          <Text style={styles.createFieldLabel}>Extra lives</Text>
+                          <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            style={styles.createGwScroll}
+                            contentContainerStyle={styles.createGwRow}
+                            nestedScrollEnabled
+                          >
+                            {[0, 1, 2, 3].map((n) => {
+                              const active = createExtraLives === n;
+                              return (
+                                <Pressable
+                                  key={n}
+                                  style={[
+                                    styles.createGwChip,
+                                    active && styles.createGwChipActive,
+                                  ]}
+                                  onPress={() => setCreateExtraLives(n)}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.createGwChipText,
+                                      active && styles.createGwChipTextActive,
+                                    ]}
+                                  >
+                                    {n}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                          </ScrollView>
+                          <Text style={styles.createHint}>
+                            0 = out on first loss. Missed picks still go out immediately.
+                          </Text>
+                          <Text style={styles.createFieldLabel}>Entry fee (optional)</Text>
+                          <TextInput
+                            style={styles.createInput}
+                            value={createEntry}
+                            onChangeText={setCreateEntry}
+                            placeholder="e.g. £10 cash to organiser"
+                            placeholderTextColor={theme.colors.textMuted}
+                            autoCorrect={false}
+                          />
                           <Pressable
                             style={styles.createSubmit}
                             onPress={() => void onCreateCompetition()}

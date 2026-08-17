@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  TextInput,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,6 +37,7 @@ import {
   lmsListAssignableManagers,
   lmsListCompetitionManagers,
   lmsSetCompetitionManager,
+  lmsSetCompetitionEntry,
   type LmsAssignableManagerRow,
   lmsGetCompetition,
   lmsGetCompetitionCurrentGameweek,
@@ -98,6 +100,7 @@ export default function LmsCompetitionDashboard() {
   const [name, setName] = useState('');
   const [compStatus, setCompStatus] = useState('');
   const [startGwNumber, setStartGwNumber] = useState<number | null>(null);
+  const [extraLives, setExtraLives] = useState(0);
   const [me, setMe] = useState<LmsParticipant | null>(null);
   const [currentGw, setCurrentGw] = useState<LmsGameweek | null>(null);
   const [gameweeks, setGameweeks] = useState<LmsGameweek[]>([]);
@@ -140,6 +143,8 @@ export default function LmsCompetitionDashboard() {
   const [joinNotifyBusy, setJoinNotifyBusy] = useState(false);
   const [joinCode, setJoinCode] = useState<string | null>(null);
   const [rejoinCode, setRejoinCode] = useState<string | null>(null);
+  const [entryDraft, setEntryDraft] = useState('');
+  const [entrySaving, setEntrySaving] = useState(false);
   const [adminPickUserId, setAdminPickUserId] = useState<string | null>(null);
   const [adminPickTeamId, setAdminPickTeamId] = useState<string | null>(null);
   const [adminPickUsedIds, setAdminPickUsedIds] = useState<string[]>([]);
@@ -445,6 +450,8 @@ export default function LmsCompetitionDashboard() {
     setName(comp?.name ?? 'Competition');
     setCompStatus(comp?.status ?? '');
     setStartGwNumber(gwInfo.startGameweekNumber);
+    setExtraLives(comp?.extra_lives ?? 0);
+    setEntryDraft(comp?.entry?.trim() ?? '');
     setMe(participant);
     setCurrentGw(gw);
     setLeaderboard(parts);
@@ -543,6 +550,26 @@ export default function LmsCompetitionDashboard() {
       }
     } catch {
       Alert.alert('Copy failed', `Could not copy the ${label}. Try selecting it manually.`);
+    }
+  };
+
+  const onSaveEntry = async () => {
+    if (!competitionId || entrySaving) return;
+    setEntrySaving(true);
+    try {
+      const res = await lmsSetCompetitionEntry(competitionId, entryDraft);
+      if (!res.success) {
+        Alert.alert('Error', res.error || 'Could not save entry fee');
+        return;
+      }
+      setEntryDraft(res.entry ?? '');
+      if (competitionRef.current) {
+        competitionRef.current = { ...competitionRef.current, entry: res.entry ?? null };
+      }
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not save entry fee');
+    } finally {
+      setEntrySaving(false);
     }
   };
 
@@ -1731,6 +1758,11 @@ export default function LmsCompetitionDashboard() {
         lbYou: {
           color: theme.colors.accent,
         },
+        livesChip: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          color: theme.colors.accent,
+        },
         standingRoleChip: {
           paddingVertical: 1,
           paddingHorizontal: 6,
@@ -1969,6 +2001,45 @@ export default function LmsCompetitionDashboard() {
           fontSize: 12,
           color: theme.colors.textSecondary,
         },
+        entryInput: {
+          fontFamily: theme.fontFamily.input,
+          fontSize: 14,
+          color: theme.colors.text,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.sm,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          backgroundColor: theme.colors.background,
+        },
+        entrySaveBtn: {
+          alignSelf: 'flex-start',
+          paddingVertical: 6,
+          paddingHorizontal: 10,
+          borderRadius: theme.radius.sm,
+          borderWidth: 1,
+          borderColor: theme.colors.accent,
+        },
+        entrySaveBtnText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 12,
+          color: theme.colors.accent,
+        },
+        shareInviteBtn: {
+          marginTop: 4,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.sm,
+          paddingVertical: 10,
+        },
+        shareInviteBtnText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 14,
+          color: theme.colors.white,
+        },
         adminSubTab: {
           flexGrow: 1,
           flexBasis: '30%',
@@ -2196,6 +2267,11 @@ export default function LmsCompetitionDashboard() {
                   color={theme.colors.accent}
                   accessibilityLabel="Manager"
                 />
+              ) : null}
+              {extraLives > 0 && p.status === 'active' ? (
+                <Text style={styles.livesChip}>
+                  {Math.max(0, p.lives_remaining ?? 0)} extra
+                </Text>
               ) : null}
               <Ionicons
                 name={expanded ? 'chevron-up' : 'chevron-down'}
@@ -2510,9 +2586,9 @@ export default function LmsCompetitionDashboard() {
               ) : (
               <>
                 <Text style={styles.sectionIntro}>
-                  Pick one unused team that must win this gameweek. Draws eliminate you. Each club
-                  can only be used once. Deadline is 20 minutes before the first kick-off — if you
-                  miss it, the next unused team alphabetically is assigned for you.
+                  {extraLives > 0
+                    ? `Pick one unused team that must win this gameweek. A draw or defeat uses one extra life; you go out when none are left. This league starts with ${extraLives} extra ${extraLives === 1 ? 'life' : 'lives'}. You have ${Math.max(0, me?.lives_remaining ?? 0)} left. A missed pick still goes out. Each club can only be used once. Deadline is 20 minutes before the first kick-off — if you miss it, the next unused team alphabetically is assigned for you.`
+                    : 'Pick one unused team that must win this gameweek. Draws eliminate you. Each club can only be used once. Deadline is 20 minutes before the first kick-off — if you miss it, the next unused team alphabetically is assigned for you.'}
                 </Text>
 
                 <View>
@@ -2816,6 +2892,50 @@ export default function LmsCompetitionDashboard() {
                       </Text>
                     </Pressable>
                   ) : null}
+                  {canManage ? (
+                    <>
+                      <Text style={styles.joinCodeLabel}>Entry fee</Text>
+                      <TextInput
+                        style={styles.entryInput}
+                        value={entryDraft}
+                        onChangeText={setEntryDraft}
+                        placeholder="£10 cash to organiser"
+                        placeholderTextColor={theme.colors.textMuted}
+                        autoCorrect={false}
+                        editable={!entrySaving}
+                      />
+                      <Text style={styles.joinCodeHint}>
+                        Display only — money is not taken in the app.
+                      </Text>
+                      <Pressable
+                        style={styles.entrySaveBtn}
+                        onPress={() => void onSaveEntry()}
+                        disabled={entrySaving}
+                        accessibilityRole="button"
+                        accessibilityLabel="Save entry fee"
+                      >
+                        {entrySaving ? (
+                          <ActivityIndicator size="small" color={theme.colors.accent} />
+                        ) : (
+                          <Text style={styles.entrySaveBtnText}>Save entry</Text>
+                        )}
+                      </Pressable>
+                    </>
+                  ) : null}
+                  <Pressable
+                    style={styles.shareInviteBtn}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/(lms)/share/[competitionId]',
+                        params: { competitionId },
+                      } as any)
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel="Share competition invite"
+                  >
+                    <Ionicons name="share-outline" size={18} color={theme.colors.white} />
+                    <Text style={styles.shareInviteBtnText}>Share</Text>
+                  </Pressable>
                 </View>
 
                 {canManage ? (

@@ -68,6 +68,7 @@ export type LmsParticipant = {
   joined_at: string;
   rollover_count: number;
   username?: string | null;
+  lives_remaining?: number;
 };
 
 export type LmsPick = {
@@ -201,6 +202,8 @@ export type LmsCompetition = {
   status: string;
   created_at: string;
   start_gameweek_id: string | null;
+  entry?: string | null;
+  extra_lives?: number;
 };
 
 export type LmsCompletedPick = {
@@ -215,7 +218,7 @@ export type LmsCompletedPick = {
 export async function lmsGetCompetition(competitionId: string): Promise<LmsCompetition | null> {
   const { data, error } = await db
     .from('lms_competitions')
-    .select('id, name, season, status, created_at, start_gameweek_id')
+    .select('id, name, season, status, created_at, start_gameweek_id, entry, extra_lives')
     .eq('id', competitionId)
     .maybeSingle();
   if (error) throw error;
@@ -318,7 +321,7 @@ export async function lmsGetMyParticipant(competitionId: string, userId: string)
 export async function lmsListParticipants(competitionId: string): Promise<LmsParticipant[]> {
   const { data, error } = await supabase
     .from('lms_participants')
-    .select('id, competition_id, user_id, status, eliminated_gameweek_id, joined_at, rollover_count')
+    .select('id, competition_id, user_id, status, eliminated_gameweek_id, joined_at, rollover_count, lives_remaining')
     .eq('competition_id', competitionId)
     .order('joined_at', { ascending: true });
   if (error) throw error;
@@ -920,13 +923,15 @@ export async function lmsAdminCreateCompetition(
   adminCode: string,
   name: string,
   startGameweekId: string,
-  season = '2026/27'
+  season = '2026/27',
+  extraLives = 0
 ) {
   const { data, error } = await db.rpc('lms_admin_create_competition', {
     p_code: adminCode,
     p_name: name,
     p_start_gameweek_id: startGameweekId,
     p_season: season,
+    p_extra_lives: extraLives,
   });
   if (error) throw error;
   return data as {
@@ -1184,13 +1189,39 @@ export async function lmsAdminRemoveParticipant(
   };
 }
 
+export async function lmsSetCompetitionEntry(
+  competitionId: string,
+  entry: string
+): Promise<{ success: boolean; entry?: string | null; error?: string }> {
+  const { data, error } = await db.rpc('lms_set_competition_entry', {
+    p_competition_id: competitionId,
+    p_entry: entry,
+  });
+  if (error) throw error;
+  return (data ?? { success: false, error: 'unknown' }) as {
+    success: boolean;
+    entry?: string | null;
+    error?: string;
+  };
+}
+
 /** Session-auth create (p_code ignored by tablet_code_admin_user_id). */
 export async function lmsCreateCompetition(
   name: string,
   startGameweekId: string,
-  season = '2026/27'
+  season = '2026/27',
+  entry?: string,
+  extraLives = 0
 ) {
-  return lmsAdminCreateCompetition('', name, startGameweekId, season);
+  const created = await lmsAdminCreateCompetition('', name, startGameweekId, season, extraLives);
+  const trimmed = entry?.trim();
+  if (created.success && created.competition_id && trimmed) {
+    const setRes = await lmsSetCompetitionEntry(created.competition_id, trimmed);
+    if (!setRes.success) {
+      return { ...created, error: setRes.error ?? 'Could not save entry fee' };
+    }
+  }
+  return created;
 }
 
 export async function lmsApproveJoinRequest(requestId: string) {
