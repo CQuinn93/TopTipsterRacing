@@ -3,6 +3,7 @@ import { getSupabaseUrl, supabase } from '@/lib/supabase';
 export type OwnerUserRow = {
   id: string;
   username: string | null;
+  email?: string | null;
   role: 'User' | 'Admin' | 'Owner';
   created_at: string;
   updated_at?: string;

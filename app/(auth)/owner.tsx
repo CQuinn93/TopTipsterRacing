@@ -699,6 +699,13 @@ export default function OwnerScreen() {
                         <Text style={styles.badgeText}>{banned ? 'Banned' : u.role}</Text>
                       </View>
                     </View>
+                    {u.email?.trim() ? (
+                      <Text style={styles.meta} numberOfLines={1} selectable>
+                        {u.email.trim()}
+                      </Text>
+                    ) : (
+                      <Text style={styles.meta}>No email on file</Text>
+                    )}
                     <Text style={styles.meta}>
                       Joined {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
                       {isSelf ? ' · you' : ''}
