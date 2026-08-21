@@ -3,7 +3,7 @@
  *
  * Preferred: client invokes after composing title + body in Admin → Notify.
  *
- * Auth: signed-in creator/Owner (lms_admin_authorize_broadcast), or service role.
+ * Auth: signed-in creator/Owner via lms_admin_authorize_broadcast.
  *
  * Secrets: VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, optional VAPID_SUBJECT,
  * SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY.
@@ -16,7 +16,7 @@ import webpush from "npm:web-push@3.6.7";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-cron-secret",
+    "authorization, x-client-info, apikey, content-type",
 };
 
 function json(status: number, body: Record<string, unknown>) {
@@ -37,10 +37,7 @@ Deno.serve(async (req) => {
     const auth = req.headers.get("Authorization") ?? "";
     const bearerToken = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
 
-    const isServiceRole =
-      Boolean(serviceKey) && (auth === `Bearer ${serviceKey}` || bearerToken === serviceKey);
-
-    if (!isServiceRole && !bearerToken) {
+    if (!bearerToken || !serviceKey || !anonKey) {
       return json(401, { error: "Unauthorized" });
     }
 
@@ -76,20 +73,6 @@ Deno.serve(async (req) => {
       return json(400, { error: "missing_competition_id" });
     }
 
-    let authResult: Record<string, unknown> | null = null;
-
-    if (isServiceRole) {
-      // Service role still goes through the RPC with a user JWT when provided;
-      // otherwise require pre-authorized payload (internal only).
-      if (!anonKey || !bearerToken || bearerToken === serviceKey) {
-        return json(400, { error: "user_session_required" });
-      }
-    }
-
-    if (!anonKey) {
-      return json(500, { error: "SUPABASE_ANON_KEY not configured" });
-    }
-
     const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: `Bearer ${bearerToken}` } },
     });
@@ -107,7 +90,7 @@ Deno.serve(async (req) => {
       },
     );
     if (prepErr) throw prepErr;
-    authResult = (prepared ?? {}) as Record<string, unknown>;
+    const authResult = (prepared ?? {}) as Record<string, unknown>;
 
     if (!authResult.success) {
       const err = typeof authResult.error === "string" ? authResult.error : "forbidden";
