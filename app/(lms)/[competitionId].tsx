@@ -2011,7 +2011,7 @@ export default function LmsCompetitionDashboard() {
           marginTop: 2,
         },
         lbDrawer: {
-          paddingLeft: 8,
+          paddingHorizontal: 12,
           paddingBottom: 12,
           gap: 6,
         },
