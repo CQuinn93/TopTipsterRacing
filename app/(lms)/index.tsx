@@ -419,11 +419,32 @@ export default function LmsHomeScreen() {
         },
         spotlightWrap: {
           paddingHorizontal: theme.spacing.lg,
-          paddingBottom: theme.spacing.md,
+          paddingBottom: theme.spacing.sm,
         },
         deadlineAlertsWrap: {
+          paddingBottom: theme.spacing.sm,
+        },
+        mainScroll: {
+          flex: 1,
+        },
+        mainScrollContent: {
           paddingHorizontal: theme.spacing.lg,
+          paddingBottom: insets.bottom + theme.spacing.xl,
+          gap: theme.spacing.md,
+          flexGrow: 1,
+        },
+        homePanel: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.lg,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          overflow: 'hidden',
+        },
+        panelBody: {
+          paddingHorizontal: theme.spacing.md,
+          paddingTop: theme.spacing.md,
           paddingBottom: theme.spacing.md,
+          gap: theme.spacing.lg,
         },
         spotlight: {
           backgroundColor: theme.colors.surfaceElevated,
@@ -518,10 +539,9 @@ export default function LmsHomeScreen() {
         },
         tabs: {
           flexDirection: 'row',
-          marginHorizontal: theme.spacing.lg,
-          marginBottom: theme.spacing.md,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
         },
         tab: {
           flex: 1,
@@ -539,11 +559,6 @@ export default function LmsHomeScreen() {
           textAlign: 'center',
         },
         tabTextActive: { color: theme.colors.accent },
-        content: {
-          paddingHorizontal: theme.spacing.lg,
-          paddingBottom: insets.bottom + theme.spacing.xl,
-          gap: theme.spacing.lg,
-        },
         sectionLabel: {
           fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: 11,
@@ -770,9 +785,8 @@ export default function LmsHomeScreen() {
           textTransform: 'uppercase',
         },
         pickStatsCard: {
-          marginTop: 10,
           backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.md,
+          borderRadius: theme.radius.lg,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
           paddingVertical: 12,
@@ -796,9 +810,6 @@ export default function LmsHomeScreen() {
           fontFamily: theme.fontFamily.baiLight,
           fontSize: 11,
           color: theme.colors.textMuted,
-        },
-        pickStatsList: {
-          maxHeight: 220,
         },
         pickStatRow: {
           flexDirection: 'row',
@@ -929,60 +940,55 @@ export default function LmsHomeScreen() {
             </View>
           ) : null}
         </View>
+      </View>
+    );
+  };
 
-        {pickStats?.revealed && pickStats.teams.length > 0 ? (
-          <View style={styles.pickStatsCard}>
-            <View style={styles.pickStatsHead}>
-              <Text style={styles.pickStatsTitle}>
-                GW{pickStats.gameweek_number ?? gw.number} picks
+  const renderPickStats = () => {
+    if (!gw || !pickStats?.revealed || pickStats.teams.length === 0) return null;
+    return (
+      <View style={styles.pickStatsCard}>
+        <View style={styles.pickStatsHead}>
+          <Text style={styles.pickStatsTitle}>
+            GW{pickStats.gameweek_number ?? gw.number} picks
+          </Text>
+          <Text style={styles.pickStatsMeta}>
+            {pickStats.total_picks} pick{pickStats.total_picks === 1 ? '' : 's'} · all leagues
+          </Text>
+        </View>
+        {pickStats.teams.map((t) => {
+          const widthPct = Math.min(100, Math.max(0, t.pick_pct));
+          return (
+            <View key={t.team_id} style={styles.pickStatRow}>
+              <TeamColourChip
+                shortName={t.short_name}
+                name={t.name}
+                slug={t.slug}
+                size={22}
+              />
+              <Text style={styles.pickStatName} numberOfLines={1}>
+                {t.short_name || lmsDisplayTeamName(t.name).slice(0, 3)}
               </Text>
-              <Text style={styles.pickStatsMeta}>
-                {pickStats.total_picks} pick{pickStats.total_picks === 1 ? '' : 's'} · all leagues
+              <View style={styles.pickStatBarTrack}>
+                <View
+                  style={[
+                    styles.pickStatBarFill,
+                    {
+                      width: `${widthPct}%`,
+                      opacity: t.pick_count > 0 ? 1 : 0.25,
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={styles.pickStatPct}>
+                {t.pick_pct.toFixed(t.pick_pct % 1 === 0 ? 0 : 1)}%
+              </Text>
+              <Text style={[styles.pickStatOutcome, { color: outcomeColor(t.outcome) }]}>
+                {outcomeLabel(t.outcome)}
               </Text>
             </View>
-            <ScrollView
-              style={styles.pickStatsList}
-              nestedScrollEnabled
-              showsVerticalScrollIndicator={false}
-            >
-              {pickStats.teams.map((t) => {
-                const widthPct = Math.min(100, Math.max(0, t.pick_pct));
-                return (
-                  <View key={t.team_id} style={styles.pickStatRow}>
-                    <TeamColourChip
-                      shortName={t.short_name}
-                      name={t.name}
-                      slug={t.slug}
-                      size={22}
-                    />
-                    <Text style={styles.pickStatName} numberOfLines={1}>
-                      {t.short_name || lmsDisplayTeamName(t.name).slice(0, 3)}
-                    </Text>
-                    <View style={styles.pickStatBarTrack}>
-                      <View
-                        style={[
-                          styles.pickStatBarFill,
-                          {
-                            width: `${widthPct}%`,
-                            opacity: t.pick_count > 0 ? 1 : 0.25,
-                          },
-                        ]}
-                      />
-                    </View>
-                    <Text style={styles.pickStatPct}>
-                      {t.pick_pct.toFixed(t.pick_pct % 1 === 0 ? 0 : 1)}%
-                    </Text>
-                    <Text
-                      style={[styles.pickStatOutcome, { color: outcomeColor(t.outcome) }]}
-                    >
-                      {outcomeLabel(t.outcome)}
-                    </Text>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </View>
-        ) : null}
+          );
+        })}
       </View>
     );
   };
@@ -1024,35 +1030,11 @@ export default function LmsHomeScreen() {
       ) : (
         <>
           {renderNextUp()}
-          <View style={styles.deadlineAlertsWrap}>
-            <LmsPushNotificationsCard />
-          </View>
-
-          <View style={styles.tabs}>
-            {(
-              [
-                { key: 'competitions' as const, label: 'My competitions' },
-                { key: 'join' as const, label: 'Join' },
-                { key: 'table' as const, label: 'Table' },
-              ] as const
-            ).map((t) => {
-              const active = tab === t.key;
-              return (
-                <Pressable
-                  key={t.key}
-                  style={[styles.tab, active && styles.tabActive]}
-                  onPress={() => setTab(t.key)}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: active }}
-                >
-                  <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
 
           <ScrollView
-            contentContainerStyle={styles.content}
+            style={styles.mainScroll}
+            contentContainerStyle={styles.mainScrollContent}
+            keyboardShouldPersistTaps="handled"
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
@@ -1062,262 +1044,297 @@ export default function LmsHomeScreen() {
               />
             }
           >
-            {tab === 'competitions' ? (
-              <>
-                {pending.length > 0 ? (
-                  <View>
-                    <Text style={styles.sectionLabel}>Pending approval</Text>
-                    <View style={styles.list}>
-                      {pending.map((p, i) => (
-                        <View
-                          key={p.competition_id}
-                          style={[styles.row, i === pending.length - 1 && styles.rowLast]}
-                        >
-                          <View style={styles.rowCopy}>
-                            <Text style={styles.rowTitle}>{p.name}</Text>
-                            <Text style={styles.rowMeta}>Waiting for admin</Text>
-                          </View>
-                          <Text style={styles.badge}>Pending</Text>
+            {renderPickStats()}
+
+            <View style={styles.deadlineAlertsWrap}>
+              <LmsPushNotificationsCard />
+            </View>
+
+            <View style={styles.homePanel}>
+              <View style={styles.tabs}>
+                {(
+                  [
+                    { key: 'competitions' as const, label: 'My competitions' },
+                    { key: 'join' as const, label: 'Join' },
+                    { key: 'table' as const, label: 'Table' },
+                  ] as const
+                ).map((t) => {
+                  const active = tab === t.key;
+                  return (
+                    <Pressable
+                      key={t.key}
+                      style={[styles.tab, active && styles.tabActive]}
+                      onPress={() => setTab(t.key)}
+                      accessibilityRole="tab"
+                      accessibilityState={{ selected: active }}
+                    >
+                      <Text style={[styles.tabText, active && styles.tabTextActive]}>
+                        {t.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.panelBody}>
+                {tab === 'competitions' ? (
+                  <>
+                    {pending.length > 0 ? (
+                      <View>
+                        <Text style={styles.sectionLabel}>Pending approval</Text>
+                        <View style={styles.list}>
+                          {pending.map((p, i) => (
+                            <View
+                              key={p.competition_id}
+                              style={[styles.row, i === pending.length - 1 && styles.rowLast]}
+                            >
+                              <View style={styles.rowCopy}>
+                                <Text style={styles.rowTitle}>{p.name}</Text>
+                                <Text style={styles.rowMeta}>Waiting for admin</Text>
+                              </View>
+                              <Text style={styles.badge}>Pending</Text>
+                            </View>
+                          ))}
                         </View>
-                      ))}
+                      </View>
+                    ) : null}
+
+                    <View>
+                      <Text style={styles.sectionLabel}>Your leagues</Text>
+                      {isStaff ? (
+                        <>
+                          <Pressable
+                            style={styles.createToggle}
+                            onPress={() => setShowCreate((v) => !v)}
+                            accessibilityRole="button"
+                            accessibilityState={{ expanded: showCreate }}
+                            accessibilityLabel="Create competition"
+                          >
+                            <Ionicons
+                              name={showCreate ? 'chevron-up' : 'add-circle-outline'}
+                              size={18}
+                              color={theme.colors.accent}
+                            />
+                            <Text style={styles.createToggleText}>Create competition</Text>
+                          </Pressable>
+                          {showCreate ? (
+                            <View style={styles.createPanel}>
+                              <TextInput
+                                style={styles.createInput}
+                                value={createName}
+                                onChangeText={setCreateName}
+                                placeholder="e.g. Office LMS"
+                                placeholderTextColor={theme.colors.textMuted}
+                                autoCorrect={false}
+                              />
+                              <Text style={styles.createFieldLabel}>Starting gameweek</Text>
+                              <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                style={styles.createGwScroll}
+                                contentContainerStyle={styles.createGwRow}
+                                nestedScrollEnabled
+                              >
+                                {createGws.slice(0, 20).map((g) => {
+                                  const active = createGwId === g.id;
+                                  return (
+                                    <Pressable
+                                      key={g.id}
+                                      style={[
+                                        styles.createGwChip,
+                                        active && styles.createGwChipActive,
+                                      ]}
+                                      onPress={() => setCreateGwId(g.id)}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.createGwChipText,
+                                          active && styles.createGwChipTextActive,
+                                        ]}
+                                      >
+                                        GW{g.number}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </ScrollView>
+                              <Text style={styles.createFieldLabel}>Extra lives</Text>
+                              <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                style={styles.createGwScroll}
+                                contentContainerStyle={styles.createGwRow}
+                                nestedScrollEnabled
+                              >
+                                {[0, 1, 2, 3].map((n) => {
+                                  const active = createExtraLives === n;
+                                  return (
+                                    <Pressable
+                                      key={n}
+                                      style={[
+                                        styles.createGwChip,
+                                        active && styles.createGwChipActive,
+                                      ]}
+                                      onPress={() => setCreateExtraLives(n)}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.createGwChipText,
+                                          active && styles.createGwChipTextActive,
+                                        ]}
+                                      >
+                                        {n}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </ScrollView>
+                              <Text style={styles.createHint}>
+                                0 = out on first loss. Missed picks still go out immediately.
+                              </Text>
+                              <Text style={styles.createFieldLabel}>Entry fee (optional)</Text>
+                              <TextInput
+                                style={styles.createInput}
+                                value={createEntry}
+                                onChangeText={setCreateEntry}
+                                placeholder="e.g. £10 cash to organiser"
+                                placeholderTextColor={theme.colors.textMuted}
+                                autoCorrect={false}
+                              />
+                              <Pressable
+                                style={styles.createSubmit}
+                                onPress={() => void onCreateCompetition()}
+                                disabled={creating}
+                              >
+                                {creating ? (
+                                  <ActivityIndicator color={theme.colors.white} size="small" />
+                                ) : (
+                                  <Text style={styles.createSubmitText}>Create</Text>
+                                )}
+                              </Pressable>
+                            </View>
+                          ) : null}
+                        </>
+                      ) : null}
+                      {comps.length === 0 ? (
+                        <View style={styles.emptyBlock}>
+                          <Text style={styles.empty}>
+                            No competitions yet. Got a competition code? Enter it on the Join tab
+                            to get started.
+                          </Text>
+                          <Pressable
+                            style={styles.emptyAction}
+                            onPress={() => setTab('join')}
+                            accessibilityRole="button"
+                            accessibilityLabel="Enter competition code"
+                          >
+                            <Text style={styles.emptyActionText}>Enter competition code</Text>
+                            <Ionicons name="arrow-forward" size={14} color={theme.colors.accent} />
+                          </Pressable>
+                        </View>
+                      ) : (
+                        <View style={styles.list}>
+                          {comps.map((c, i) => {
+                            const remainLabel =
+                              c.totalCount > 0
+                                ? `${c.aliveCount} of ${c.totalCount} remain`
+                                : statusLabel(c.participant_status);
+                            return (
+                              <Pressable
+                                key={c.competition_id}
+                                style={[styles.row, i === comps.length - 1 && styles.rowLast]}
+                                onPress={() => router.push(`/(lms)/${c.competition_id}` as any)}
+                              >
+                                <View style={styles.rowCopy}>
+                                  <View style={styles.rowTitleRow}>
+                                    <Text style={styles.rowTitle}>{c.name}</Text>
+                                    {c.isCreator ? (
+                                      <View style={styles.manageChip}>
+                                        <Text style={styles.manageChipText}>Admin</Text>
+                                      </View>
+                                    ) : c.canManage ? (
+                                      <View style={styles.manageChip}>
+                                        <Text style={styles.manageChipText}>Owner</Text>
+                                      </View>
+                                    ) : c.isManager || c.canHandleJoins ? (
+                                      <View style={styles.manageChip}>
+                                        <Text style={styles.manageChipText}>Manager</Text>
+                                      </View>
+                                    ) : null}
+                                  </View>
+                                  <Text style={styles.rowMeta}>{remainLabel}</Text>
+                                  {c.participant_status === 'active' && c.pickAvailable ? (
+                                    <Text style={styles.rowPickHint}>Pick available</Text>
+                                  ) : c.participant_status !== 'active' ? (
+                                    <Text style={styles.rowMeta}>
+                                      {statusLabel(c.participant_status)}
+                                    </Text>
+                                  ) : null}
+                                </View>
+                                {c.pickTeam ? (
+                                  <View style={styles.pickCol}>
+                                    <TeamColourChip
+                                      shortName={c.pickTeam.short_name}
+                                      name={c.pickTeam.name}
+                                      slug={c.pickTeam.slug}
+                                      size={28}
+                                    />
+                                    <Text style={styles.pickAbbr} numberOfLines={1}>
+                                      {c.pickTeam.short_name || c.pickTeam.name.slice(0, 3)}
+                                    </Text>
+                                  </View>
+                                ) : (
+                                  <Ionicons
+                                    name="chevron-forward"
+                                    size={16}
+                                    color={theme.colors.textMuted}
+                                  />
+                                )}
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      )}
                     </View>
+                  </>
+                ) : null}
+
+                {tab === 'join' ? (
+                  <View>
+                    <Text style={styles.sectionLabel}>Competition code</Text>
+                    <View style={styles.joinRow}>
+                      <TextInput
+                        style={styles.input}
+                        value={code}
+                        onChangeText={setCode}
+                        placeholder="CODE"
+                        placeholderTextColor={theme.colors.textMuted}
+                        autoCapitalize="characters"
+                        maxLength={6}
+                        autoCorrect={false}
+                      />
+                      <Pressable
+                        style={styles.joinBtn}
+                        onPress={() => void onJoin()}
+                        disabled={joining}
+                      >
+                        {joining ? (
+                          <ActivityIndicator color={theme.colors.white} size="small" />
+                        ) : (
+                          <Text style={styles.joinBtnText}>Join</Text>
+                        )}
+                      </Pressable>
+                    </View>
+                    <Text style={styles.joinHint}>
+                      Ask the competition organiser for the 6-character code, then enter it here.
+                      You’ll appear in My competitions once they approve you.
+                    </Text>
                   </View>
                 ) : null}
 
-                <View>
-                  <Text style={styles.sectionLabel}>Your leagues</Text>
-                  {isStaff ? (
-                    <>
-                      <Pressable
-                        style={styles.createToggle}
-                        onPress={() => setShowCreate((v) => !v)}
-                        accessibilityRole="button"
-                        accessibilityState={{ expanded: showCreate }}
-                        accessibilityLabel="Create competition"
-                      >
-                        <Ionicons
-                          name={showCreate ? 'chevron-up' : 'add-circle-outline'}
-                          size={18}
-                          color={theme.colors.accent}
-                        />
-                        <Text style={styles.createToggleText}>Create competition</Text>
-                      </Pressable>
-                      {showCreate ? (
-                        <View style={styles.createPanel}>
-                          <TextInput
-                            style={styles.createInput}
-                            value={createName}
-                            onChangeText={setCreateName}
-                            placeholder="e.g. Office LMS"
-                            placeholderTextColor={theme.colors.textMuted}
-                            autoCorrect={false}
-                          />
-                          <Text style={styles.createFieldLabel}>Starting gameweek</Text>
-                          <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            style={styles.createGwScroll}
-                            contentContainerStyle={styles.createGwRow}
-                            nestedScrollEnabled
-                          >
-                            {createGws.slice(0, 20).map((g) => {
-                              const active = createGwId === g.id;
-                              return (
-                                <Pressable
-                                  key={g.id}
-                                  style={[
-                                    styles.createGwChip,
-                                    active && styles.createGwChipActive,
-                                  ]}
-                                  onPress={() => setCreateGwId(g.id)}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.createGwChipText,
-                                      active && styles.createGwChipTextActive,
-                                    ]}
-                                  >
-                                    GW{g.number}
-                                  </Text>
-                                </Pressable>
-                              );
-                            })}
-                          </ScrollView>
-                          <Text style={styles.createFieldLabel}>Extra lives</Text>
-                          <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            style={styles.createGwScroll}
-                            contentContainerStyle={styles.createGwRow}
-                            nestedScrollEnabled
-                          >
-                            {[0, 1, 2, 3].map((n) => {
-                              const active = createExtraLives === n;
-                              return (
-                                <Pressable
-                                  key={n}
-                                  style={[
-                                    styles.createGwChip,
-                                    active && styles.createGwChipActive,
-                                  ]}
-                                  onPress={() => setCreateExtraLives(n)}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.createGwChipText,
-                                      active && styles.createGwChipTextActive,
-                                    ]}
-                                  >
-                                    {n}
-                                  </Text>
-                                </Pressable>
-                              );
-                            })}
-                          </ScrollView>
-                          <Text style={styles.createHint}>
-                            0 = out on first loss. Missed picks still go out immediately.
-                          </Text>
-                          <Text style={styles.createFieldLabel}>Entry fee (optional)</Text>
-                          <TextInput
-                            style={styles.createInput}
-                            value={createEntry}
-                            onChangeText={setCreateEntry}
-                            placeholder="e.g. £10 cash to organiser"
-                            placeholderTextColor={theme.colors.textMuted}
-                            autoCorrect={false}
-                          />
-                          <Pressable
-                            style={styles.createSubmit}
-                            onPress={() => void onCreateCompetition()}
-                            disabled={creating}
-                          >
-                            {creating ? (
-                              <ActivityIndicator color={theme.colors.white} size="small" />
-                            ) : (
-                              <Text style={styles.createSubmitText}>Create</Text>
-                            )}
-                          </Pressable>
-                        </View>
-                      ) : null}
-                    </>
-                  ) : null}
-                  {comps.length === 0 ? (
-                    <View style={styles.emptyBlock}>
-                      <Text style={styles.empty}>
-                        No competitions yet. Got a competition code? Enter it on the Join tab to get
-                        started.
-                      </Text>
-                      <Pressable
-                        style={styles.emptyAction}
-                        onPress={() => setTab('join')}
-                        accessibilityRole="button"
-                        accessibilityLabel="Enter competition code"
-                      >
-                        <Text style={styles.emptyActionText}>Enter competition code</Text>
-                        <Ionicons name="arrow-forward" size={14} color={theme.colors.accent} />
-                      </Pressable>
-                    </View>
-                  ) : (
-                    <View style={styles.list}>
-                      {comps.map((c, i) => {
-                        const remainLabel =
-                          c.totalCount > 0
-                            ? `${c.aliveCount} of ${c.totalCount} remain`
-                            : statusLabel(c.participant_status);
-                        return (
-                          <Pressable
-                            key={c.competition_id}
-                            style={[styles.row, i === comps.length - 1 && styles.rowLast]}
-                            onPress={() => router.push(`/(lms)/${c.competition_id}` as any)}
-                          >
-                            <View style={styles.rowCopy}>
-                              <View style={styles.rowTitleRow}>
-                                <Text style={styles.rowTitle}>{c.name}</Text>
-                                {c.isCreator ? (
-                                  <View style={styles.manageChip}>
-                                    <Text style={styles.manageChipText}>Admin</Text>
-                                  </View>
-                                ) : c.canManage ? (
-                                  <View style={styles.manageChip}>
-                                    <Text style={styles.manageChipText}>Owner</Text>
-                                  </View>
-                                ) : c.isManager || c.canHandleJoins ? (
-                                  <View style={styles.manageChip}>
-                                    <Text style={styles.manageChipText}>Manager</Text>
-                                  </View>
-                                ) : null}
-                              </View>
-                              <Text style={styles.rowMeta}>{remainLabel}</Text>
-                              {c.participant_status === 'active' && c.pickAvailable ? (
-                                <Text style={styles.rowPickHint}>Pick available</Text>
-                              ) : c.participant_status !== 'active' ? (
-                                <Text style={styles.rowMeta}>
-                                  {statusLabel(c.participant_status)}
-                                </Text>
-                              ) : null}
-                            </View>
-                            {c.pickTeam ? (
-                              <View style={styles.pickCol}>
-                                <TeamColourChip
-                                  shortName={c.pickTeam.short_name}
-                                  name={c.pickTeam.name}
-                                  slug={c.pickTeam.slug}
-                                  size={28}
-                                />
-                                <Text style={styles.pickAbbr} numberOfLines={1}>
-                                  {c.pickTeam.short_name || c.pickTeam.name.slice(0, 3)}
-                                </Text>
-                              </View>
-                            ) : (
-                              <Ionicons
-                                name="chevron-forward"
-                                size={16}
-                                color={theme.colors.textMuted}
-                              />
-                            )}
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  )}
-                </View>
-              </>
-            ) : null}
-
-            {tab === 'join' ? (
-              <View>
-                <Text style={styles.sectionLabel}>Competition code</Text>
-                <View style={styles.joinRow}>
-                  <TextInput
-                    style={styles.input}
-                    value={code}
-                    onChangeText={setCode}
-                    placeholder="CODE"
-                    placeholderTextColor={theme.colors.textMuted}
-                    autoCapitalize="characters"
-                    maxLength={6}
-                    autoCorrect={false}
-                  />
-                  <Pressable
-                    style={styles.joinBtn}
-                    onPress={() => void onJoin()}
-                    disabled={joining}
-                  >
-                    {joining ? (
-                      <ActivityIndicator color={theme.colors.white} size="small" />
-                    ) : (
-                      <Text style={styles.joinBtnText}>Join</Text>
-                    )}
-                  </Pressable>
-                </View>
-                <Text style={styles.joinHint}>
-                  Ask the competition organiser for the 6-character code, then enter it here.
-                  You’ll appear in My competitions once they approve you.
-                </Text>
+                {tab === 'table' ? <LeagueTablePanel refreshKey={tableRefreshKey} /> : null}
               </View>
-            ) : null}
-
-            {tab === 'table' ? <LeagueTablePanel refreshKey={tableRefreshKey} /> : null}
+            </View>
 
             <LmsTrademarkDisclaimer />
           </ScrollView>
