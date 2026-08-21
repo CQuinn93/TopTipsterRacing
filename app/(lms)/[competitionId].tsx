@@ -1208,10 +1208,6 @@ export default function LmsCompetitionDashboard() {
 
   const onAdminSubmitPick = async () => {
     if (!adminPickUserId || !adminPickTeamId || !currentGw) return;
-    if (deadlinePassed) {
-      Alert.alert('Deadline passed', 'Picks are closed for this gameweek.');
-      return;
-    }
     setAdminBusy(true);
     try {
       const res = await lmsAdminSubmitPickForUser(
@@ -3248,8 +3244,9 @@ export default function LmsCompetitionDashboard() {
                 ) : adminSubTab === 'users' && canManage ? (
                   <>
                     <Text style={styles.sectionIntro}>
-                      Select a player to assign them as a manager, submit a pick on their behalf, or
-                      remove them from the competition.
+                      Select a player to assign them as a manager, submit or change a pick on their
+                      behalf at any time (including after the deadline), or remove them from the
+                      competition.
                     </Text>
                     <Text style={styles.poolTitle}>
                       Player · managers {managerUserIds.size}/3
@@ -3428,6 +3425,7 @@ export default function LmsCompetitionDashboard() {
 
                         <Text style={styles.poolTitle}>
                           Pick{currentGw ? ` · GW${currentGw.number}` : ''}
+                          {currentGw && deadlinePassed ? ' · after deadline' : ''}
                         </Text>
                         {selectedManageUser.status !== 'active' ? (
                           <Text style={styles.muted}>
@@ -3435,17 +3433,18 @@ export default function LmsCompetitionDashboard() {
                           </Text>
                         ) : !currentGw ? (
                           <Text style={styles.muted}>No open gameweek for picks yet.</Text>
-                        ) : deadlinePassed ? (
-                          <Text style={styles.muted}>
-                            Picks are closed for GW{currentGw.number}. Admin picks unlock again next
-                            gameweek before the deadline.
-                          </Text>
                         ) : adminPickTeams.length === 0 ? (
                           <Text style={styles.muted}>
                             No unused pool teams playing this gameweek for that player.
                           </Text>
                         ) : (
                           <>
+                            {deadlinePassed ? (
+                              <Text style={styles.muted}>
+                                Player picks are locked, but as admin you can still set or change
+                                this player’s selection.
+                              </Text>
+                            ) : null}
                             <View style={styles.teamGrid}>
                               {adminPickTeams.map((t) => {
                                 const selected = adminPickTeamId === t.id;
@@ -3564,7 +3563,8 @@ export default function LmsCompetitionDashboard() {
                   <>
                     <Text style={styles.sectionIntro}>
                       See who has locked a pick for the current gameweek. Players without a pick
-                      are listed first so you can nudge them before the deadline.
+                      are listed first. After the deadline, use Manage user to set or change a
+                      pick for them.
                     </Text>
                     {!currentGw ? (
                       <Text style={styles.muted}>No open gameweek for picks yet.</Text>
