@@ -119,6 +119,7 @@ export default function LmsCompetitionDashboard() {
   const [historyPicks, setHistoryPicks] = useState<LmsCompletedPick[]>([]);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [standingSearch, setStandingSearch] = useState('');
+  const [standingPickSort, setStandingPickSort] = useState<'alpha' | 'popular'>('alpha');
   const [leaderboard, setLeaderboard] = useState<LmsParticipant[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -1065,6 +1066,11 @@ export default function LmsCompetitionDashboard() {
       groups.sort((a, b) => {
         if (a.key === 'no-pick') return 1;
         if (b.key === 'no-pick') return -1;
+        if (standingPickSort === 'popular') {
+          if (b.players.length !== a.players.length) {
+            return b.players.length - a.players.length;
+          }
+        }
         return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' });
       });
       return groups;
@@ -1107,7 +1113,7 @@ export default function LmsCompetitionDashboard() {
       eliminated,
       matchCount: survivors.length + outThisWeek.length + eliminated.length,
     };
-  }, [leaderboard, currentGw?.id, currentGw, standingSearch, picksRevealed, pickByUserId]);
+  }, [leaderboard, currentGw?.id, currentGw, standingSearch, standingPickSort, picksRevealed, pickByUserId]);
 
   const gwNumberById = useMemo(() => {
     const map = new Map<string, number>();
@@ -1895,6 +1901,33 @@ export default function LmsCompetitionDashboard() {
           color: theme.colors.text,
           paddingVertical: 2,
           outlineStyle: 'none' as unknown as undefined,
+        },
+        standingSortRow: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 8,
+          marginBottom: theme.spacing.sm,
+        },
+        standingSortChip: {
+          paddingVertical: 6,
+          paddingHorizontal: 12,
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+        },
+        standingSortChipActive: {
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+        },
+        standingSortChipText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        standingSortChipTextActive: {
+          color: theme.colors.accent,
+          fontFamily: theme.fontFamily.baiSemiBold,
         },
         standingPickGroup: {
           marginBottom: theme.spacing.sm,
@@ -3064,8 +3097,8 @@ export default function LmsCompetitionDashboard() {
             {tab === 'leaderboard' ? (
               <>
                 <Text style={styles.sectionIntro}>
-                  Still standing wins. During the gameweek, players are grouped under their pick
-                  with teams listed A–Z. Tap a player for their used teams.
+                  Still standing wins. During the gameweek, players are grouped under their pick.
+                  Switch between A–Z and most picked. Tap a player for their used teams.
                   {currentGw
                     ? picksRevealed
                       ? ` Showing GW${currentGw.number} picks.`
@@ -3096,6 +3129,37 @@ export default function LmsCompetitionDashboard() {
                     </Pressable>
                   ) : null}
                 </View>
+                {picksRevealed ? (
+                  <View style={styles.standingSortRow}>
+                    {(
+                      [
+                        { key: 'alpha' as const, label: 'A–Z' },
+                        { key: 'popular' as const, label: 'Most picked' },
+                      ] as const
+                    ).map((opt) => {
+                      const active = standingPickSort === opt.key;
+                      return (
+                        <Pressable
+                          key={opt.key}
+                          style={[styles.standingSortChip, active && styles.standingSortChipActive]}
+                          onPress={() => setStandingPickSort(opt.key)}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                          accessibilityLabel={`Sort teams ${opt.label}`}
+                        >
+                          <Text
+                            style={[
+                              styles.standingSortChipText,
+                              active && styles.standingSortChipTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
                 {leaderboard.length === 0 ? (
                   <Text style={styles.muted}>No players in this competition yet.</Text>
                 ) : standingSections.matchCount === 0 ? (
