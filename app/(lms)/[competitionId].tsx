@@ -130,7 +130,9 @@ export default function LmsCompetitionDashboard() {
   const [managerBusyId, setManagerBusyId] = useState<string | null>(null);
   const [poolTeamIds, setPoolTeamIds] = useState<string[]>([]);
   const [adminBusy, setAdminBusy] = useState(false);
-  const [adminSubTab, setAdminSubTab] = useState<'joins' | 'pool' | 'users' | 'notify'>('joins');
+  const [adminSubTab, setAdminSubTab] = useState<'joins' | 'pool' | 'users' | 'picks' | 'notify'>(
+    'joins'
+  );
   const [pendingJoins, setPendingJoins] = useState<
     {
       id: string;
@@ -758,7 +760,12 @@ export default function LmsCompetitionDashboard() {
   }, [canHandleJoins, tab]);
 
   useEffect(() => {
-    if (canHandleJoins && !canManage && adminSubTab !== 'joins') {
+    if (
+      canHandleJoins &&
+      !canManage &&
+      adminSubTab !== 'joins' &&
+      adminSubTab !== 'picks'
+    ) {
       setAdminSubTab('joins');
     }
   }, [canHandleJoins, canManage, adminSubTab]);
@@ -965,6 +972,34 @@ export default function LmsCompetitionDashboard() {
     for (const p of gwPicks) map.set(p.user_id, p);
     return map;
   }, [gwPicks]);
+
+  /** Active players for current GW: who has locked a pick vs who still needs one. */
+  const adminPickStatusRows = useMemo(() => {
+    const active = leaderboard.filter((p) => p.status === 'active');
+    const rows = active.map((p) => {
+      const pick = pickByUserId.get(p.user_id);
+      return {
+        user_id: p.user_id,
+        username: p.username ?? null,
+        locked: Boolean(pick),
+        teamLabel: pick?.team
+          ? pick.team.short_name || lmsDisplayTeamName(pick.team.name)
+          : null,
+      };
+    });
+    rows.sort((a, b) => {
+      if (a.locked !== b.locked) return a.locked ? 1 : -1;
+      return (a.username || '').localeCompare(b.username || '', undefined, {
+        sensitivity: 'base',
+      });
+    });
+    return rows;
+  }, [leaderboard, pickByUserId]);
+
+  const adminPickStatusLockedCount = useMemo(
+    () => adminPickStatusRows.filter((r) => r.locked).length,
+    [adminPickStatusRows]
+  );
 
   const historyByUserId = useMemo(() => {
     const map = new Map<string, typeof historyPicks>();
@@ -2118,6 +2153,30 @@ export default function LmsCompetitionDashboard() {
         adminSubTabTextActive: {
           color: theme.colors.accent,
         },
+        pickStatusBadge: {
+          paddingVertical: 5,
+          paddingHorizontal: 10,
+          borderRadius: theme.radius.sm,
+          borderWidth: 1,
+        },
+        pickStatusBadgeLocked: {
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+        },
+        pickStatusBadgeMissing: {
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        pickStatusBadgeTextLocked: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          color: theme.colors.accent,
+        },
+        pickStatusBadgeTextMissing: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          color: theme.colors.textSecondary,
+        },
         adminJoinActions: {
           flexDirection: 'row',
           flexWrap: 'wrap',
@@ -2998,6 +3057,7 @@ export default function LmsCompetitionDashboard() {
                         { key: 'joins' as const, label: 'Join requests' },
                         { key: 'pool' as const, label: 'Team pool' },
                         { key: 'users' as const, label: 'Manage user' },
+                        { key: 'picks' as const, label: 'Picks' },
                         { key: 'notify' as const, label: 'Notify' },
                       ] as const
                     ).map((t) => {
@@ -3023,10 +3083,34 @@ export default function LmsCompetitionDashboard() {
                     })}
                   </View>
                 ) : isCompManager ? (
-                  <Text style={styles.sectionIntro}>
-                    As a competition manager you can accept join requests and get alerts when
-                    players ask to join.
-                  </Text>
+                  <View style={styles.adminSubTabs}>
+                    {(
+                      [
+                        { key: 'joins' as const, label: 'Join requests' },
+                        { key: 'picks' as const, label: 'Picks' },
+                      ] as const
+                    ).map((t) => {
+                      const active = adminSubTab === t.key;
+                      return (
+                        <Pressable
+                          key={t.key}
+                          style={[styles.adminSubTab, active && styles.adminSubTabActive]}
+                          onPress={() => setAdminSubTab(t.key)}
+                          accessibilityRole="tab"
+                          accessibilityState={{ selected: active }}
+                        >
+                          <Text
+                            style={[
+                              styles.adminSubTabText,
+                              active && styles.adminSubTabTextActive,
+                            ]}
+                          >
+                            {t.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
                 ) : null}
 
                 {adminSubTab === 'joins' ? (
@@ -3475,6 +3559,63 @@ export default function LmsCompetitionDashboard() {
                     ) : manageUserPlayers.length > 0 ? (
                       <Text style={styles.muted}>Select a player above.</Text>
                     ) : null}
+                  </>
+                ) : adminSubTab === 'picks' && canHandleJoins ? (
+                  <>
+                    <Text style={styles.sectionIntro}>
+                      See who has locked a pick for the current gameweek. Players without a pick
+                      are listed first so you can nudge them before the deadline.
+                    </Text>
+                    {!currentGw ? (
+                      <Text style={styles.muted}>No open gameweek for picks yet.</Text>
+                    ) : (
+                      <>
+                        <Text style={styles.poolTitle}>
+                          GW{currentGw.number} · {adminPickStatusLockedCount}/
+                          {adminPickStatusRows.length} locked
+                          {deadlinePassed ? ' · picks closed' : ''}
+                        </Text>
+                        {adminPickStatusRows.length === 0 ? (
+                          <Text style={styles.muted}>No active players in this competition.</Text>
+                        ) : (
+                          adminPickStatusRows.map((row) => (
+                            <View key={row.user_id} style={styles.adminRow}>
+                              <View style={styles.adminRowBody}>
+                                <Text style={styles.adminRowTitle}>
+                                  {row.username || row.user_id.slice(0, 8)}
+                                  {row.user_id === userId ? ' (you)' : ''}
+                                </Text>
+                                <Text style={styles.adminRowMeta}>
+                                  {row.locked
+                                    ? picksRevealed && row.teamLabel
+                                      ? `Locked · ${row.teamLabel}`
+                                      : 'Locked'
+                                    : 'No pick yet'}
+                                </Text>
+                              </View>
+                              <View
+                                style={[
+                                  styles.pickStatusBadge,
+                                  row.locked
+                                    ? styles.pickStatusBadgeLocked
+                                    : styles.pickStatusBadgeMissing,
+                                ]}
+                              >
+                                <Text
+                                  style={
+                                    row.locked
+                                      ? styles.pickStatusBadgeTextLocked
+                                      : styles.pickStatusBadgeTextMissing
+                                  }
+                                >
+                                  {row.locked ? 'Locked' : 'Missing'}
+                                </Text>
+                              </View>
+                            </View>
+                          ))
+                        )}
+                      </>
+                    )}
                   </>
                 ) : adminSubTab === 'notify' && canManage ? (
                   <>
