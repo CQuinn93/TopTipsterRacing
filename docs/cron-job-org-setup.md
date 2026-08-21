@@ -155,6 +155,34 @@ Requires GitHub Secrets **`VAPID_PUBLIC_KEY`**, **`VAPID_PRIVATE_KEY`**, plus `S
 
 ---
 
+### Job 6: LMS auto-assign missed picks (every 10–15 minutes)
+
+Runs `lms_auto_assign_missed_picks` for open gameweeks past their deadline. No football API key needed — only Supabase service role.
+
+**For now:** run it manually in GitHub → **Actions** → **LMS auto-assign missed picks** → **Run workflow**.
+
+**COMMON tab**
+
+- **Title:** `LMS auto-assign missed picks`
+- **URL:**  
+  `https://api.github.com/repos/OWNER/REPO/actions/workflows/lms-auto-assign-picks.yml/dispatches`  
+  (or the numeric workflow ID once the workflow exists on GitHub).
+- **Enable job:** On when you’re ready for cron.
+- **Execution schedule:** **Custom** crontab: `*/15 * * * *` (every 15 minutes UTC), or `*/10 * * * *` on match days.
+- **Schedule timezone:** UTC.
+
+**ADVANCED tab**
+
+- **Request method:** **POST**.
+- **Request headers:** Same as Job 1.
+- **Request body:** `{"ref":"main"}` (or your default branch).
+
+Then **CREATE** (or **Save**).
+
+Requires GitHub Secrets **`SUPABASE_URL`** and **`SUPABASE_SERVICE_KEY`**.
+
+---
+
 ## 4. Summary
 
 | cron-job.org title      | Workflow file                 | Schedule (UTC)              |
@@ -164,6 +192,7 @@ Requires GitHub Secrets **`VAPID_PUBLIC_KEY`**, **`VAPID_PRIVATE_KEY`**, plus `S
 | Remove old races        | remove-old-races.yml          | 18:00 daily                 |
 | Sync LMS football data  | sync-lms-football.yml         | Every 6 hours (or as needed)|
 | LMS deadline reminders  | lms-deadline-reminders.yml    | Every 15 minutes            |
+| LMS auto-assign picks   | lms-auto-assign-picks.yml     | Every 15 minutes (or manual)|
 - **COMMON:** Title, URL (GitHub API dispatch URL), Schedule.
 - **ADVANCED:** Method = POST, Headers (Authorization with your PAT, Accept, X-GitHub-Api-Version, Content-Type), Body = `{"ref":"main"}` (or your branch).
 
