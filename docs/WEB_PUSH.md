@@ -86,6 +86,20 @@ Notification copy:
 
 Assigned managers default to join-notify **on**. They still need Home Screen + Deadline Alerts.
 
+## 8. Competition broadcast (creator/Owner)
+
+Creators/Owners can send a custom push to all players from **Admin → Notify**.
+
+```bash
+# Apply migration 082, then:
+supabase functions deploy notify-lms-competition-broadcast
+```
+
+- Title up to 80 chars, message up to 280 chars  
+- Rate limit: one send per competition every 3 minutes (max 20 / 24h)  
+- Reaches participants who have Home Screen + **Deadline Alerts** enabled  
+- Competition managers cannot send broadcasts  
+
 ## Preference behaviour
 
 | Role | Default (no saved pref) | Toggle |
@@ -115,4 +129,5 @@ Admin accepts → player gets a push if Deadline Alerts is on.
 - Deadline sender: `scripts/send-lms-deadline-reminders.ts` + GitHub Action  
 - Join request sender: `supabase/functions/notify-lms-join-request`  
 - Join accepted sender: `supabase/functions/notify-lms-join-accepted`  
-- SQL: `071_…`, `072_…`
+- Competition broadcast: `supabase/functions/notify-lms-competition-broadcast`  
+- SQL: `071_…`, `072_…`, `082_…`

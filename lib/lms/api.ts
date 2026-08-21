@@ -1189,6 +1189,96 @@ export async function lmsAdminRemoveParticipant(
   };
 }
 
+/** Creator/Owner: send a custom Web Push to all players in the competition. */
+export async function lmsAdminBroadcastPush(
+  competitionId: string,
+  title: string,
+  body: string
+): Promise<{
+  success: boolean;
+  error?: string;
+  sent?: number;
+  users_notified?: number;
+  participants?: number;
+  skipped?: string;
+}> {
+  const { data, error } = await supabase.functions.invoke('notify-lms-competition-broadcast', {
+    body: {
+      competition_id: competitionId,
+      title,
+      body,
+    },
+  });
+  if (error) {
+    // Functions may return JSON error bodies with non-2xx status
+    const ctx = (error as { context?: Response }).context;
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const errBody = (await ctx.json()) as { error?: string };
+        if (errBody?.error) {
+          return { success: false, error: errBody.error };
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    throw error;
+  }
+  const row = (data ?? {}) as {
+    ok?: boolean;
+    error?: string;
+    sent?: number;
+    users_notified?: number;
+    participants?: number;
+    skipped?: string;
+  };
+  if (!row.ok) {
+    return { success: false, error: row.error ?? 'send_failed' };
+  }
+  if (row.skipped === 'no_subscriptions' || row.skipped === 'no_participants') {
+    return {
+      success: false,
+      error: row.skipped,
+      sent: 0,
+      users_notified: 0,
+      participants: row.participants,
+      skipped: row.skipped,
+    };
+  }
+  return {
+    success: true,
+    sent: row.sent ?? 0,
+    users_notified: row.users_notified ?? 0,
+    participants: row.participants,
+    skipped: row.skipped,
+  };
+}
+
+export function lmsBroadcastErrorMessage(code?: string): string {
+  switch (code) {
+    case 'unauthorized':
+    case 'not_authenticated':
+    case 'forbidden':
+      return 'Only the competition creator or Owner can send notifications.';
+    case 'invalid_title':
+      return 'Enter a title up to 80 characters.';
+    case 'invalid_body':
+      return 'Enter a message up to 280 characters.';
+    case 'rate_limited':
+      return 'Please wait a few minutes before sending another notification.';
+    case 'daily_limit':
+      return 'Daily notification limit reached for this competition (20).';
+    case 'invalid_competition':
+      return 'Competition not found.';
+    case 'no_subscriptions':
+      return 'No players have push notifications enabled yet.';
+    case 'no_participants':
+      return 'There are no players in this competition yet.';
+    default:
+      return 'Could not send the notification.';
+  }
+}
+
 export async function lmsSetCompetitionEntry(
   competitionId: string,
   entry: string

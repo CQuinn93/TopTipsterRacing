@@ -26,10 +26,12 @@ import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer'
 import {
   lmsAdminSetCompetitionTeam,
   lmsAdminDeleteCompetition,
+  lmsAdminBroadcastPush,
   lmsAdminListPendingForCompetition,
   lmsAdminRemoveParticipant,
   lmsAdminSubmitPickForUser,
   lmsApproveJoinRequest,
+  lmsBroadcastErrorMessage,
   lmsCanManageCompetition,
   lmsGetCompetitionJoinCodes,
   lmsGetJoinNotifyPref,
@@ -128,7 +130,7 @@ export default function LmsCompetitionDashboard() {
   const [managerBusyId, setManagerBusyId] = useState<string | null>(null);
   const [poolTeamIds, setPoolTeamIds] = useState<string[]>([]);
   const [adminBusy, setAdminBusy] = useState(false);
-  const [adminSubTab, setAdminSubTab] = useState<'joins' | 'pool' | 'users'>('joins');
+  const [adminSubTab, setAdminSubTab] = useState<'joins' | 'pool' | 'users' | 'notify'>('joins');
   const [pendingJoins, setPendingJoins] = useState<
     {
       id: string;
@@ -145,6 +147,9 @@ export default function LmsCompetitionDashboard() {
   const [rejoinCode, setRejoinCode] = useState<string | null>(null);
   const [entryDraft, setEntryDraft] = useState('');
   const [entrySaving, setEntrySaving] = useState(false);
+  const [broadcastTitle, setBroadcastTitle] = useState('');
+  const [broadcastBody, setBroadcastBody] = useState('');
+  const [broadcastSending, setBroadcastSending] = useState(false);
   const [adminPickUserId, setAdminPickUserId] = useState<string | null>(null);
   const [adminPickTeamId, setAdminPickTeamId] = useState<string | null>(null);
   const [adminPickUsedIds, setAdminPickUsedIds] = useState<string[]>([]);
@@ -1310,6 +1315,49 @@ export default function LmsCompetitionDashboard() {
     );
   };
 
+  const onSendBroadcast = () => {
+    const title = broadcastTitle.trim();
+    const body = broadcastBody.trim();
+    if (!title || !body) {
+      Alert.alert('Missing message', 'Enter a title and message before sending.');
+      return;
+    }
+    confirmDestructive(
+      'Send notification?',
+      `This will push to players in “${name}” who have Deadline Alerts enabled.`,
+      'Send',
+      () => {
+        void (async () => {
+          setBroadcastSending(true);
+          try {
+            const res = await lmsAdminBroadcastPush(competitionId, title, body);
+            if (!res.success) {
+              Alert.alert('Not sent', lmsBroadcastErrorMessage(res.error));
+              return;
+            }
+            setBroadcastTitle('');
+            setBroadcastBody('');
+            const notified = res.users_notified ?? 0;
+            const devices = res.sent ?? 0;
+            Alert.alert(
+              'Sent',
+              notified > 0
+                ? `Notification delivered to ${notified} player${notified === 1 ? '' : 's'} (${devices} device${devices === 1 ? '' : 's'}).`
+                : 'Notification sent.'
+            );
+          } catch (e) {
+            Alert.alert(
+              'Error',
+              e instanceof Error ? e.message : 'Could not send notification'
+            );
+          } finally {
+            setBroadcastSending(false);
+          }
+        })();
+      }
+    );
+  };
+
   const formatKickoff = (iso: string) => {
     try {
       return new Date(iso).toLocaleString(undefined, {
@@ -2024,6 +2072,11 @@ export default function LmsCompetitionDashboard() {
           fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: 12,
           color: theme.colors.accent,
+        },
+        broadcastBodyInput: {
+          minHeight: 96,
+          paddingTop: 10,
+          paddingBottom: 10,
         },
         shareInviteBtn: {
           marginTop: 4,
@@ -2945,6 +2998,7 @@ export default function LmsCompetitionDashboard() {
                         { key: 'joins' as const, label: 'Join requests' },
                         { key: 'pool' as const, label: 'Team pool' },
                         { key: 'users' as const, label: 'Manage user' },
+                        { key: 'notify' as const, label: 'Notify' },
                       ] as const
                     ).map((t) => {
                       const active = adminSubTab === t.key;
@@ -3421,6 +3475,67 @@ export default function LmsCompetitionDashboard() {
                     ) : manageUserPlayers.length > 0 ? (
                       <Text style={styles.muted}>Select a player above.</Text>
                     ) : null}
+                  </>
+                ) : adminSubTab === 'notify' && canManage ? (
+                  <>
+                    <Text style={styles.sectionIntro}>
+                      Send a custom push to players in this competition — for example when a
+                      fixture is removed, or a short gameweek summary.
+                    </Text>
+                    <Text style={styles.muted}>
+                      Only reaches players with Deadline Alerts on. Max one send every few
+                      minutes.
+                    </Text>
+                    <Text style={styles.poolTitle}>Title</Text>
+                    <TextInput
+                      style={styles.entryInput}
+                      value={broadcastTitle}
+                      onChangeText={setBroadcastTitle}
+                      placeholder="e.g. Fixture update"
+                      placeholderTextColor={theme.colors.textMuted}
+                      maxLength={80}
+                      editable={!broadcastSending}
+                      accessibilityLabel="Notification title"
+                    />
+                    <Text style={styles.poolTitle}>Message</Text>
+                    <TextInput
+                      style={[styles.entryInput, styles.broadcastBodyInput]}
+                      value={broadcastBody}
+                      onChangeText={setBroadcastBody}
+                      placeholder="Write a short update for the group…"
+                      placeholderTextColor={theme.colors.textMuted}
+                      maxLength={280}
+                      multiline
+                      textAlignVertical="top"
+                      editable={!broadcastSending}
+                      accessibilityLabel="Notification message"
+                    />
+                    <Text style={styles.joinCodeHint}>
+                      {broadcastBody.trim().length}/280
+                    </Text>
+                    <Pressable
+                      style={[
+                        styles.primaryBtn,
+                        (broadcastSending ||
+                          !broadcastTitle.trim() ||
+                          !broadcastBody.trim()) &&
+                          styles.primaryBtnDisabled,
+                      ]}
+                      disabled={
+                        broadcastSending ||
+                        !broadcastTitle.trim() ||
+                        !broadcastBody.trim()
+                      }
+                      onPress={onSendBroadcast}
+                      accessibilityRole="button"
+                      accessibilityLabel="Send notification to competition"
+                    >
+                      {broadcastSending ? (
+                        <ActivityIndicator color={theme.colors.white} />
+                      ) : (
+                        <Text style={styles.primaryBtnText}>Send to competition</Text>
+                      )}
+                    </Pressable>
                   </>
                 ) : null}
 
