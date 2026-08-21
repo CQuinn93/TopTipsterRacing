@@ -1055,9 +1055,7 @@ export default function LmsCompetitionDashboard() {
         const pick = pickByUserId.get(p.user_id);
         const team = pick?.team ?? null;
         const key = team?.id ?? 'no-pick';
-        const label = team
-          ? team.short_name || lmsDisplayTeamName(team.name)
-          : 'No pick';
+        const label = team ? lmsDisplayTeamName(team.name) : 'No pick';
         const existing = map.get(key);
         if (existing) existing.players.push(p);
         else map.set(key, { key, label, team, players: [p] });
@@ -1067,7 +1065,6 @@ export default function LmsCompetitionDashboard() {
       groups.sort((a, b) => {
         if (a.key === 'no-pick') return 1;
         if (b.key === 'no-pick') return -1;
-        if (b.players.length !== a.players.length) return b.players.length - a.players.length;
         return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' });
       });
       return groups;
@@ -3067,8 +3064,8 @@ export default function LmsCompetitionDashboard() {
             {tab === 'leaderboard' ? (
               <>
                 <Text style={styles.sectionIntro}>
-                  Still standing wins. Players are grouped by this week’s pick once revealed. Tap a
-                  player for their used teams.
+                  Still standing wins. During the gameweek, players are grouped under their pick
+                  with teams listed A–Z. Tap a player for their used teams.
                   {currentGw
                     ? picksRevealed
                       ? ` Showing GW${currentGw.number} picks.`
