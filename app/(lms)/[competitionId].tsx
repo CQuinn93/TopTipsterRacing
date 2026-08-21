@@ -1579,6 +1579,9 @@ export default function LmsCompetitionDashboard() {
           paddingBottom: insets.bottom + theme.spacing.xl,
           gap: theme.spacing.lg,
         },
+        standingContent: {
+          paddingHorizontal: 8,
+        },
         sectionIntro: {
           fontFamily: theme.fontFamily.baiLight,
           fontSize: 13,
@@ -1861,7 +1864,7 @@ export default function LmsCompetitionDashboard() {
           alignItems: 'center',
           gap: 10,
           paddingVertical: 12,
-          paddingHorizontal: 16,
+          paddingHorizontal: 8,
         },
         lbBlock: {
           borderBottomWidth: StyleSheet.hairlineWidth,
@@ -1942,7 +1945,7 @@ export default function LmsCompetitionDashboard() {
           flexDirection: 'row',
           alignItems: 'center',
           gap: 8,
-          paddingHorizontal: 16,
+          paddingHorizontal: 8,
           paddingVertical: 8,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: theme.colors.border,
@@ -2011,7 +2014,7 @@ export default function LmsCompetitionDashboard() {
           marginTop: 2,
         },
         lbDrawer: {
-          paddingHorizontal: 16,
+          paddingHorizontal: 8,
           paddingBottom: 12,
           gap: 6,
         },
@@ -2727,7 +2730,10 @@ export default function LmsCompetitionDashboard() {
           </View>
 
           <ScrollView
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[
+              styles.content,
+              tab === 'leaderboard' && styles.standingContent,
+            ]}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
