@@ -118,6 +118,7 @@ export default function LmsCompetitionDashboard() {
   const [gwPicks, setGwPicks] = useState<LmsPick[]>([]);
   const [historyPicks, setHistoryPicks] = useState<LmsCompletedPick[]>([]);
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [standingSearch, setStandingSearch] = useState('');
   const [leaderboard, setLeaderboard] = useState<LmsParticipant[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -1026,8 +1027,55 @@ export default function LmsCompetitionDashboard() {
     const byName = (a: LmsParticipant, b: LmsParticipant) =>
       (a.username || a.user_id).localeCompare(b.username || b.user_id);
 
+    const q = standingSearch.trim().toLowerCase();
+    const matchesSearch = (p: LmsParticipant) => {
+      if (!q) return true;
+      const name = (p.username || '').toLowerCase();
+      const idShort = p.user_id.slice(0, 8).toLowerCase();
+      return name.includes(q) || idShort.includes(q);
+    };
+
+    type PickGroup = {
+      key: string;
+      label: string;
+      team: LmsTeam | null;
+      players: LmsParticipant[];
+    };
+
+    const groupByCurrentPick = (players: LmsParticipant[]): PickGroup[] => {
+      const sortedPlayers = [...players].sort(byName);
+      if (!picksRevealed || !currentGw) {
+        return sortedPlayers.length
+          ? [{ key: 'all', label: '', team: null, players: sortedPlayers }]
+          : [];
+      }
+
+      const map = new Map<string, PickGroup>();
+      for (const p of sortedPlayers) {
+        const pick = pickByUserId.get(p.user_id);
+        const team = pick?.team ?? null;
+        const key = team?.id ?? 'no-pick';
+        const label = team
+          ? team.short_name || lmsDisplayTeamName(team.name)
+          : 'No pick';
+        const existing = map.get(key);
+        if (existing) existing.players.push(p);
+        else map.set(key, { key, label, team, players: [p] });
+      }
+
+      const groups = Array.from(map.values());
+      groups.sort((a, b) => {
+        if (a.key === 'no-pick') return 1;
+        if (b.key === 'no-pick') return -1;
+        if (b.players.length !== a.players.length) return b.players.length - a.players.length;
+        return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' });
+      });
+      return groups;
+    };
+
     const survivors = leaderboard
       .filter((p) => p.status === 'active' || p.status === 'winner')
+      .filter(matchesSearch)
       .sort((a, b) => {
         if (a.status === 'winner' && b.status !== 'winner') return -1;
         if (b.status === 'winner' && a.status !== 'winner') return 1;
@@ -1042,6 +1090,7 @@ export default function LmsCompetitionDashboard() {
           !!currentGwId &&
           p.eliminated_gameweek_id === currentGwId
       )
+      .filter(matchesSearch)
       .sort(byName);
 
     const eliminated = leaderboard
@@ -1050,10 +1099,18 @@ export default function LmsCompetitionDashboard() {
           p.status === 'eliminated' &&
           (!currentGwId || p.eliminated_gameweek_id !== currentGwId)
       )
+      .filter(matchesSearch)
       .sort(byName);
 
-    return { survivors, outThisWeek, eliminated };
-  }, [leaderboard, currentGw?.id]);
+    return {
+      survivors,
+      survivorsByPick: groupByCurrentPick(survivors),
+      outThisWeek,
+      outThisWeekByPick: groupByCurrentPick(outThisWeek),
+      eliminated,
+      matchCount: survivors.length + outThisWeek.length + eliminated.length,
+    };
+  }, [leaderboard, currentGw?.id, currentGw, standingSearch, picksRevealed, pickByUserId]);
 
   const gwNumberById = useMemo(() => {
     const map = new Map<string, number>();
@@ -1822,6 +1879,65 @@ export default function LmsCompetitionDashboard() {
           fontFamily: theme.fontFamily.baiMedium,
           color: theme.colors.textSecondary,
         },
+        standingSearchRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.sm,
+          paddingHorizontal: 10,
+          paddingVertical: Platform.OS === 'web' ? 8 : 6,
+          backgroundColor: theme.colors.surface,
+          marginBottom: theme.spacing.sm,
+        },
+        standingSearchInput: {
+          flex: 1,
+          fontFamily: theme.fontFamily.input,
+          fontSize: 14,
+          color: theme.colors.text,
+          paddingVertical: 2,
+          outlineStyle: 'none' as unknown as undefined,
+        },
+        standingPickGroup: {
+          marginBottom: theme.spacing.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.md,
+          overflow: 'hidden',
+          backgroundColor: theme.colors.surface,
+        },
+        standingPickGroupHead: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingHorizontal: 10,
+          paddingVertical: 8,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        standingPickGroupIconFallback: {
+          width: 22,
+          height: 22,
+          borderRadius: 11,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: theme.colors.background,
+        },
+        standingPickGroupTitle: {
+          flex: 1,
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.text,
+        },
+        standingPickGroupCount: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          minWidth: 20,
+          textAlign: 'right',
+        },
         lbBody: { flex: 1, minWidth: 0 },
         lbNameRow: {
           flexDirection: 'row',
@@ -2341,7 +2457,10 @@ export default function LmsCompetitionDashboard() {
     );
   };
 
-  const renderStandingRow = (p: LmsParticipant, opts?: { showOutGw?: boolean }) => {
+  const renderStandingRow = (
+    p: LmsParticipant,
+    opts?: { showOutGw?: boolean; hidePick?: boolean }
+  ) => {
     const isYou = p.user_id === userId;
     const userPick = pickByUserId.get(p.user_id);
     const expanded = expandedUserId === p.user_id;
@@ -2352,6 +2471,7 @@ export default function LmsCompetitionDashboard() {
         : null;
     const statusText =
       p.status === 'active' ? 'Alive' : p.status === 'winner' ? 'Winner' : 'Out';
+    const showPick = !opts?.hidePick;
 
     return (
       <View key={p.id} style={styles.lbBlock}>
@@ -2389,7 +2509,7 @@ export default function LmsCompetitionDashboard() {
             </View>
             {outGw != null ? <Text style={styles.lbOutMeta}>Out GW{outGw}</Text> : null}
           </View>
-          {p.status !== 'eliminated' && currentGw ? (
+          {showPick && p.status !== 'eliminated' && currentGw ? (
             picksRevealed && userPick?.team ? (
               <View style={styles.lbPick}>
                 <TeamColourChip
@@ -2450,6 +2570,49 @@ export default function LmsCompetitionDashboard() {
       </View>
     );
   };
+
+  const renderPickGroups = (
+    groups: {
+      key: string;
+      label: string;
+      team: LmsTeam | null;
+      players: LmsParticipant[];
+    }[],
+    opts?: { showOutGw?: boolean }
+  ) =>
+    groups.map((group) => {
+      const grouped = Boolean(group.label);
+      return (
+        <View key={group.key} style={grouped ? styles.standingPickGroup : undefined}>
+          {grouped ? (
+            <View style={styles.standingPickGroupHead}>
+              {group.team ? (
+                <TeamColourChip
+                  shortName={group.team.short_name}
+                  name={group.team.name}
+                  slug={group.team.slug}
+                  size={22}
+                />
+              ) : (
+                <View style={styles.standingPickGroupIconFallback}>
+                  <Ionicons name="help-outline" size={14} color={theme.colors.textMuted} />
+                </View>
+              )}
+              <Text style={styles.standingPickGroupTitle} numberOfLines={1}>
+                {group.label}
+              </Text>
+              <Text style={styles.standingPickGroupCount}>{group.players.length}</Text>
+            </View>
+          ) : null}
+          {group.players.map((p) =>
+            renderStandingRow(p, {
+              showOutGw: opts?.showOutGw,
+              hidePick: grouped && group.key !== 'no-pick',
+            })
+          )}
+        </View>
+      );
+    });
 
   return (
     <View style={styles.root}>
@@ -2904,15 +3067,42 @@ export default function LmsCompetitionDashboard() {
             {tab === 'leaderboard' ? (
               <>
                 <Text style={styles.sectionIntro}>
-                  Still standing wins. Tap a player for their used teams.
+                  Still standing wins. Players are grouped by this week’s pick once revealed. Tap a
+                  player for their used teams.
                   {currentGw
                     ? picksRevealed
                       ? ` Showing GW${currentGw.number} picks.`
                       : ` GW${currentGw.number} picks stay hidden until the first kickoff.`
                     : ''}
                 </Text>
+                <View style={styles.standingSearchRow}>
+                  <Ionicons name="search" size={16} color={theme.colors.textMuted} />
+                  <TextInput
+                    style={styles.standingSearchInput}
+                    value={standingSearch}
+                    onChangeText={setStandingSearch}
+                    placeholder="Search player…"
+                    placeholderTextColor={theme.colors.textMuted}
+                    autoCorrect={false}
+                    autoCapitalize="none"
+                    clearButtonMode="while-editing"
+                    accessibilityLabel="Search standing by username"
+                  />
+                  {standingSearch.trim() ? (
+                    <Pressable
+                      onPress={() => setStandingSearch('')}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear search"
+                    >
+                      <Ionicons name="close-circle" size={16} color={theme.colors.textMuted} />
+                    </Pressable>
+                  ) : null}
+                </View>
                 {leaderboard.length === 0 ? (
                   <Text style={styles.muted}>No players in this competition yet.</Text>
+                ) : standingSections.matchCount === 0 ? (
+                  <Text style={styles.muted}>No players match “{standingSearch.trim()}”.</Text>
                 ) : (
                   <>
                     {standingSections.survivors.length > 0 ? (
@@ -2928,7 +3118,7 @@ export default function LmsCompetitionDashboard() {
                             · {standingSections.survivors.length}
                           </Text>
                         </Text>
-                        {standingSections.survivors.map((p) => renderStandingRow(p))}
+                        {renderPickGroups(standingSections.survivorsByPick)}
                       </View>
                     ) : null}
 
@@ -2942,9 +3132,9 @@ export default function LmsCompetitionDashboard() {
                             · {standingSections.outThisWeek.length}
                           </Text>
                         </Text>
-                        {standingSections.outThisWeek.map((p) =>
-                          renderStandingRow(p, { showOutGw: true })
-                        )}
+                        {renderPickGroups(standingSections.outThisWeekByPick, {
+                          showOutGw: true,
+                        })}
                       </View>
                     ) : null}
 
