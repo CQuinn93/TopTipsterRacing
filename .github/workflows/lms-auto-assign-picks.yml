@@ -1,0 +1,25 @@
+# Auto-assign LMS picks after missed deadlines.
+# Run manually via workflow_dispatch, or from cron-job.org later.
+# Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY
+# Optional: LMS_SEASON (default 2026/27)
+name: LMS auto-assign missed picks
+
+on:
+  workflow_dispatch:
+
+jobs:
+  auto-assign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Auto-assign missed LMS picks
+        run: npx tsx scripts/lms-auto-assign-missed-picks.ts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          LMS_SEASON: '2026/27'
