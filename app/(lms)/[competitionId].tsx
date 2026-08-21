@@ -1864,7 +1864,7 @@ export default function LmsCompetitionDashboard() {
           alignItems: 'center',
           gap: 10,
           paddingVertical: 12,
-          paddingHorizontal: 8,
+          paddingHorizontal: 14,
         },
         lbBlock: {
           borderBottomWidth: StyleSheet.hairlineWidth,
@@ -1945,7 +1945,7 @@ export default function LmsCompetitionDashboard() {
           flexDirection: 'row',
           alignItems: 'center',
           gap: 8,
-          paddingHorizontal: 8,
+          paddingHorizontal: 14,
           paddingVertical: 8,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: theme.colors.border,
@@ -2014,7 +2014,7 @@ export default function LmsCompetitionDashboard() {
           marginTop: 2,
         },
         lbDrawer: {
-          paddingHorizontal: 8,
+          paddingHorizontal: 14,
           paddingBottom: 12,
           gap: 6,
         },
