@@ -876,6 +876,28 @@ export default function LmsCompetitionDashboard() {
     return map;
   }, [pickGwFixtures]);
 
+  /** Current GW result for each team (W / D / L) once the fixture is finished. */
+  const gwOutcomeByTeamId = useMemo(() => {
+    const map = new Map<string, 'W' | 'D' | 'L'>();
+    for (const f of pickGwFixtures) {
+      if (f.excluded_from_lms) continue;
+      if (f.status !== 'finished' || f.home_goals == null || f.away_goals == null) continue;
+      const hg = f.home_goals;
+      const ag = f.away_goals;
+      if (hg === ag) {
+        map.set(f.home_team_id, 'D');
+        map.set(f.away_team_id, 'D');
+      } else if (hg > ag) {
+        map.set(f.home_team_id, 'W');
+        map.set(f.away_team_id, 'L');
+      } else {
+        map.set(f.home_team_id, 'L');
+        map.set(f.away_team_id, 'W');
+      }
+    }
+    return map;
+  }, [pickGwFixtures]);
+
   /** Unused competition-pool teams shown on Selection (pickable + greyed). */
   const selectionTeams = useMemo(() => {
     const used = new Set(usedIds);
@@ -1476,6 +1498,12 @@ export default function LmsCompetitionDashboard() {
     return theme.colors.textMuted;
   };
 
+  const gwOutcomeColor = (outcome: 'W' | 'D' | 'L') => {
+    if (outcome === 'W') return theme.colors.accent;
+    if (outcome === 'L') return theme.colors.error;
+    return theme.colors.textMuted;
+  };
+
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -1965,6 +1993,13 @@ export default function LmsCompetitionDashboard() {
           fontSize: 13,
           color: theme.colors.text,
         },
+        standingPickGroupOutcome: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 12,
+          letterSpacing: 0.4,
+          minWidth: 16,
+          textAlign: 'center',
+        },
         standingPickGroupCount: {
           fontFamily: theme.fontFamily.baiMedium,
           fontSize: 12,
@@ -1985,6 +2020,13 @@ export default function LmsCompetitionDashboard() {
           flexShrink: 1,
         },
         lbYou: {
+          color: theme.colors.accent,
+        },
+        standingThroughChip: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 10,
+          letterSpacing: 0.3,
+          textTransform: 'uppercase',
           color: theme.colors.accent,
         },
         livesChip: {
@@ -2503,6 +2545,7 @@ export default function LmsCompetitionDashboard() {
       opts?.showOutGw && p.eliminated_gameweek_id
         ? gwNumberById.get(p.eliminated_gameweek_id)
         : null;
+    const throughToNext = p.status === 'active' && userPick?.result === 'correct';
     const statusText =
       p.status === 'active' ? 'Alive' : p.status === 'winner' ? 'Winner' : 'Out';
     const showPick = !opts?.hidePick;
@@ -2514,7 +2557,7 @@ export default function LmsCompetitionDashboard() {
           onPress={() => setExpandedUserId((prev) => (prev === p.user_id ? null : p.user_id))}
           accessibilityRole="button"
           accessibilityState={{ expanded }}
-          accessibilityLabel={`${p.username || 'Player'} history`}
+          accessibilityLabel={`${p.username || 'Player'}${throughToNext ? ', through to next round' : ''} history`}
         >
           <View style={styles.lbBody}>
             <View style={styles.lbNameRow}>
@@ -2522,6 +2565,11 @@ export default function LmsCompetitionDashboard() {
                 {p.username || p.user_id.slice(0, 8)}
                 {isYou ? ' (you)' : ''}
               </Text>
+              {throughToNext ? (
+                <Text style={styles.standingThroughChip} accessibilityLabel="Through to next round">
+                  Through
+                </Text>
+              ) : null}
               {managerUserIds.has(p.user_id) ? (
                 <Ionicons
                   name="star"
@@ -2616,6 +2664,7 @@ export default function LmsCompetitionDashboard() {
   ) =>
     groups.map((group) => {
       const grouped = Boolean(group.label);
+      const teamOutcome = group.team ? gwOutcomeByTeamId.get(group.team.id) : undefined;
       return (
         <View key={group.key} style={grouped ? styles.standingPickGroup : undefined}>
           {grouped ? (
@@ -2635,6 +2684,23 @@ export default function LmsCompetitionDashboard() {
               <Text style={styles.standingPickGroupTitle} numberOfLines={1}>
                 {group.label}
               </Text>
+              {teamOutcome ? (
+                <Text
+                  style={[
+                    styles.standingPickGroupOutcome,
+                    { color: gwOutcomeColor(teamOutcome) },
+                  ]}
+                  accessibilityLabel={
+                    teamOutcome === 'W'
+                      ? 'Won'
+                      : teamOutcome === 'L'
+                        ? 'Lost'
+                        : 'Drew'
+                  }
+                >
+                  {teamOutcome}
+                </Text>
+              ) : null}
               <Text style={styles.standingPickGroupCount}>{group.players.length}</Text>
             </View>
           ) : null}
@@ -3105,7 +3171,8 @@ export default function LmsCompetitionDashboard() {
               <>
                 <Text style={styles.sectionIntro}>
                   Still standing wins. During the gameweek, players are grouped under their pick.
-                  Switch between A–Z and most picked. Tap a player for their used teams.
+                  Finished fixtures show W / D / L beside the team; players whose pick won get a
+                  Through mark. Switch between A–Z and most picked. Tap a player for their used teams.
                   {currentGw
                     ? picksRevealed
                       ? ` Showing GW${currentGw.number} picks.`
