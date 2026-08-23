@@ -98,6 +98,13 @@ export default function LmsHomeScreen() {
     });
   }, [fixtures]);
 
+  /** True while the next gameweek's pick window is open (before the 20‑min deadline). */
+  const picksOpen = useMemo(() => {
+    if (!gw || gw.status === 'complete') return false;
+    const deadlineMs = new Date(gw.deadline_at).getTime();
+    return Number.isFinite(deadlineMs) && deadlineMs > Date.now();
+  }, [gw]);
+
   const load = useCallback(async () => {
     if (!userId) return;
     try {
@@ -428,6 +435,27 @@ export default function LmsHomeScreen() {
         },
         deadlineAlertsWrap: {
           paddingBottom: theme.spacing.sm,
+          gap: theme.spacing.sm,
+        },
+        picksOpenBanner: {
+          backgroundColor: theme.colors.accentMuted,
+          borderRadius: theme.radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.accent,
+          paddingVertical: 12,
+          paddingHorizontal: 14,
+          gap: 6,
+        },
+        picksOpenTitle: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 13,
+          color: theme.colors.accent,
+        },
+        picksOpenBody: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 13,
+          lineHeight: 18,
+          color: theme.colors.text,
         },
         mainScroll: {
           flex: 1,
@@ -1076,6 +1104,19 @@ export default function LmsHomeScreen() {
               />
             }
           >
+            {picksOpen && gw ? (
+              <View
+                style={styles.picksOpenBanner}
+                accessibilityRole="text"
+                accessibilityLabel={`Gameweek ${gw.number} is now open`}
+              >
+                <Text style={styles.picksOpenTitle}>Gameweek {gw.number} is now open</Text>
+                <Text style={styles.picksOpenBody}>
+                  Remember entries close 20 minutes before the first game of the week. Good luck!
+                </Text>
+              </View>
+            ) : null}
+
             {renderPickStats()}
 
             <View style={styles.deadlineAlertsWrap}>
