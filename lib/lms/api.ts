@@ -875,17 +875,21 @@ export type LmsGameweekPickStats = {
   revealed: boolean;
   gameweek_id?: string;
   gameweek_number?: number;
+  competition_id?: string | null;
   total_picks: number;
   teams: LmsGameweekPickStatTeam[];
   error?: string;
 };
 
-/** Aggregated pick share + fixture outcome for a gameweek (all competitions). */
+/** Aggregated pick share + fixture outcome for a gameweek.
+ *  Pass competitionId for one league; omit / null for all leagues. */
 export async function lmsGetGameweekPickStats(
-  gameweekId: string
+  gameweekId: string,
+  competitionId?: string | null
 ): Promise<LmsGameweekPickStats> {
   const { data, error } = await db.rpc('lms_get_gameweek_pick_stats', {
     p_gameweek_id: gameweekId,
+    p_competition_id: competitionId ?? null,
   });
   if (error) throw error;
   const raw = (data ?? {}) as LmsGameweekPickStats;
@@ -894,6 +898,7 @@ export async function lmsGetGameweekPickStats(
     revealed: !!raw.revealed,
     gameweek_id: raw.gameweek_id,
     gameweek_number: raw.gameweek_number,
+    competition_id: raw.competition_id ?? competitionId ?? null,
     total_picks: Number(raw.total_picks ?? 0),
     teams: (raw.teams ?? []).map((t) => ({
       ...t,

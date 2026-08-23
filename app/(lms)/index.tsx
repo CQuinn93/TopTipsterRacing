@@ -66,6 +66,10 @@ export default function LmsHomeScreen() {
   const [fixtures, setFixtures] = useState<LmsFixture[]>([]);
   const [fxIndex, setFxIndex] = useState(0);
   const [pickStats, setPickStats] = useState<LmsGameweekPickStats | null>(null);
+  /** null = all leagues; otherwise a competition the user is in. */
+  const [pickStatsCompetitionId, setPickStatsCompetitionId] = useState<string | null>(null);
+  const [pickStatsDisplay, setPickStatsDisplay] = useState<'pct' | 'count'>('pct');
+  const [pickStatsLoading, setPickStatsLoading] = useState(false);
   const [isStaff, setIsStaff] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -132,10 +136,7 @@ export default function LmsHomeScreen() {
           : 'competitions';
       });
 
-      if (home.nextUp.gameweek?.id) {
-        const stats = await lmsGetGameweekPickStats(home.nextUp.gameweek.id);
-        setPickStats(stats.revealed ? stats : null);
-      } else {
+      if (!home.nextUp.gameweek?.id) {
         setPickStats(null);
       }
 
@@ -161,6 +162,40 @@ export default function LmsHomeScreen() {
 
   const loadRef = useRef(load);
   loadRef.current = load;
+
+  /** Load / reload pick stats when the gameweek or scope changes. */
+  useEffect(() => {
+    if (!gw?.id) {
+      setPickStats(null);
+      return;
+    }
+    let cancelled = false;
+    setPickStatsLoading(true);
+    void lmsGetGameweekPickStats(gw.id, pickStatsCompetitionId)
+      .then((stats) => {
+        if (cancelled) return;
+        setPickStats(stats.revealed ? stats : null);
+      })
+      .catch(() => {
+        if (!cancelled) setPickStats(null);
+      })
+      .finally(() => {
+        if (!cancelled) setPickStatsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gw?.id, pickStatsCompetitionId]);
+
+  /** Drop a stale competition filter if the user left that league. */
+  useEffect(() => {
+    if (
+      pickStatsCompetitionId != null &&
+      !comps.some((c) => c.competition_id === pickStatsCompetitionId)
+    ) {
+      setPickStatsCompetitionId(null);
+    }
+  }, [comps, pickStatsCompetitionId]);
 
   const requestManualRefresh = useCallback(() => {
     if (refreshing || loading) return;
@@ -857,6 +892,35 @@ export default function LmsHomeScreen() {
           fontSize: 11,
           color: theme.colors.textMuted,
         },
+        pickStatsToggles: {
+          gap: 8,
+        },
+        pickStatsToggleRow: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 6,
+        },
+        pickStatsChip: {
+          paddingVertical: 5,
+          paddingHorizontal: 10,
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        pickStatsChipActive: {
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+        },
+        pickStatsChipText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+        },
+        pickStatsChipTextActive: {
+          color: theme.colors.accent,
+          fontFamily: theme.fontFamily.baiSemiBold,
+        },
         pickStatRow: {
           flexDirection: 'row',
           alignItems: 'center',
@@ -1005,50 +1069,154 @@ export default function LmsHomeScreen() {
   };
 
   const renderPickStats = () => {
-    if (!gw || !pickStats?.revealed || pickStats.teams.length === 0) return null;
+    if (!gw) return null;
+    if (!pickStats?.revealed && !pickStatsLoading) return null;
+    if (!pickStatsLoading && (!pickStats || pickStats.teams.length === 0)) return null;
+
+    const scopeLabel =
+      pickStatsCompetitionId == null
+        ? 'all leagues'
+        : comps.find((c) => c.competition_id === pickStatsCompetitionId)?.name ?? 'league';
+
     return (
       <View style={styles.pickStatsCard}>
         <View style={styles.pickStatsHead}>
           <Text style={styles.pickStatsTitle}>
-            GW{pickStats.gameweek_number ?? gw.number} picks
+            GW{pickStats?.gameweek_number ?? gw.number} picks
           </Text>
           <Text style={styles.pickStatsMeta}>
-            {pickStats.total_picks} pick{pickStats.total_picks === 1 ? '' : 's'} · all leagues
+            {pickStatsLoading
+              ? 'Loading…'
+              : `${pickStats?.total_picks ?? 0} pick${(pickStats?.total_picks ?? 0) === 1 ? '' : 's'} · ${scopeLabel}`}
           </Text>
         </View>
-        {pickStats.teams.map((t) => {
-          const widthPct = Math.min(100, Math.max(0, t.pick_pct));
-          return (
-            <View key={t.team_id} style={styles.pickStatRow}>
-              <TeamColourChip
-                shortName={t.short_name}
-                name={t.name}
-                slug={t.slug}
-                size={22}
-              />
-              <Text style={styles.pickStatName} numberOfLines={1}>
-                {t.short_name || lmsDisplayTeamName(t.name).slice(0, 3)}
+
+        <View style={styles.pickStatsToggles}>
+          <View style={styles.pickStatsToggleRow}>
+            <Pressable
+              style={[
+                styles.pickStatsChip,
+                pickStatsCompetitionId == null && styles.pickStatsChipActive,
+              ]}
+              onPress={() => setPickStatsCompetitionId(null)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: pickStatsCompetitionId == null }}
+              accessibilityLabel="Show picks across all leagues"
+            >
+              <Text
+                style={[
+                  styles.pickStatsChipText,
+                  pickStatsCompetitionId == null && styles.pickStatsChipTextActive,
+                ]}
+              >
+                Overall
               </Text>
-              <View style={styles.pickStatBarTrack}>
-                <View
-                  style={[
-                    styles.pickStatBarFill,
-                    {
-                      width: `${widthPct}%`,
-                      opacity: t.pick_count > 0 ? 1 : 0.25,
-                    },
-                  ]}
+            </Pressable>
+            {comps.map((c) => {
+              const active = pickStatsCompetitionId === c.competition_id;
+              return (
+                <Pressable
+                  key={c.competition_id}
+                  style={[styles.pickStatsChip, active && styles.pickStatsChipActive]}
+                  onPress={() => setPickStatsCompetitionId(c.competition_id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Show picks for ${c.name}`}
+                >
+                  <Text
+                    style={[
+                      styles.pickStatsChipText,
+                      active && styles.pickStatsChipTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {c.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.pickStatsToggleRow}>
+            <Pressable
+              style={[
+                styles.pickStatsChip,
+                pickStatsDisplay === 'pct' && styles.pickStatsChipActive,
+              ]}
+              onPress={() => setPickStatsDisplay('pct')}
+              accessibilityRole="button"
+              accessibilityState={{ selected: pickStatsDisplay === 'pct' }}
+              accessibilityLabel="Show pick percentages"
+            >
+              <Text
+                style={[
+                  styles.pickStatsChipText,
+                  pickStatsDisplay === 'pct' && styles.pickStatsChipTextActive,
+                ]}
+              >
+                %
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.pickStatsChip,
+                pickStatsDisplay === 'count' && styles.pickStatsChipActive,
+              ]}
+              onPress={() => setPickStatsDisplay('count')}
+              accessibilityRole="button"
+              accessibilityState={{ selected: pickStatsDisplay === 'count' }}
+              accessibilityLabel="Show pick counts"
+            >
+              <Text
+                style={[
+                  styles.pickStatsChipText,
+                  pickStatsDisplay === 'count' && styles.pickStatsChipTextActive,
+                ]}
+              >
+                Count
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {pickStatsLoading && !pickStats ? (
+          <ActivityIndicator color={theme.colors.accent} style={{ marginVertical: 8 }} />
+        ) : (
+          (pickStats?.teams ?? []).map((t) => {
+            const widthPct = Math.min(100, Math.max(0, t.pick_pct));
+            return (
+              <View key={t.team_id} style={styles.pickStatRow}>
+                <TeamColourChip
+                  shortName={t.short_name}
+                  name={t.name}
+                  slug={t.slug}
+                  size={22}
                 />
+                <Text style={styles.pickStatName} numberOfLines={1}>
+                  {t.short_name || lmsDisplayTeamName(t.name).slice(0, 3)}
+                </Text>
+                <View style={styles.pickStatBarTrack}>
+                  <View
+                    style={[
+                      styles.pickStatBarFill,
+                      {
+                        width: `${widthPct}%`,
+                        opacity: t.pick_count > 0 ? 1 : 0.25,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.pickStatPct}>
+                  {pickStatsDisplay === 'count'
+                    ? String(t.pick_count)
+                    : `${t.pick_pct.toFixed(t.pick_pct % 1 === 0 ? 0 : 1)}%`}
+                </Text>
+                <Text style={[styles.pickStatOutcome, { color: outcomeColor(t.outcome) }]}>
+                  {outcomeLabel(t.outcome)}
+                </Text>
               </View>
-              <Text style={styles.pickStatPct}>
-                {t.pick_pct.toFixed(t.pick_pct % 1 === 0 ? 0 : 1)}%
-              </Text>
-              <Text style={[styles.pickStatOutcome, { color: outcomeColor(t.outcome) }]}>
-                {outcomeLabel(t.outcome)}
-              </Text>
-            </View>
-          );
-        })}
+            );
+          })
+        )}
       </View>
     );
   };
