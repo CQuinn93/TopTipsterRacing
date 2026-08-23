@@ -67,6 +67,7 @@ import {
   type LmsTeam,
 } from '@/lib/lms/api';
 import { lmsDisplayTeamName } from '@/lib/lms/teamColours';
+import { useRealtimeLmsFixtures } from '@/lib/useRealtimeLmsFixtures';
 import {
   lmsSessionGetFixtures,
   lmsSessionGetFormFixtures,
@@ -343,6 +344,46 @@ export default function LmsCompetitionDashboard() {
   loadLeaderboardExtrasRef.current = loadLeaderboardExtras;
   const ensureGameweekFixturesRef = useRef(ensureGameweekFixtures);
   ensureGameweekFixturesRef.current = ensureGameweekFixtures;
+
+  /** Fixture ids for the open gameweek — used to filter Realtime updates. */
+  const realtimeFixtureIds = useMemo(
+    () => pickGwFixtures.map((f) => f.id).filter(Boolean),
+    [pickGwFixtures]
+  );
+
+  const realtimeRefreshInFlightRef = useRef(false);
+
+  /** Realtime-driven refresh: force fixtures + standing without the manual cooldown. */
+  const refreshFromRealtime = useCallback(async () => {
+    if (!competitionId || realtimeRefreshInFlightRef.current) return;
+    const gw = currentGwRef.current;
+    if (!gw) return;
+    realtimeRefreshInFlightRef.current = true;
+    try {
+      lmsSessionInvalidateFixtures(gw.id);
+      const filterGw = filterGwIdRef.current;
+      if (tabRef.current === 'gameweeks' && filterGw && filterGw !== gw.id) {
+        lmsSessionInvalidateFixtures(filterGw);
+      }
+
+      const [parts] = await Promise.all([
+        lmsListParticipants(competitionId),
+        loadLeaderboardExtrasRef.current(gw, { force: true }),
+        tabRef.current === 'gameweeks' && filterGw && filterGw !== gw.id
+          ? ensureGameweekFixturesRef.current(filterGw, { force: true })
+          : Promise.resolve(null),
+      ]);
+      setLeaderboard(parts);
+    } catch {
+      /* ignore transient Realtime refetch errors; next sync/event retries */
+    } finally {
+      realtimeRefreshInFlightRef.current = false;
+    }
+  }, [competitionId]);
+
+  useRealtimeLmsFixtures(realtimeFixtureIds, () => {
+    void refreshFromRealtime();
+  });
 
   const loadSelectionSlice = useCallback(
     async (opts?: { force?: boolean }) => {
