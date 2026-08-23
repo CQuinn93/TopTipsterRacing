@@ -48,8 +48,36 @@ type FdMatch = {
   awayTeam: { id: number; name: string; shortName?: string; tla?: string };
   score?: {
     fullTime?: { home: number | null; away: number | null };
+    halfTime?: { home: number | null; away: number | null };
+    regularTime?: { home: number | null; away: number | null };
   };
 };
+
+type LmsFixtureStatus = 'scheduled' | 'live' | 'finished';
+
+/**
+ * Pick home/away goals from football-data score objects.
+ * Finished → full-time only. Live → best current score available.
+ */
+function pickMatchGoals(
+  score: FdMatch['score'],
+  status: LmsFixtureStatus
+): { home: number | null; away: number | null } {
+  if (status === 'scheduled') return { home: null, away: null };
+
+  const ft = score?.fullTime;
+  const rt = score?.regularTime;
+  const ht = score?.halfTime;
+
+  if (status === 'finished') {
+    return { home: ft?.home ?? null, away: ft?.away ?? null };
+  }
+
+  // Live: API may expose running score on fullTime, regularTime, or halfTime.
+  const home = ft?.home ?? rt?.home ?? ht?.home ?? null;
+  const away = ft?.away ?? rt?.away ?? ht?.away ?? null;
+  return { home, away };
+}
 
 type LmsTeamRow = {
   id: string;
@@ -75,7 +103,7 @@ function slugify(input: string): string {
  * Map football-data.org match status strings into our LMS fixture statuses.
  * Only `finished` matches are used for settlement / scoring.
  */
-function mapMatchStatus(status: string): 'scheduled' | 'live' | 'finished' {
+function mapMatchStatus(status: string): LmsFixtureStatus {
   switch (status) {
     case 'FINISHED':
       return 'finished';
@@ -375,9 +403,7 @@ async function main() {
     }
 
     const status = mapMatchStatus(m.status);
-    // Only store full-time goals once the match is finished
-    const homeGoals = status === 'finished' ? m.score?.fullTime?.home ?? null : null;
-    const awayGoals = status === 'finished' ? m.score?.fullTime?.away ?? null : null;
+    const { home: homeGoals, away: awayGoals } = pickMatchGoals(m.score, status);
 
     const row = {
       // Intentionally omit excluded_from_lms / excluded_reason / excluded_at / excluded_by

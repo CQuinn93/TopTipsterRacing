@@ -1728,6 +1728,16 @@ export default function LmsCompetitionDashboard() {
           fontSize: 15,
           color: theme.colors.text,
         },
+        scoreTextLive: {
+          color: theme.colors.accent,
+        },
+        inPlayLabel: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 10,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: theme.colors.accent,
+        },
         drawLabel: {
           fontFamily: theme.fontFamily.baiBold,
           fontSize: 11,
@@ -2441,17 +2451,19 @@ export default function LmsCompetitionDashboard() {
 
   const renderFixtureRow = (f: LmsFixture, i: number, list: LmsFixture[]) => {
     const finished = f.status === 'finished';
+    const inPlay = f.status === 'live';
     const excluded = !!f.excluded_from_lms;
     const homeForm = formByTeamId.get(f.home_team_id) ?? [null, null, null, null, null];
     const awayForm = formByTeamId.get(f.away_team_id) ?? [null, null, null, null, null];
     const hg = f.home_goals;
     const ag = f.away_goals;
+    const hasScore = hg != null && ag != null;
     const isDraw =
-      finished && hg != null && ag != null && hg === ag;
+      finished && hasScore && hg === ag;
     const homeWin =
-      finished && hg != null && ag != null && hg > ag;
+      finished && hasScore && hg > ag;
     const awayWin =
-      finished && hg != null && ag != null && ag > hg;
+      finished && hasScore && ag > hg;
 
     return (
       <View
@@ -2482,12 +2494,21 @@ export default function LmsCompetitionDashboard() {
               <TeamFormDots results={homeForm} />
             </View>
             <View style={styles.scoreBox}>
-              {finished ? (
+              {finished && hasScore ? (
                 <>
                   <Text style={styles.scoreText}>
-                    {hg ?? 0}–{ag ?? 0}
+                    {hg}–{ag}
                   </Text>
                   {isDraw ? <Text style={styles.drawLabel}>Draw</Text> : null}
+                </>
+              ) : inPlay ? (
+                <>
+                  {hasScore ? (
+                    <Text style={[styles.scoreText, styles.scoreTextLive]}>
+                      {hg}–{ag}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.inPlayLabel}>In play</Text>
                 </>
               ) : (
                 <>
