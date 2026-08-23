@@ -90,7 +90,12 @@ export default function LmsHomeScreen() {
 
   const upcomingFixtures = useMemo(() => {
     const open = fixtures.filter((f) => f.status !== 'finished' && !f.excluded_from_lms);
-    return open.length ? open : fixtures.filter((f) => !f.excluded_from_lms);
+    const list = open.length ? open : fixtures.filter((f) => !f.excluded_from_lms);
+    return [...list].sort((a, b) => {
+      if (a.status === 'live' && b.status !== 'live') return -1;
+      if (b.status === 'live' && a.status !== 'live') return 1;
+      return new Date(a.kickoff_at).getTime() - new Date(b.kickoff_at).getTime();
+    });
   }, [fixtures]);
 
   const load = useCallback(async () => {
@@ -519,6 +524,19 @@ export default function LmsHomeScreen() {
           color: theme.colors.textMuted,
           textAlign: 'center',
         },
+        cardScoreLive: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 16,
+          color: theme.colors.accent,
+        },
+        cardInPlay: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 10,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: theme.colors.accent,
+          textAlign: 'center',
+        },
         dots: {
           flexDirection: 'row',
           justifyContent: 'center',
@@ -897,14 +915,28 @@ export default function LmsHomeScreen() {
                     </Text>
                   </View>
                   <View style={styles.cardMid}>
-                    <Text style={styles.cardVs}>vs</Text>
-                    <Text style={styles.cardTime}>
-                      {new Date(activeFixture.kickoff_at).toLocaleString(undefined, {
-                        weekday: 'short',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </Text>
+                    {activeFixture.status === 'live' ? (
+                      <>
+                        {activeFixture.home_goals != null &&
+                        activeFixture.away_goals != null ? (
+                          <Text style={styles.cardScoreLive}>
+                            {activeFixture.home_goals}–{activeFixture.away_goals}
+                          </Text>
+                        ) : null}
+                        <Text style={styles.cardInPlay}>In play</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.cardVs}>vs</Text>
+                        <Text style={styles.cardTime}>
+                          {new Date(activeFixture.kickoff_at).toLocaleString(undefined, {
+                            weekday: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </Text>
+                      </>
+                    )}
                   </View>
                   <View style={styles.cardSide}>
                     <TeamColourChip
