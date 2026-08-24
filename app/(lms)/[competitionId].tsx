@@ -21,7 +21,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
 // Crest images disabled (trademark risk) — restore TeamCrest if logo rights obtained.
 // import { TeamCrest } from '@/components/lms/TeamCrest';
-import { TeamFormDots } from '@/components/lms/TeamFormDots';
+import { TeamFormDots, SelectionTeamFormDots } from '@/components/lms/TeamFormDots';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import {
   lmsAdminSetCompetitionTeam,
@@ -3099,6 +3099,24 @@ export default function LmsCompetitionDashboard() {
                       <Text style={styles.pickBannerName}>
                         {lmsDisplayTeamName(currentPickTeam.name)}
                       </Text>
+                      <SelectionTeamFormDots
+                        teamResults={
+                          formByTeamId.get(currentPickTeam.id) ?? [
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                          ]
+                        }
+                        opponentResults={
+                          opponentByTeamId.get(currentPickTeam.id)
+                            ? formByTeamId.get(
+                                opponentByTeamId.get(currentPickTeam.id)!.id
+                              ) ?? [null, null, null, null, null]
+                            : null
+                        }
+                      />
                     </View>
                   </View>
                 ) : null}
@@ -3226,6 +3244,22 @@ export default function LmsCompetitionDashboard() {
                                   {vsLabel}
                                 </Text>
                               ) : null}
+                              <SelectionTeamFormDots
+                                teamResults={
+                                  formByTeamId.get(t.id) ?? [null, null, null, null, null]
+                                }
+                                opponentResults={
+                                  opponent
+                                    ? formByTeamId.get(opponent.id) ?? [
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                      ]
+                                    : null
+                                }
+                              />
                               {!pickable && note ? (
                                 <Text style={styles.teamTileNote} numberOfLines={2}>
                                   {note}
@@ -3923,6 +3957,28 @@ export default function LmsCompetitionDashboard() {
                                         >
                                           {vsLabel}
                                         </Text>
+                                      ) : null}
+                                      {opponent ? (
+                                        <SelectionTeamFormDots
+                                          teamResults={
+                                            formByTeamId.get(t.id) ?? [
+                                              null,
+                                              null,
+                                              null,
+                                              null,
+                                              null,
+                                            ]
+                                          }
+                                          opponentResults={
+                                            formByTeamId.get(opponent.id) ?? [
+                                              null,
+                                              null,
+                                              null,
+                                              null,
+                                              null,
+                                            ]
+                                          }
+                                        />
                                       ) : null}
                                     </View>
                                     {selected ? (
