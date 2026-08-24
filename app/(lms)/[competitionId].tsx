@@ -278,13 +278,21 @@ export default function LmsCompetitionDashboard() {
 
   const ensureFormFixtures = useCallback(
     async (season: string, opts?: { force?: boolean }) => {
+      const hasFinishedResult = (list: LmsFixture[]) =>
+        list.some(
+          (f) => f.status === 'finished' && f.home_goals != null && f.away_goals != null
+        );
+
       if (!opts?.force) {
         const cached = lmsSessionGetFormFixtures(season);
         // Skip empty cache — it may be from before any fixtures had finished.
+        // Also skip caches that only have future weeks (no finished results yet).
         if (cached && cached.length > 0) {
           const merged = lmsMergeFixtures(cached, lmsSessionListCachedFixtures());
-          setFormFixtures(merged);
-          return merged;
+          if (hasFinishedResult(merged)) {
+            setFormFixtures(merged);
+            return merged;
+          }
         }
       }
       const fx = await lmsListRecentFinishedFixtures(season);

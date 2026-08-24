@@ -342,20 +342,53 @@ export async function lmsListTeams(): Promise<LmsTeam[]> {
   return (data ?? []) as LmsTeam[];
 }
 
-/** Finished fixtures from recent gameweeks — enough for form dots.
- * Includes in-progress weeks (finished matches count as soon as they FT). */
+/** Fixtures from gameweeks that matter for form dots (complete / live / current).
+ * Avoids `order by number desc limit 6`, which early in the season returns GW33–38
+ * with no finished matches while GW1 already has results. */
 export async function lmsListRecentFinishedFixtures(
   season = '2026/27',
   gameweekLimit = 6
 ): Promise<LmsFixture[]> {
-  const { data: recentGws, error: gwErr } = await supabase
+  type GwRow = { id: string; number: number; status: string };
+  const byId = new Map<string, GwRow>();
+
+  const { data: playedGws, error: playedErr } = await supabase
     .from('lms_gameweeks')
-    .select('id, number')
+    .select('id, number, status')
     .eq('season', season)
+    .in('status', ['complete', 'live'])
     .order('number', { ascending: false })
     .limit(gameweekLimit);
-  if (gwErr) throw gwErr;
-  const gws = (recentGws ?? []) as { id: string; number: number }[];
+  if (playedErr) throw playedErr;
+  for (const g of (playedGws ?? []) as GwRow[]) byId.set(g.id, g);
+
+  // Mid-week / first week: include the open upcoming GW so FT results count before settle.
+  if (byId.size < gameweekLimit) {
+    const { data: openGw, error: openErr } = await supabase
+      .from('lms_gameweeks')
+      .select('id, number, status')
+      .eq('season', season)
+      .eq('status', 'upcoming')
+      .order('number', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (openErr) throw openErr;
+    if (openGw) byId.set((openGw as GwRow).id, openGw as GwRow);
+  }
+
+  // Fallback: start of season before any week is live/complete — take earliest weeks.
+  if (byId.size === 0) {
+    const { data: earlyGws, error: earlyErr } = await supabase
+      .from('lms_gameweeks')
+      .select('id, number, status')
+      .eq('season', season)
+      .order('number', { ascending: true })
+      .limit(gameweekLimit);
+    if (earlyErr) throw earlyErr;
+    for (const g of (earlyGws ?? []) as GwRow[]) byId.set(g.id, g);
+  }
+
+  const gws = [...byId.values()].sort((a, b) => b.number - a.number).slice(0, gameweekLimit);
   if (!gws.length) return [];
 
   const gwIds = gws.map((g) => g.id);
