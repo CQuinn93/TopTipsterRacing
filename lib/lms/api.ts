@@ -705,6 +705,32 @@ export async function lmsListSeasonFixtures(season = '2026/27'): Promise<LmsFixt
 
 export type FormResult = 'W' | 'D' | 'L' | null;
 
+function fixtureResultRank(f: LmsFixture): number {
+  if (f.status === 'finished' && f.home_goals != null && f.away_goals != null) return 3;
+  if (f.status === 'live') return 2;
+  return 1;
+}
+
+/** Merge fixture lists by id, preferring the row with the most complete result data. */
+export function lmsMergeFixtures(...groups: LmsFixture[][]): LmsFixture[] {
+  const byId = new Map<string, LmsFixture>();
+  for (const group of groups) {
+    for (const f of group) {
+      const prev = byId.get(f.id);
+      if (!prev) {
+        byId.set(f.id, f);
+        continue;
+      }
+      const prevRank = fixtureResultRank(prev);
+      const nextRank = fixtureResultRank(f);
+      if (nextRank > prevRank || (nextRank === prevRank && f !== prev)) {
+        byId.set(f.id, f);
+      }
+    }
+  }
+  return [...byId.values()];
+}
+
 /** Last five finished results for a team (oldest → newest), padded with nulls. */
 export function lmsTeamFormFromFixtures(
   fixtures: LmsFixture[],
