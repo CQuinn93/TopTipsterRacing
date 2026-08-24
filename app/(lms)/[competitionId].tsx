@@ -176,6 +176,8 @@ export default function LmsCompetitionDashboard() {
   });
   const historyLoadedUsersRef = useRef(new Set<string>());
   const tabRef = useRef<TabKey>(tab);
+  const canManageRef = useRef(canManage);
+  canManageRef.current = canManage;
   tabRef.current = tab;
   const filterGwIdRef = useRef(filterGwId);
   filterGwIdRef.current = filterGwId;
@@ -521,37 +523,44 @@ export default function LmsCompetitionDashboard() {
     setExpandedUserId(null);
 
     await loadLeaderboardExtrasRef.current(gw, { force: true });
-    void loadCompetitionManagersRef.current();
+
+    // Managers / assignable lists are admin-only — skip for normal players.
+    const joins = !!manage.can_handle_joins;
+    const ownerAdmin = !!manage.can_manage;
+    if (joins || ownerAdmin) {
+      void loadCompetitionManagersRef.current({ loadAssignable: ownerAdmin });
+    } else {
+      setManagerUserIds(new Set());
+      setAssignablePlayers([]);
+    }
   }, [competitionId, userId]);
 
-  const loadCompetitionManagers = useCallback(async () => {
-    if (!competitionId) return;
-    try {
-      const rows = await lmsListCompetitionManagers(competitionId);
-      setManagerUserIds(new Set(rows.map((r) => r.user_id)));
-    } catch {
-      /* leave previous manager chips */
-    }
-    try {
-      const players = await lmsListAssignableManagers(competitionId);
-      setAssignablePlayers(players);
-    } catch {
+  /** Manager badges (+ optional assignable list for owners). Not for normal players. */
+  const loadCompetitionManagers = useCallback(
+    async (opts?: { loadAssignable?: boolean }) => {
+      if (!competitionId) return;
       try {
-        const parts = await lmsListParticipants(competitionId);
-        setAssignablePlayers(
-          parts.map((p) => ({
-            user_id: p.user_id,
-            username: p.username ?? null,
-            status: p.status,
-            is_creator: createdByUserId != null && p.user_id === createdByUserId,
-            is_manager: false,
-          }))
-        );
+        const rows = await lmsListCompetitionManagers(competitionId);
+        setManagerUserIds(new Set(rows.map((r) => r.user_id)));
       } catch {
+        /* leave previous manager chips */
+      }
+
+      if (!opts?.loadAssignable) {
+        setAssignablePlayers([]);
+        return;
+      }
+
+      try {
+        const players = await lmsListAssignableManagers(competitionId);
+        setAssignablePlayers(players);
+      } catch {
+        // manageUserPlayers already falls back to the in-memory leaderboard
         setAssignablePlayers([]);
       }
-    }
-  }, [competitionId, createdByUserId]);
+    },
+    [competitionId]
+  );
 
   const loadPendingJoins = useCallback(async () => {
     if (!competitionId) return;
@@ -666,7 +675,7 @@ export default function LmsCompetitionDashboard() {
                 : res.error || 'Could not update manager';
         Alert.alert('Managers', msg);
       } else {
-        void loadCompetitionManagers();
+        void loadCompetitionManagers({ loadAssignable: true });
       }
     } catch (e) {
       setManagerUserIds(prev);
@@ -720,7 +729,9 @@ export default function LmsCompetitionDashboard() {
         tasks.push(loadPendingJoinsRef.current());
         tasks.push(loadJoinNotifyPrefRef.current());
         tasks.push(loadJoinCodesRef.current());
-        tasks.push(loadCompetitionManagersRef.current());
+        tasks.push(
+          loadCompetitionManagersRef.current({ loadAssignable: canManageRef.current })
+        );
       }
       // Leaderboard standings + GW picks come from loadShell → loadLeaderboardExtras.
       await Promise.all(tasks);
@@ -774,9 +785,9 @@ export default function LmsCompetitionDashboard() {
       void loadPendingJoinsRef.current();
       void loadJoinNotifyPrefRef.current();
       void loadJoinCodesRef.current();
-      void loadCompetitionManagersRef.current();
+      void loadCompetitionManagersRef.current({ loadAssignable: canManage });
     }
-  }, [tab, canHandleJoins]);
+  }, [tab, canHandleJoins, canManage]);
 
   useEffect(() => {
     if (tab !== 'gameweeks') return;
