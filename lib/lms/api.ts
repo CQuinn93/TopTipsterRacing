@@ -705,6 +705,32 @@ export async function lmsListSeasonFixtures(season = '2026/27'): Promise<LmsFixt
 
 export type FormResult = 'W' | 'D' | 'L' | null;
 
+function fixtureResultRank(f: LmsFixture): number {
+  if (f.status === 'finished' && f.home_goals != null && f.away_goals != null) return 3;
+  if (f.status === 'live') return 2;
+  return 1;
+}
+
+/** Merge fixture lists by id, preferring the row with the most complete result data. */
+export function lmsMergeFixtures(...groups: LmsFixture[][]): LmsFixture[] {
+  const byId = new Map<string, LmsFixture>();
+  for (const group of groups) {
+    for (const f of group) {
+      const prev = byId.get(f.id);
+      if (!prev) {
+        byId.set(f.id, f);
+        continue;
+      }
+      const prevRank = fixtureResultRank(prev);
+      const nextRank = fixtureResultRank(f);
+      if (nextRank > prevRank || (nextRank === prevRank && f !== prev)) {
+        byId.set(f.id, f);
+      }
+    }
+  }
+  return [...byId.values()];
+}
+
 /** Last five finished results for a team (oldest → newest), padded with nulls. */
 export function lmsTeamFormFromFixtures(
   fixtures: LmsFixture[],
@@ -907,6 +933,105 @@ export async function lmsGetGameweekPickStats(
     })),
     error: raw.error,
   };
+}
+
+export type LmsEliminationSummaryGameweek = {
+  gameweek_id: string;
+  gameweek_number: number;
+  eliminated_count: number;
+  entrants_count: number;
+  survival_pct: number;
+};
+
+export type LmsEliminationSummary = {
+  success: boolean;
+  season: string;
+  competition_id: string | null;
+  still_standing: number;
+  gameweeks: LmsEliminationSummaryGameweek[];
+  error?: string;
+};
+
+/** Eliminations per completed gameweek (home card when pick stats are hidden). */
+export async function lmsGetEliminationSummary(
+  season = '2026/27',
+  competitionId?: string | null
+): Promise<LmsEliminationSummary> {
+  const { data, error } = await db.rpc('lms_get_elimination_summary', {
+    p_season: season,
+    p_competition_id: competitionId ?? null,
+  });
+  if (error) throw error;
+  const raw = (data ?? {}) as LmsEliminationSummary & { gameweeks?: LmsEliminationSummaryGameweek[] };
+  return {
+    success: !!raw.success,
+    season: raw.season ?? season,
+    competition_id: raw.competition_id ?? competitionId ?? null,
+    still_standing: Number(raw.still_standing ?? 0),
+    gameweeks: (raw.gameweeks ?? []).map((g) => ({
+      gameweek_id: g.gameweek_id,
+      gameweek_number: Number(g.gameweek_number ?? 0),
+      eliminated_count: Number(g.eliminated_count ?? 0),
+      entrants_count: Number(g.entrants_count ?? 0),
+      survival_pct: Number(g.survival_pct ?? 100),
+    })),
+    error: raw.error,
+  };
+}
+
+export type LmsUserPoolTeam = {
+  team_id: string;
+  team: LmsTeam;
+  used: boolean;
+  gameweek_number: number | null;
+};
+
+/** Competition pool teams for one player — used teams greyed with GW label. */
+export async function lmsGetUserPoolForCompetition(
+  competitionId: string,
+  userId: string,
+  opts?: {
+    currentGameweekId?: string | null;
+    currentGameweekNumber?: number | null;
+  }
+): Promise<LmsUserPoolTeam[]> {
+  const [poolIds, allTeams, completedPicks, currentPick] = await Promise.all([
+    lmsListCompetitionTeamIds(competitionId),
+    lmsListTeams(),
+    lmsListCompletedPicksForUser(competitionId, userId),
+    opts?.currentGameweekId
+      ? lmsGetMyPick(competitionId, userId, opts.currentGameweekId)
+      : Promise.resolve(null),
+  ]);
+
+  const teamById = new Map(allTeams.map((t) => [t.id, t]));
+  const usedGwByTeamId = new Map<string, number>();
+
+  for (const p of completedPicks) {
+    usedGwByTeamId.set(p.team_id, p.gameweek_number);
+  }
+  if (currentPick?.team_id && opts?.currentGameweekNumber != null) {
+    usedGwByTeamId.set(currentPick.team_id, opts.currentGameweekNumber);
+  }
+
+  return poolIds
+    .map((id) => {
+      const team = teamById.get(id);
+      if (!team) return null;
+      const gwNum = usedGwByTeamId.get(id) ?? null;
+      return {
+        team_id: id,
+        team,
+        used: gwNum != null,
+        gameweek_number: gwNum,
+      };
+    })
+    .filter((row): row is LmsUserPoolTeam => row != null)
+    .sort((a, b) =>
+      (a.team.short_name || a.team.name).localeCompare(b.team.short_name || b.team.name, undefined, {
+        sensitivity: 'base',
+      })
+    );
 }
 
 /** All picks for a competition gameweek (same-comp members can read via RLS). */

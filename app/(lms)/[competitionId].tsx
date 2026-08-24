@@ -21,7 +21,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
 // Crest images disabled (trademark risk) — restore TeamCrest if logo rights obtained.
 // import { TeamCrest } from '@/components/lms/TeamCrest';
-import { TeamFormDots } from '@/components/lms/TeamFormDots';
+import { TeamFormDots, SelectionTeamFormDots } from '@/components/lms/TeamFormDots';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import {
   lmsAdminSetCompetitionTeam,
@@ -57,6 +57,7 @@ import {
   lmsPickErrorMessage,
   lmsRejectJoinRequest,
   lmsSubmitPick,
+  lmsMergeFixtures,
   lmsTeamFormFromFixtures,
   type LmsCompetition,
   type LmsCompletedPick,
@@ -215,18 +216,22 @@ export default function LmsCompetitionDashboard() {
   const syncSeasonFixturesFromCache = useCallback(() => {
     const next = lmsSessionListCachedFixtures();
     setSeasonFixtures((prev) => {
-      if (
-        prev.length === next.length &&
-        prev.every(
-          (f, i) =>
-            f.id === next[i]?.id &&
-            f.gameweek_number === next[i]?.gameweek_number &&
-            f.excluded_from_lms === next[i]?.excluded_from_lms
-        )
-      ) {
-        return prev;
+      if (prev.length !== next.length) return next;
+      const prevById = new Map(prev.map((f) => [f.id, f]));
+      for (const f of next) {
+        const p = prevById.get(f.id);
+        if (
+          !p ||
+          p.gameweek_number !== f.gameweek_number ||
+          p.excluded_from_lms !== f.excluded_from_lms ||
+          p.status !== f.status ||
+          p.home_goals !== f.home_goals ||
+          p.away_goals !== f.away_goals
+        ) {
+          return next;
+        }
       }
-      return next;
+      return prev;
     });
   }, []);
 
@@ -277,12 +282,12 @@ export default function LmsCompetitionDashboard() {
         const cached = lmsSessionGetFormFixtures(season);
         // Skip empty cache — it may be from before any fixtures had finished.
         if (cached && cached.length > 0) {
-          setFormFixtures(cached);
-          return cached;
+          const merged = lmsMergeFixtures(cached, lmsSessionListCachedFixtures());
+          setFormFixtures(merged);
+          return merged;
         }
       }
       const fx = await lmsListRecentFinishedFixtures(season);
-      lmsSessionSetFormFixtures(season, fx);
       // Seed per-GW cache so “All” can include recent weeks without extra fetches.
       const byGw = new Map<string, LmsFixture[]>();
       for (const f of fx) {
@@ -294,8 +299,10 @@ export default function LmsCompetitionDashboard() {
         if (!lmsSessionHasFixtures(gwId)) lmsSessionSetFixtures(gwId, list);
       }
       syncSeasonFixturesFromCache();
-      setFormFixtures(fx);
-      return fx;
+      const merged = lmsMergeFixtures(fx, lmsSessionListCachedFixtures());
+      lmsSessionSetFormFixtures(season, merged);
+      setFormFixtures(merged);
+      return merged;
     },
     [syncSeasonFixturesFromCache]
   );
@@ -355,6 +362,9 @@ export default function LmsCompetitionDashboard() {
 
   const realtimeRefreshInFlightRef = useRef(false);
 
+  const ensureFormFixturesRef = useRef(ensureFormFixtures);
+  ensureFormFixturesRef.current = ensureFormFixtures;
+
   /** Realtime-driven refresh: force fixtures + standing without the manual cooldown. */
   const refreshFromRealtime = useCallback(async () => {
     if (!competitionId || realtimeRefreshInFlightRef.current) return;
@@ -368,9 +378,11 @@ export default function LmsCompetitionDashboard() {
         lmsSessionInvalidateFixtures(filterGw);
       }
 
+      const season = competitionRef.current?.season ?? '2026/27';
       const [parts] = await Promise.all([
         lmsListParticipants(competitionId),
         loadLeaderboardExtrasRef.current(gw, { force: true }),
+        ensureFormFixturesRef.current(season, { force: true }),
         tabRef.current === 'gameweeks' && filterGw && filterGw !== gw.id
           ? ensureGameweekFixturesRef.current(filterGw, { force: true })
           : Promise.resolve(null),
@@ -828,13 +840,24 @@ export default function LmsCompetitionDashboard() {
     if (adminSubTab !== 'users') setManageUserDropdownOpen(false);
   }, [adminSubTab]);
 
+  const formSourceFixtures = useMemo(
+    () => lmsMergeFixtures(formFixtures, seasonFixtures),
+    [formFixtures, seasonFixtures]
+  );
+
   const formByTeamId = useMemo(() => {
     const map = new Map<string, ReturnType<typeof lmsTeamFormFromFixtures>>();
-    for (const t of teams) {
-      map.set(t.id, lmsTeamFormFromFixtures(formFixtures, t.id));
+    const teamIds = new Set<string>();
+    for (const t of teams) teamIds.add(t.id);
+    for (const f of formSourceFixtures) {
+      teamIds.add(f.home_team_id);
+      teamIds.add(f.away_team_id);
+    }
+    for (const id of teamIds) {
+      map.set(id, lmsTeamFormFromFixtures(formSourceFixtures, id));
     }
     return map;
-  }, [teams, formFixtures]);
+  }, [teams, formSourceFixtures]);
 
   const filteredFixtures = useMemo(() => {
     return seasonFixtures.filter((f) => {
@@ -1728,11 +1751,21 @@ export default function LmsCompetitionDashboard() {
           paddingVertical: 12,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: theme.colors.border,
+        },
+        fixtureInner: {
+          flex: 1,
+          minWidth: 0,
+        },
+        fixtureTeamsRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
           gap: 8,
         },
         fixtureTeam: {
-          flex: 1,
+          flex: 2,
+          minWidth: 0,
           gap: 4,
+          alignItems: 'flex-start',
         },
         fixtureTeamAway: {
           alignItems: 'flex-end',
@@ -1740,6 +1773,7 @@ export default function LmsCompetitionDashboard() {
         fixtureTeamMain: {
           flexDirection: 'row',
           alignItems: 'center',
+          alignSelf: 'stretch',
           gap: 8,
           paddingVertical: 4,
           paddingHorizontal: 6,
@@ -1770,9 +1804,11 @@ export default function LmsCompetitionDashboard() {
           textAlign: 'right',
         },
         scoreBox: {
+          flex: 1,
           minWidth: 52,
           alignItems: 'center',
-          paddingHorizontal: 6,
+          justifyContent: 'center',
+          paddingHorizontal: 4,
           gap: 2,
         },
         scoreText: {
@@ -2526,8 +2562,8 @@ export default function LmsCompetitionDashboard() {
           excluded && { opacity: 0.55 },
         ]}
       >
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View style={styles.fixtureInner}>
+          <View style={styles.fixtureTeamsRow}>
             <View style={styles.fixtureTeam}>
               <View
                 style={[styles.fixtureTeamMain, homeWin && styles.fixtureTeamWin]}
@@ -3074,6 +3110,24 @@ export default function LmsCompetitionDashboard() {
                       <Text style={styles.pickBannerName}>
                         {lmsDisplayTeamName(currentPickTeam.name)}
                       </Text>
+                      <SelectionTeamFormDots
+                        teamResults={
+                          formByTeamId.get(currentPickTeam.id) ?? [
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                          ]
+                        }
+                        opponentResults={
+                          opponentByTeamId.get(currentPickTeam.id)
+                            ? formByTeamId.get(
+                                opponentByTeamId.get(currentPickTeam.id)!.id
+                              ) ?? [null, null, null, null, null]
+                            : null
+                        }
+                      />
                     </View>
                   </View>
                 ) : null}
@@ -3201,6 +3255,22 @@ export default function LmsCompetitionDashboard() {
                                   {vsLabel}
                                 </Text>
                               ) : null}
+                              <SelectionTeamFormDots
+                                teamResults={
+                                  formByTeamId.get(t.id) ?? [null, null, null, null, null]
+                                }
+                                opponentResults={
+                                  opponent
+                                    ? formByTeamId.get(opponent.id) ?? [
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                        null,
+                                      ]
+                                    : null
+                                }
+                              />
                               {!pickable && note ? (
                                 <Text style={styles.teamTileNote} numberOfLines={2}>
                                   {note}
@@ -3898,6 +3968,28 @@ export default function LmsCompetitionDashboard() {
                                         >
                                           {vsLabel}
                                         </Text>
+                                      ) : null}
+                                      {opponent ? (
+                                        <SelectionTeamFormDots
+                                          teamResults={
+                                            formByTeamId.get(t.id) ?? [
+                                              null,
+                                              null,
+                                              null,
+                                              null,
+                                              null,
+                                            ]
+                                          }
+                                          opponentResults={
+                                            formByTeamId.get(opponent.id) ?? [
+                                              null,
+                                              null,
+                                              null,
+                                              null,
+                                              null,
+                                            ]
+                                          }
+                                        />
                                       ) : null}
                                     </View>
                                     {selected ? (

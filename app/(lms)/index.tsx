@@ -21,17 +21,21 @@ import { useSidebar } from '@/contexts/SidebarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   lmsCreateCompetition,
+  lmsGetEliminationSummary,
   lmsGetGameweekPickStats,
   lmsGetHome,
+  lmsGetUserPoolForCompetition,
   lmsJoinErrorMessage,
   lmsListGameweeks,
   lmsListParticipants,
   lmsListPicksForGameweek,
   lmsRequestJoin,
   type LmsCompetitionHomeSummary,
+  type LmsEliminationSummary,
   type LmsFixture,
   type LmsGameweek,
   type LmsGameweekPickStats,
+  type LmsUserPoolTeam,
   type LmsPendingJoin,
   type LmsPickStatOutcome,
   type LmsTeam,
@@ -42,6 +46,8 @@ import { LeagueTablePanel } from '@/components/lms/LeagueTablePanel';
 import { lmsDisplayTeamName } from '@/lib/lms/teamColours';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import { LmsPushNotificationsCard } from '@/components/lms/LmsPushNotificationsCard';
+import { SurvivalDonut } from '@/components/lms/SurvivalDonut';
+import { LmsUserPoolGrid } from '@/components/lms/LmsUserPoolGrid';
 
 type HomeTab = 'competitions' | 'join' | 'table';
 
@@ -82,6 +88,12 @@ export default function LmsHomeScreen() {
   const [pickStatsExpandedTeams, setPickStatsExpandedTeams] = useState<Record<string, boolean>>(
     {}
   );
+  const [eliminationSummary, setEliminationSummary] = useState<LmsEliminationSummary | null>(null);
+  const [eliminationLoading, setEliminationLoading] = useState(false);
+  const [poolCompetitionId, setPoolCompetitionId] = useState<string | null>(null);
+  const [poolTeams, setPoolTeams] = useState<LmsUserPoolTeam[]>([]);
+  const [poolLoading, setPoolLoading] = useState(false);
+  const [poolMenuOpen, setPoolMenuOpen] = useState(false);
   const [isStaff, setIsStaff] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -119,6 +131,13 @@ export default function LmsHomeScreen() {
     if (!gw || gw.status === 'complete') return false;
     const deadlineMs = new Date(gw.deadline_at).getTime();
     return Number.isFinite(deadlineMs) && deadlineMs > Date.now();
+  }, [gw]);
+
+  /** Pick distribution visible only after deadline and before the gameweek settles. */
+  const pickStatsWindowOpen = useMemo(() => {
+    if (!gw || gw.status === 'complete') return false;
+    const deadlineMs = new Date(gw.deadline_at).getTime();
+    return Number.isFinite(deadlineMs) && deadlineMs <= Date.now();
   }, [gw]);
 
   const load = useCallback(async () => {
@@ -175,10 +194,11 @@ export default function LmsHomeScreen() {
   const loadRef = useRef(load);
   loadRef.current = load;
 
-  /** Load / reload pick stats when the gameweek or scope changes. */
+  /** Load / reload pick stats when the gameweek is live (locked, not yet complete). */
   useEffect(() => {
-    if (!gw?.id) {
+    if (!gw?.id || !pickStatsWindowOpen) {
       setPickStats(null);
+      setPickStatsLoading(false);
       return;
     }
     const competitionId =
@@ -204,7 +224,76 @@ export default function LmsHomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, [gw?.id, pickStatsScope, pickStatsCompetitionId]);
+  }, [gw?.id, gw?.status, pickStatsWindowOpen, pickStatsScope, pickStatsCompetitionId]);
+
+  /** Elimination summary when pick stats are hidden (picks open or gameweek complete). */
+  useEffect(() => {
+    if (!gw?.id || pickStatsWindowOpen) {
+      setEliminationSummary(null);
+      setEliminationLoading(false);
+      return;
+    }
+    const competitionId =
+      pickStatsScope === 'league' ? pickStatsCompetitionId : null;
+    if (pickStatsScope === 'league' && !competitionId) {
+      setEliminationSummary(null);
+      setEliminationLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setEliminationLoading(true);
+    void lmsGetEliminationSummary('2026/27', competitionId)
+      .then((summary) => {
+        if (cancelled) return;
+        setEliminationSummary(summary.success ? summary : null);
+      })
+      .catch(() => {
+        if (!cancelled) setEliminationSummary(null);
+      })
+      .finally(() => {
+        if (!cancelled) setEliminationLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gw?.id, pickStatsWindowOpen, pickStatsScope, pickStatsCompetitionId]);
+
+  useEffect(() => {
+    if (poolCompetitionId != null && !comps.some((c) => c.competition_id === poolCompetitionId)) {
+      setPoolCompetitionId(comps[0]?.competition_id ?? null);
+      setPoolMenuOpen(false);
+    } else if (poolCompetitionId == null && comps.length > 0) {
+      setPoolCompetitionId(comps[0].competition_id);
+    }
+  }, [comps, poolCompetitionId]);
+
+  /** Your pool grid for one competition (between / after gameweeks). */
+  useEffect(() => {
+    if (!userId || !poolCompetitionId || pickStatsWindowOpen) {
+      setPoolTeams([]);
+      setPoolLoading(false);
+      return;
+    }
+    const comp = comps.find((c) => c.competition_id === poolCompetitionId);
+    let cancelled = false;
+    setPoolLoading(true);
+    void lmsGetUserPoolForCompetition(poolCompetitionId, userId, {
+      currentGameweekId: gw?.id ?? null,
+      currentGameweekNumber: comp?.currentGameweekNumber ?? gw?.number ?? null,
+    })
+      .then((rows) => {
+        if (!cancelled) setPoolTeams(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setPoolTeams([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPoolLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, poolCompetitionId, pickStatsWindowOpen, comps, gw?.id, gw?.number]);
 
   /** Drop a stale competition filter if the user left that league. */
   useEffect(() => {
@@ -1072,6 +1161,63 @@ export default function LmsHomeScreen() {
           fontFamily: theme.fontFamily.baiBold,
           fontSize: 11,
         },
+        eliminationRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          paddingVertical: 8,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+        },
+        eliminationRowLast: {
+          borderBottomWidth: 0,
+        },
+        eliminationGw: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.text,
+        },
+        eliminationCount: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 13,
+          color: theme.colors.textSecondary,
+        },
+        eliminationFooter: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          marginTop: 4,
+        },
+        donutScroll: {
+          marginHorizontal: -4,
+        },
+        donutScrollContent: {
+          flexDirection: 'row',
+          gap: 16,
+          paddingHorizontal: 4,
+          paddingVertical: 4,
+        },
+        donutCell: {
+          alignItems: 'center',
+          gap: 4,
+          minWidth: 72,
+        },
+        donutGwLabel: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          color: theme.colors.textSecondary,
+          textTransform: 'uppercase',
+          letterSpacing: 0.4,
+        },
+        donutOutLabel: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 10,
+          color: theme.colors.textMuted,
+        },
+        homeInsightsGap: {
+          gap: 10,
+        },
         pickGameFixture: {
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: theme.colors.border,
@@ -1256,8 +1402,237 @@ export default function LmsHomeScreen() {
     );
   };
 
+  const renderHomeStatsScopeControls = () => {
+    const selectedLeague =
+      pickStatsCompetitionId != null
+        ? comps.find((c) => c.competition_id === pickStatsCompetitionId)
+        : null;
+
+    return (
+      <View style={styles.pickStatsToggles}>
+        <View style={styles.pickStatsScopeRow}>
+          <View style={styles.pickStatsToggleRow}>
+            <Pressable
+              style={[
+                styles.pickStatsChip,
+                pickStatsScope === 'overall' && styles.pickStatsChipActive,
+              ]}
+              onPress={() => {
+                setPickStatsScope('overall');
+                setPickStatsLeagueMenuOpen(false);
+                setPickStatsExpandedTeams({});
+              }}
+              accessibilityRole="button"
+              accessibilityState={{ selected: pickStatsScope === 'overall' }}
+              accessibilityLabel="Show stats across all leagues"
+            >
+              <Text
+                style={[
+                  styles.pickStatsChipText,
+                  pickStatsScope === 'overall' && styles.pickStatsChipTextActive,
+                ]}
+              >
+                Overall
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.pickStatsChip,
+                pickStatsScope === 'league' && styles.pickStatsChipActive,
+                comps.length === 0 && { opacity: 0.45 },
+              ]}
+              onPress={() => {
+                if (!comps.length) return;
+                const nextId = pickStatsCompetitionId ?? comps[0]?.competition_id ?? null;
+                setPickStatsCompetitionId(nextId);
+                setPickStatsScope('league');
+                setPickStatsExpandedTeams({});
+              }}
+              accessibilityRole="button"
+              accessibilityState={{
+                selected: pickStatsScope === 'league',
+                disabled: comps.length === 0,
+              }}
+              accessibilityLabel="Show stats for one competition"
+            >
+              <Text
+                style={[
+                  styles.pickStatsChipText,
+                  pickStatsScope === 'league' && styles.pickStatsChipTextActive,
+                ]}
+              >
+                League
+              </Text>
+            </Pressable>
+          </View>
+
+          {pickStatsScope === 'league' && comps.length > 0 ? (
+            <Pressable
+              style={styles.pickStatsDropdown}
+              onPress={() => setPickStatsLeagueMenuOpen((o) => !o)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: pickStatsLeagueMenuOpen }}
+              accessibilityLabel="Choose competition"
+            >
+              <Text style={styles.pickStatsDropdownText} numberOfLines={1}>
+                {selectedLeague?.name ?? 'Select league'}
+              </Text>
+              <Ionicons
+                name={pickStatsLeagueMenuOpen ? 'chevron-up' : 'chevron-down'}
+                size={14}
+                color={theme.colors.textMuted}
+              />
+            </Pressable>
+          ) : null}
+        </View>
+
+        {pickStatsScope === 'league' && pickStatsLeagueMenuOpen ? (
+          <View style={styles.pickStatsDropdownMenu}>
+            {comps.map((c, i) => {
+              const active = c.competition_id === pickStatsCompetitionId;
+              return (
+                <Pressable
+                  key={c.competition_id}
+                  style={[
+                    styles.pickStatsDropdownItem,
+                    active && styles.pickStatsDropdownItemActive,
+                    i === comps.length - 1 && { borderBottomWidth: 0 },
+                  ]}
+                  onPress={() => {
+                    setPickStatsCompetitionId(c.competition_id);
+                    setPickStatsLeagueMenuOpen(false);
+                    setPickStatsExpandedTeams({});
+                  }}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                >
+                  <Text
+                    style={[
+                      styles.pickStatsDropdownItemText,
+                      active && styles.pickStatsDropdownItemTextActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {c.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
+  const renderEliminationSummary = () => {
+    if (!gw || pickStatsWindowOpen) return null;
+    if (!eliminationLoading && !eliminationSummary?.gameweeks?.length) return null;
+
+    const selectedLeague =
+      pickStatsCompetitionId != null
+        ? comps.find((c) => c.competition_id === pickStatsCompetitionId)
+        : null;
+    const scopeLabel =
+      pickStatsScope === 'overall' ? 'all leagues' : selectedLeague?.name ?? 'league';
+    const rows = eliminationSummary?.gameweeks ?? [];
+    const stillStanding =
+      eliminationSummary?.still_standing ??
+      (pickStatsScope === 'overall'
+        ? comps.reduce((sum, c) => sum + c.aliveCount, 0)
+        : selectedLeague?.aliveCount ?? 0);
+
+    return (
+      <View style={styles.pickStatsCard}>
+        <View style={styles.pickStatsHead}>
+          <Text style={styles.pickStatsTitle}>Survival rate</Text>
+          <Text style={styles.pickStatsMeta}>
+            {eliminationLoading ? 'Loading…' : scopeLabel}
+          </Text>
+        </View>
+
+        {renderHomeStatsScopeControls()}
+
+        {eliminationLoading && !eliminationSummary ? (
+          <ActivityIndicator color={theme.colors.accent} style={{ marginVertical: 8 }} />
+        ) : (
+          <>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.donutScroll}
+              contentContainerStyle={styles.donutScrollContent}
+            >
+              {rows.map((row) => {
+                const survivalPct =
+                  row.survival_pct ??
+                  (row.entrants_count > 0
+                    ? Math.round(
+                        ((row.entrants_count - row.eliminated_count) / row.entrants_count) *
+                          100
+                      )
+                    : 100);
+                return (
+                  <View key={row.gameweek_id} style={styles.donutCell}>
+                    <Text style={styles.donutGwLabel}>GW{row.gameweek_number}</Text>
+                    <SurvivalDonut survivalPct={survivalPct} size={58} strokeWidth={7} />
+                    <Text style={styles.donutOutLabel}>
+                      {row.eliminated_count} out
+                    </Text>
+                  </View>
+                );
+              })}
+            </ScrollView>
+            {stillStanding > 0 ? (
+              <Text style={styles.eliminationFooter}>
+                {stillStanding} still standing · {scopeLabel}
+              </Text>
+            ) : null}
+          </>
+        )}
+      </View>
+    );
+  };
+
+  const renderUserPool = () => {
+    if (!gw || pickStatsWindowOpen || comps.length === 0 || !poolCompetitionId) return null;
+    const selected = comps.find((c) => c.competition_id === poolCompetitionId);
+    if (!selected) return null;
+
+    return (
+      <LmsUserPoolGrid
+        competitionName={selected.name}
+        menuOpen={poolMenuOpen}
+        onToggleMenu={() => setPoolMenuOpen((o) => !o)}
+        competitions={comps.map((c) => ({
+          competition_id: c.competition_id,
+          name: c.name,
+        }))}
+        selectedCompetitionId={poolCompetitionId}
+        onSelectCompetition={(id) => {
+          setPoolCompetitionId(id);
+          setPoolMenuOpen(false);
+        }}
+        teams={poolTeams}
+        loading={poolLoading}
+      />
+    );
+  };
+
+  const renderBetweenGameweeksInsights = () => {
+    if (!gw || pickStatsWindowOpen) return null;
+    const elimination = renderEliminationSummary();
+    const pool = renderUserPool();
+    if (!elimination && !pool) return null;
+    return (
+      <View style={styles.homeInsightsGap}>
+        {elimination}
+        {pool}
+      </View>
+    );
+  };
+
   const renderPickStats = () => {
-    if (!gw) return null;
+    if (!gw || !pickStatsWindowOpen) return null;
     if (!pickStats?.revealed && !pickStatsLoading) return null;
     if (!pickStatsLoading && (!pickStats || pickStats.teams.length === 0)) return null;
 
@@ -1367,151 +1742,40 @@ export default function LmsHomeScreen() {
           </Text>
         </View>
 
-        <View style={styles.pickStatsToggles}>
-          <View style={styles.pickStatsScopeRow}>
-            <View style={styles.pickStatsToggleRow}>
+        {renderHomeStatsScopeControls()}
+
+        <View style={styles.pickStatsToggleRow}>
+          {(
+            [
+              { id: 'pct' as const, label: '%', a11y: 'Show pick percentages' },
+              { id: 'count' as const, label: 'Count', a11y: 'Show pick counts' },
+              { id: 'game' as const, label: 'Game', a11y: 'Show picks by fixture' },
+            ] as const
+          ).map((opt) => {
+            const active = pickStatsDisplay === opt.id;
+            return (
               <Pressable
-                style={[
-                  styles.pickStatsChip,
-                  pickStatsScope === 'overall' && styles.pickStatsChipActive,
-                ]}
+                key={opt.id}
+                style={[styles.pickStatsChip, active && styles.pickStatsChipActive]}
                 onPress={() => {
-                  setPickStatsScope('overall');
-                  setPickStatsLeagueMenuOpen(false);
-                  setPickStatsExpandedTeams({});
+                  setPickStatsDisplay(opt.id);
+                  if (opt.id !== 'game') setPickStatsExpandedTeams({});
                 }}
                 accessibilityRole="button"
-                accessibilityState={{ selected: pickStatsScope === 'overall' }}
-                accessibilityLabel="Show picks across all leagues"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={opt.a11y}
               >
                 <Text
                   style={[
                     styles.pickStatsChipText,
-                    pickStatsScope === 'overall' && styles.pickStatsChipTextActive,
+                    active && styles.pickStatsChipTextActive,
                   ]}
                 >
-                  Overall
+                  {opt.label}
                 </Text>
               </Pressable>
-              <Pressable
-                style={[
-                  styles.pickStatsChip,
-                  pickStatsScope === 'league' && styles.pickStatsChipActive,
-                  comps.length === 0 && { opacity: 0.45 },
-                ]}
-                onPress={() => {
-                  if (!comps.length) return;
-                  const nextId = pickStatsCompetitionId ?? comps[0]?.competition_id ?? null;
-                  setPickStatsCompetitionId(nextId);
-                  setPickStatsScope('league');
-                  setPickStatsExpandedTeams({});
-                }}
-                accessibilityRole="button"
-                accessibilityState={{
-                  selected: pickStatsScope === 'league',
-                  disabled: comps.length === 0,
-                }}
-                accessibilityLabel="Show picks for one competition"
-              >
-                <Text
-                  style={[
-                    styles.pickStatsChipText,
-                    pickStatsScope === 'league' && styles.pickStatsChipTextActive,
-                  ]}
-                >
-                  League
-                </Text>
-              </Pressable>
-            </View>
-
-            {pickStatsScope === 'league' && comps.length > 0 ? (
-              <Pressable
-                style={styles.pickStatsDropdown}
-                onPress={() => setPickStatsLeagueMenuOpen((o) => !o)}
-                accessibilityRole="button"
-                accessibilityState={{ expanded: pickStatsLeagueMenuOpen }}
-                accessibilityLabel="Choose competition"
-              >
-                <Text style={styles.pickStatsDropdownText} numberOfLines={1}>
-                  {selectedLeague?.name ?? 'Select league'}
-                </Text>
-                <Ionicons
-                  name={pickStatsLeagueMenuOpen ? 'chevron-up' : 'chevron-down'}
-                  size={14}
-                  color={theme.colors.textMuted}
-                />
-              </Pressable>
-            ) : null}
-          </View>
-
-          {pickStatsScope === 'league' && pickStatsLeagueMenuOpen ? (
-            <View style={styles.pickStatsDropdownMenu}>
-              {comps.map((c, i) => {
-                const active = c.competition_id === pickStatsCompetitionId;
-                return (
-                  <Pressable
-                    key={c.competition_id}
-                    style={[
-                      styles.pickStatsDropdownItem,
-                      active && styles.pickStatsDropdownItemActive,
-                      i === comps.length - 1 && { borderBottomWidth: 0 },
-                    ]}
-                    onPress={() => {
-                      setPickStatsCompetitionId(c.competition_id);
-                      setPickStatsLeagueMenuOpen(false);
-                      setPickStatsExpandedTeams({});
-                    }}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
-                  >
-                    <Text
-                      style={[
-                        styles.pickStatsDropdownItemText,
-                        active && styles.pickStatsDropdownItemTextActive,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {c.name}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ) : null}
-
-          <View style={styles.pickStatsToggleRow}>
-            {(
-              [
-                { id: 'pct' as const, label: '%', a11y: 'Show pick percentages' },
-                { id: 'count' as const, label: 'Count', a11y: 'Show pick counts' },
-                { id: 'game' as const, label: 'Game', a11y: 'Show picks by fixture' },
-              ] as const
-            ).map((opt) => {
-              const active = pickStatsDisplay === opt.id;
-              return (
-                <Pressable
-                  key={opt.id}
-                  style={[styles.pickStatsChip, active && styles.pickStatsChipActive]}
-                  onPress={() => {
-                    setPickStatsDisplay(opt.id);
-                    if (opt.id !== 'game') setPickStatsExpandedTeams({});
-                  }}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={opt.a11y}
-                >
-                  <Text
-                    style={[
-                      styles.pickStatsChipText,
-                      active && styles.pickStatsChipTextActive,
-                    ]}
-                  >
-                    {opt.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+            );
+          })}
         </View>
 
         {pickStatsLoading && !pickStats ? (
@@ -1658,7 +1922,7 @@ export default function LmsHomeScreen() {
               </View>
             ) : null}
 
-            {renderPickStats()}
+            {pickStatsWindowOpen ? renderPickStats() : renderBetweenGameweeksInsights()}
 
             <View style={styles.deadlineAlertsWrap}>
               <LmsPushNotificationsCard />
