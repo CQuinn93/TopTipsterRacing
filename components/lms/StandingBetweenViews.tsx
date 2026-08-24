@@ -1,0 +1,261 @@
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@/contexts/ThemeContext';
+import { TeamColourChip } from '@/components/lms/TeamColourChip';
+import type { LmsCompletedPick, LmsParticipant, LmsTeam } from '@/lib/lms/api';
+
+type Props = {
+  players: LmsParticipant[];
+  picksByUserId: Map<string, LmsCompletedPick[]>;
+  onPressPlayer?: (userId: string) => void;
+};
+
+/** Between-GW standing: compact player cards (3 across) with used-team icons. */
+export function StandingPlayerCards({ players, picksByUserId, onPressPlayer }: Props) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
+
+  return (
+    <View style={styles.grid}>
+      {players.map((p) => {
+        const picks = [...(picksByUserId.get(p.user_id) ?? [])].sort(
+          (a, b) => a.gameweek_number - b.gameweek_number
+        );
+        const name = p.username?.trim() || p.user_id.slice(0, 8);
+        return (
+          <Pressable
+            key={p.id}
+            style={styles.card}
+            onPress={() => onPressPlayer?.(p.user_id)}
+            accessibilityRole="button"
+            accessibilityLabel={`${name}, ${picks.length} teams used`}
+          >
+            <Text style={styles.name} numberOfLines={1}>
+              {name}
+            </Text>
+            <Text style={styles.meta} numberOfLines={1}>
+              {p.status === 'winner'
+                ? 'Winner'
+                : p.status === 'eliminated'
+                  ? 'Out'
+                  : 'Alive'}
+              {picks.length ? ` · ${picks.length} used` : ''}
+            </Text>
+            {picks.length === 0 ? (
+              <Text style={styles.empty}>No picks yet</Text>
+            ) : (
+              <View style={styles.iconGrid}>
+                {picks.map((pick) => (
+                  <View key={`${pick.gameweek_id}-${pick.team_id}`} style={styles.iconCell}>
+                    <TeamColourChip
+                      shortName={pick.team?.short_name}
+                      name={pick.team?.name}
+                      slug={pick.team?.slug}
+                      size={22}
+                    />
+                    <Text style={styles.gwLabel}>GW{pick.gameweek_number}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+type PoolRowProps = {
+  player: LmsParticipant;
+  poolTeams: LmsTeam[];
+  picks: LmsCompletedPick[];
+  onPress?: () => void;
+};
+
+/** One compact pool strip: 5 cols, check/X overlays for W/L picks. */
+export function StandingPlayerPoolCard({ player, poolTeams, picks, onPress }: PoolRowProps) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
+  const pickByTeamId = new Map(picks.map((p) => [p.team_id, p]));
+  const name = player.username?.trim() || player.user_id.slice(0, 8);
+
+  return (
+    <Pressable
+      style={styles.poolCard}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${name} pool`}
+    >
+      <View style={styles.poolHead}>
+        <Text style={styles.poolName} numberOfLines={1}>
+          {name}
+        </Text>
+        <Text style={styles.poolMeta}>
+          {player.status === 'winner'
+            ? 'Winner'
+            : player.status === 'eliminated'
+              ? 'Out'
+              : 'Alive'}
+        </Text>
+      </View>
+      <View style={styles.poolGrid}>
+        {poolTeams.map((team) => {
+          const pick = pickByTeamId.get(team.id);
+          const won = pick?.result === 'correct';
+          const lost = pick?.result === 'incorrect';
+          return (
+            <View key={team.id} style={styles.poolCell}>
+              <View style={[styles.crestWrap, pick && styles.crestUsed]}>
+                <TeamColourChip
+                  shortName={team.short_name}
+                  name={team.name}
+                  slug={team.slug}
+                  size={22}
+                />
+                {won ? (
+                  <View style={[styles.mark, { backgroundColor: theme.colors.accent }]}>
+                    <Ionicons name="checkmark" size={10} color={theme.colors.white} />
+                  </View>
+                ) : null}
+                {lost ? (
+                  <View style={[styles.mark, { backgroundColor: theme.colors.error }]}>
+                    <Ionicons name="close" size={10} color={theme.colors.white} />
+                  </View>
+                ) : null}
+              </View>
+              <Text
+                style={[styles.poolAbbrev, pick && styles.poolAbbrevUsed]}
+                numberOfLines={1}
+              >
+                {team.short_name || team.name.slice(0, 3)}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    </Pressable>
+  );
+}
+
+function makeStyles(theme: ReturnType<typeof useTheme>) {
+  return StyleSheet.create({
+    grid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    card: {
+      width: '31.5%',
+      flexGrow: 1,
+      flexBasis: '30%',
+      maxWidth: '32.5%',
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      paddingHorizontal: 8,
+      paddingVertical: 8,
+      gap: 4,
+      minHeight: 96,
+    },
+    name: {
+      fontFamily: theme.fontFamily.baiSemiBold,
+      fontSize: 12,
+      color: theme.colors.text,
+    },
+    meta: {
+      fontFamily: theme.fontFamily.baiLight,
+      fontSize: 10,
+      color: theme.colors.textMuted,
+    },
+    empty: {
+      fontFamily: theme.fontFamily.baiLight,
+      fontSize: 10,
+      color: theme.colors.textMuted,
+      marginTop: 6,
+    },
+    iconGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 4,
+      marginTop: 4,
+    },
+    iconCell: {
+      width: '30%',
+      alignItems: 'center',
+      gap: 1,
+    },
+    gwLabel: {
+      fontFamily: theme.fontFamily.baiBold,
+      fontSize: 8,
+      color: theme.colors.accent,
+      letterSpacing: 0.2,
+    },
+    poolCard: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      paddingHorizontal: 8,
+      paddingVertical: 8,
+      gap: 6,
+    },
+    poolHead: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    poolName: {
+      flex: 1,
+      fontFamily: theme.fontFamily.baiSemiBold,
+      fontSize: 13,
+      color: theme.colors.text,
+    },
+    poolMeta: {
+      fontFamily: theme.fontFamily.baiLight,
+      fontSize: 11,
+      color: theme.colors.textMuted,
+    },
+    poolGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+    },
+    poolCell: {
+      width: '20%',
+      alignItems: 'center',
+      paddingVertical: 3,
+      gap: 2,
+    },
+    crestWrap: {
+      width: 22,
+      height: 22,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    crestUsed: {
+      opacity: 0.45,
+    },
+    mark: {
+      position: 'absolute',
+      right: -4,
+      bottom: -3,
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: theme.colors.surface,
+    },
+    poolAbbrev: {
+      fontFamily: theme.fontFamily.baiSemiBold,
+      fontSize: 9,
+      color: theme.colors.text,
+      letterSpacing: 0.2,
+    },
+    poolAbbrevUsed: {
+      color: theme.colors.textMuted,
+    },
+  });
+}

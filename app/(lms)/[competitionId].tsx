@@ -22,6 +22,10 @@ import { TeamColourChip } from '@/components/lms/TeamColourChip';
 // Crest images disabled (trademark risk) — restore TeamCrest if logo rights obtained.
 // import { TeamCrest } from '@/components/lms/TeamCrest';
 import { TeamFormDots, SelectionTeamFormDots } from '@/components/lms/TeamFormDots';
+import {
+  StandingPlayerCards,
+  StandingPlayerPoolCard,
+} from '@/components/lms/StandingBetweenViews';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import {
   lmsAdminSetCompetitionTeam,
@@ -54,6 +58,7 @@ import {
   lmsListRecentFinishedFixtures,
   lmsListTeams,
   lmsListUsedTeamIds,
+  lmsGetStandingBoard,
   lmsPickErrorMessage,
   lmsRejectJoinRequest,
   lmsSubmitPick,
@@ -84,6 +89,7 @@ import {
 } from '@/lib/lms/sessionCache';
 
 type TabKey = 'gameweeks' | 'selection' | 'leaderboard' | 'admin';
+type StandingViewMode = 'list' | 'cards' | 'pools';
 
 /** Manual refresh (header / pull) may hit the DB at most once per minute. */
 const LMS_MANUAL_REFRESH_COOLDOWN_MS = 60_000;
@@ -122,6 +128,11 @@ export default function LmsCompetitionDashboard() {
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [standingSearch, setStandingSearch] = useState('');
   const [standingPickSort, setStandingPickSort] = useState<'alpha' | 'popular'>('alpha');
+  const [standingViewMode, setStandingViewMode] = useState<StandingViewMode>('list');
+  const [standingBoardPicks, setStandingBoardPicks] = useState<LmsCompletedPick[]>([]);
+  const [standingBoardPool, setStandingBoardPool] = useState<LmsTeam[]>([]);
+  const [standingBoardLoading, setStandingBoardLoading] = useState(false);
+  const standingBoardLoadedRef = useRef(false);
   const [leaderboard, setLeaderboard] = useState<LmsParticipant[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -541,6 +552,9 @@ export default function LmsCompetitionDashboard() {
     historyLoadedUsersRef.current = new Set();
     setHistoryPicks([]);
     setExpandedUserId(null);
+    standingBoardLoadedRef.current = false;
+    setStandingBoardPicks([]);
+    setStandingBoardPool([]);
 
     await loadLeaderboardExtrasRef.current(gw, { force: true });
 
@@ -1073,6 +1087,82 @@ export default function LmsCompetitionDashboard() {
     const firstKo = Math.min(...pickGwFixtures.map((f) => new Date(f.kickoff_at).getTime()));
     return Number.isFinite(firstKo) && firstKo <= Date.now();
   }, [pickGwFixtures]);
+
+  /** After settle / before the open GW goes live — alternate Standing layouts. */
+  const standingBetweenWeeks = !currentGw || currentGw.status === 'upcoming';
+
+  useEffect(() => {
+    if (tab !== 'leaderboard' || !standingBetweenWeeks || !competitionId) return;
+    if (standingBoardLoadedRef.current) return;
+    let cancelled = false;
+    setStandingBoardLoading(true);
+    void lmsGetStandingBoard(competitionId, competitionRef.current)
+      .then((board) => {
+        if (cancelled) return;
+        standingBoardLoadedRef.current = true;
+        setStandingBoardPicks(board.picks);
+        setStandingBoardPool(board.pool_teams);
+        setHistoryPicks((prev) => {
+          // Seed per-user drawers without extra fetches.
+          const byUser = new Map<string, LmsCompletedPick[]>();
+          for (const p of board.picks) {
+            const list = byUser.get(p.user_id) ?? [];
+            list.push(p);
+            byUser.set(p.user_id, list);
+          }
+          for (const userId of byUser.keys()) historyLoadedUsersRef.current.add(userId);
+          const others = prev.filter((h) => !byUser.has(h.user_id));
+          return [...others, ...board.picks];
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStandingBoardPicks([]);
+          setStandingBoardPool([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setStandingBoardLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, standingBetweenWeeks, competitionId]);
+
+  useEffect(() => {
+    if (standingBetweenWeeks) {
+      setStandingViewMode((prev) => (prev === 'list' ? 'cards' : prev));
+    } else {
+      setStandingViewMode('list');
+    }
+  }, [standingBetweenWeeks]);
+
+  const standingBoardByUserId = useMemo(() => {
+    const map = new Map<string, LmsCompletedPick[]>();
+    for (const p of standingBoardPicks) {
+      const list = map.get(p.user_id) ?? [];
+      list.push(p);
+      map.set(p.user_id, list);
+    }
+    return map;
+  }, [standingBoardPicks]);
+
+  const standingBetweenPlayers = useMemo(() => {
+    const q = standingSearch.trim().toLowerCase();
+    const matches = (p: LmsParticipant) => {
+      if (!q) return true;
+      const name = (p.username || '').toLowerCase();
+      return name.includes(q) || p.user_id.slice(0, 8).toLowerCase().includes(q);
+    };
+    return [...leaderboard]
+      .filter(matches)
+      .sort((a, b) => {
+        const rank = (s: string) => (s === 'winner' ? 0 : s === 'active' ? 1 : 2);
+        const d = rank(a.status) - rank(b.status);
+        if (d !== 0) return d;
+        return (a.username || a.user_id).localeCompare(b.username || b.user_id);
+      });
+  }, [leaderboard, standingSearch]);
 
   const pickByUserId = useMemo(() => {
     const map = new Map<string, LmsPick>();
@@ -2066,6 +2156,15 @@ export default function LmsCompetitionDashboard() {
         standingSortChipTextActive: {
           color: theme.colors.accent,
           fontFamily: theme.fontFamily.baiSemiBold,
+        },
+        standingViewRow: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 6,
+          marginBottom: 4,
+        },
+        standingBetweenList: {
+          gap: 8,
         },
         standingPickGroup: {
           marginBottom: theme.spacing.sm,
@@ -3321,13 +3420,15 @@ export default function LmsCompetitionDashboard() {
             {tab === 'leaderboard' ? (
               <>
                 <Text style={styles.sectionIntro}>
-                  Still standing wins. During the gameweek, players are grouped under their pick.
-                  Finished fixtures show W / D / L beside the team; players whose pick won get a
-                  Through mark. Switch between A–Z and most picked. Tap a player for their used teams.
+                  {standingBetweenWeeks
+                    ? 'Between gameweeks — browse players as cards or pool grids to see used teams and what’s still available. List view keeps the classic standing.'
+                    : 'Still standing wins. During the gameweek, players are grouped under their pick. Finished fixtures show W / D / L beside the team; players whose pick won get a Through mark. Switch between A–Z and most picked. Tap a player for their used teams.'}
                   {currentGw
                     ? picksRevealed
                       ? ` Showing GW${currentGw.number} picks.`
-                      : ` GW${currentGw.number} picks stay hidden until the first kickoff.`
+                      : standingBetweenWeeks
+                        ? ` Next up: GW${currentGw.number}.`
+                        : ` GW${currentGw.number} picks stay hidden until the first kickoff.`
                     : ''}
                 </Text>
                 <View style={styles.standingSearchRow}>
@@ -3354,7 +3455,39 @@ export default function LmsCompetitionDashboard() {
                     </Pressable>
                   ) : null}
                 </View>
-                {picksRevealed ? (
+                {standingBetweenWeeks ? (
+                  <View style={styles.standingViewRow}>
+                    {(
+                      [
+                        { key: 'cards' as const, label: 'Cards', a11y: 'Player cards with used teams' },
+                        { key: 'pools' as const, label: 'Pools', a11y: 'Player pool grids' },
+                        { key: 'list' as const, label: 'List', a11y: 'Classic standing list' },
+                      ] as const
+                    ).map((opt) => {
+                      const active = standingViewMode === opt.key;
+                      return (
+                        <Pressable
+                          key={opt.key}
+                          style={[styles.standingSortChip, active && styles.standingSortChipActive]}
+                          onPress={() => setStandingViewMode(opt.key)}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: active }}
+                          accessibilityLabel={opt.a11y}
+                        >
+                          <Text
+                            style={[
+                              styles.standingSortChipText,
+                              active && styles.standingSortChipTextActive,
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ) : null}
+                {!standingBetweenWeeks && picksRevealed ? (
                   <View style={styles.standingSortRow}>
                     {(
                       [
@@ -3387,6 +3520,37 @@ export default function LmsCompetitionDashboard() {
                 ) : null}
                 {leaderboard.length === 0 ? (
                   <Text style={styles.muted}>No players in this competition yet.</Text>
+                ) : standingBetweenWeeks &&
+                  (standingViewMode === 'cards' || standingViewMode === 'pools') ? (
+                  standingBoardLoading && standingBoardPool.length === 0 ? (
+                    <ActivityIndicator color={theme.colors.accent} style={{ marginTop: 16 }} />
+                  ) : standingBetweenPlayers.length === 0 ? (
+                    <Text style={styles.muted}>
+                      No players match “{standingSearch.trim()}”.
+                    </Text>
+                  ) : standingViewMode === 'cards' ? (
+                    <StandingPlayerCards
+                      players={standingBetweenPlayers}
+                      picksByUserId={standingBoardByUserId}
+                      onPressPlayer={(id) =>
+                        setExpandedUserId((prev) => (prev === id ? null : id))
+                      }
+                    />
+                  ) : (
+                    <View style={styles.standingBetweenList}>
+                      {standingBetweenPlayers.map((p) => (
+                        <StandingPlayerPoolCard
+                          key={p.id}
+                          player={p}
+                          poolTeams={standingBoardPool}
+                          picks={standingBoardByUserId.get(p.user_id) ?? []}
+                          onPress={() =>
+                            setExpandedUserId((prev) => (prev === p.user_id ? null : p.user_id))
+                          }
+                        />
+                      ))}
+                    </View>
+                  )
                 ) : standingSections.matchCount === 0 ? (
                   <Text style={styles.muted}>No players match “{standingSearch.trim()}”.</Text>
                 ) : (

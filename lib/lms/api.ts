@@ -506,6 +506,73 @@ export async function lmsAdminDeleteCompetition(
   };
 }
 
+export type LmsStandingBoard = {
+  success: boolean;
+  competition_id?: string;
+  pool_teams: LmsTeam[];
+  picks: LmsCompletedPick[];
+  error?: string;
+};
+
+/** Between-gameweek Standing: pool + all players’ completed picks in one RPC (with client fallback). */
+export async function lmsGetStandingBoard(
+  competitionId: string,
+  preloadedCompetition?: LmsCompetition | null
+): Promise<LmsStandingBoard> {
+  try {
+    const { data, error } = await db.rpc('lms_get_standing_board', {
+      p_competition_id: competitionId,
+    });
+    if (!error && data) {
+      const raw = data as {
+        success?: boolean;
+        competition_id?: string;
+        error?: string;
+        pool_teams?: LmsTeam[];
+        picks?: Array<LmsCompletedPick & { team?: LmsTeam | null }>;
+      };
+      if (raw.success !== false) {
+        return {
+          success: true,
+          competition_id: raw.competition_id ?? competitionId,
+          pool_teams: (raw.pool_teams ?? []) as LmsTeam[],
+          picks: (raw.picks ?? []).map((p) => ({
+            user_id: p.user_id,
+            gameweek_id: p.gameweek_id,
+            gameweek_number: Number(p.gameweek_number ?? 0),
+            team_id: p.team_id,
+            result: p.result,
+            team: p.team ?? undefined,
+          })),
+          error: raw.error,
+        };
+      }
+    }
+  } catch {
+    /* fall through to composed queries if RPC not applied yet */
+  }
+
+  const [picks, poolIds, allTeams] = await Promise.all([
+    lmsListCompletedPicks(competitionId, preloadedCompetition),
+    lmsListCompetitionTeamIds(competitionId),
+    lmsListTeams(),
+  ]);
+  const byId = new Map(allTeams.map((t) => [t.id, t]));
+  return {
+    success: true,
+    competition_id: competitionId,
+    pool_teams: poolIds
+      .map((id) => byId.get(id))
+      .filter((t): t is LmsTeam => !!t)
+      .sort((a, b) =>
+        (a.short_name || a.name).localeCompare(b.short_name || b.name, undefined, {
+          sensitivity: 'base',
+        })
+      ),
+    picks,
+  };
+}
+
 /** Picks from completed gameweeks for the whole competition (for leaderboard history drawers). */
 export async function lmsListCompletedPicks(
   competitionId: string,
