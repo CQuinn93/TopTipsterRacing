@@ -116,7 +116,8 @@ Then **CREATE** (or **Save**).
   `https://api.github.com/repos/OWNER/REPO/actions/workflows/sync-lms-football.yml/dispatches`  
   (or the numeric workflow ID once the workflow exists on GitHub).
 - **Enable job:** On.
-- **Execution schedule:** **Custom** crontab, e.g. `0 */6 * * *` (every 6 hours UTC). On match days you can run more often, e.g. `0 12,15,18,21 * * *`.
+- **Execution schedule:** **Custom** crontab, e.g. `0 */6 * * *` (every 6 hours UTC) off matchdays.
+  On live match days prefer something like `*/15 11-22 * * 0,6` (every 15 min Sat/Sun afternoon) rather than every 10 minutes all day — the sync touches Supabase heavily and drives API gateway usage.
 - **Schedule timezone:** UTC (or adjust for Europe/Dublin).
 
 **ADVANCED tab**
@@ -190,7 +191,7 @@ Requires GitHub Secrets **`SUPABASE_URL`** and **`SUPABASE_SERVICE_KEY`**.
 | Update race results     | update-race-results.yml       | Every 10 min, 12:00–19:59   |
 | Pull races              | pull-races.yml                | 17:00 and 18:00 daily       |
 | Remove old races        | remove-old-races.yml          | 18:00 daily                 |
-| Sync LMS football data  | sync-lms-football.yml         | Every 6 hours (or as needed)|
+| Sync LMS football data  | sync-lms-football.yml         | Every 6 hours; ~15 min on matchdays only |
 | LMS deadline reminders  | lms-deadline-reminders.yml    | Every 15 minutes            |
 | LMS auto-assign picks   | lms-auto-assign-picks.yml     | Every 15 minutes (or manual)|
 - **COMMON:** Title, URL (GitHub API dispatch URL), Schedule.

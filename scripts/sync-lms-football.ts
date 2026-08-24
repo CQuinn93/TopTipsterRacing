@@ -313,12 +313,21 @@ async function main() {
     .select('id, number, status, starts_at, deadline_at')
     .eq('season', LMS_SEASON);
   if (gwErr) throw gwErr;
-  const gwByNumber = new Map<number, { id: string; number: number; status: string }>();
+  type GwRow = {
+    id: string;
+    number: number;
+    status: string;
+    starts_at: string | null;
+    deadline_at: string | null;
+  };
+  const gwByNumber = new Map<number, GwRow>();
   for (const g of existingGws ?? []) {
     gwByNumber.set(g.number as number, {
       id: g.id as string,
       number: g.number as number,
       status: g.status as string,
+      starts_at: (g.starts_at as string | null) ?? null,
+      deadline_at: (g.deadline_at as string | null) ?? null,
     });
   }
 
@@ -359,6 +368,8 @@ async function main() {
           .eq('id', existing.id);
         if (error) throw error;
         existing.status = status;
+        existing.starts_at = startsAt;
+        existing.deadline_at = deadlineAt;
       }
     } else {
       // First sync of this gameweek → create the row
@@ -366,24 +377,54 @@ async function main() {
         .from('lms_gameweeks')
         .insert({
           season: LMS_SEASON,
-          number: n,
           starts_at: startsAt,
           deadline_at: deadlineAt,
+          number: n,
           status: 'upcoming',
         })
-        .select('id, number, status')
+        .select('id, number, status, starts_at, deadline_at')
         .single();
       if (error) throw error;
       gwByNumber.set(n, {
         id: data.id as string,
         number: data.number as number,
         status: data.status as string,
+        starts_at: (data.starts_at as string | null) ?? startsAt,
+        deadline_at: (data.deadline_at as string | null) ?? deadlineAt,
       });
     }
   }
 
-  // Upsert every match as an `lms_fixtures` row (kick-off, status, final score)
+  // One read of existing fixtures → skip unchanged rows (biggest gateway saver)
+  const { data: existingFixtures, error: existingFxErr } = await supabase
+    .from('lms_fixtures')
+    .select('id, external_id, gameweek_id, home_team_id, away_team_id, kickoff_at, status, home_goals, away_goals');
+  if (existingFxErr) throw existingFxErr;
+
+  type ExistingFx = {
+    id: string;
+    external_id: number | null;
+    gameweek_id: string;
+    home_team_id: string;
+    away_team_id: string;
+    kickoff_at: string;
+    status: string;
+    home_goals: number | null;
+    away_goals: number | null;
+  };
+  const fxByExternal = new Map<number, ExistingFx>();
+  const fxByPair = new Map<string, ExistingFx>();
+  for (const fx of (existingFixtures ?? []) as ExistingFx[]) {
+    if (fx.external_id != null) fxByExternal.set(fx.external_id, fx);
+    fxByPair.set(`${fx.gameweek_id}:${fx.home_team_id}:${fx.away_team_id}`, fx);
+  }
+
+  const sameGoals = (a: number | null, b: number | null) =>
+    (a == null && b == null) || a === b;
+
+  // Upsert only matches that changed (or are new)
   let fixturesUpserted = 0;
+  let fixturesUnchanged = 0;
   let fixturesSkipped = 0;
   for (const m of matches) {
     const md = m.matchday as number;
@@ -418,61 +459,76 @@ async function main() {
       external_id: m.id,
     };
 
-    const { error } = await supabase.from('lms_fixtures').upsert(row, {
-      onConflict: 'external_id',
-      ignoreDuplicates: false,
-    });
-    if (error) {
-      // Fallback if unique index is partial and upsert target differs
-      const { data: existingFx } = await supabase
-        .from('lms_fixtures')
-        .select('id')
-        .eq('external_id', m.id)
-        .maybeSingle();
-      if (existingFx?.id) {
-        const { error: updErr } = await supabase.from('lms_fixtures').update(row).eq('id', existingFx.id);
-        if (updErr) throw updErr;
-      } else {
-        const { data: byPair } = await supabase
-          .from('lms_fixtures')
-          .select('id')
-          .eq('gameweek_id', gw.id)
-          .eq('home_team_id', homeId)
-          .eq('away_team_id', awayId)
-          .maybeSingle();
-        if (byPair?.id) {
-          const { error: updErr } = await supabase.from('lms_fixtures').update(row).eq('id', byPair.id);
-          if (updErr) throw updErr;
-        } else {
-          const { error: insErr } = await supabase.from('lms_fixtures').insert(row);
-          if (insErr) throw insErr;
-        }
+    const existingFx =
+      fxByExternal.get(m.id) ?? fxByPair.get(`${gw.id}:${homeId}:${awayId}`);
+
+    if (
+      existingFx &&
+      existingFx.gameweek_id === row.gameweek_id &&
+      existingFx.home_team_id === row.home_team_id &&
+      existingFx.away_team_id === row.away_team_id &&
+      existingFx.kickoff_at === row.kickoff_at &&
+      existingFx.status === row.status &&
+      sameGoals(existingFx.home_goals, row.home_goals) &&
+      sameGoals(existingFx.away_goals, row.away_goals) &&
+      existingFx.external_id === row.external_id
+    ) {
+      fixturesUnchanged += 1;
+      continue;
+    }
+
+    if (existingFx) {
+      const { error: updErr } = await supabase.from('lms_fixtures').update(row).eq('id', existingFx.id);
+      if (updErr) throw updErr;
+    } else {
+      const { error } = await supabase.from('lms_fixtures').upsert(row, {
+        onConflict: 'external_id',
+        ignoreDuplicates: false,
+      });
+      if (error) {
+        const { error: insErr } = await supabase.from('lms_fixtures').insert(row);
+        if (insErr) throw insErr;
       }
     }
     fixturesUpserted += 1;
   }
-  console.log(`[lms-sync] Fixtures upserted/updated: ${fixturesUpserted}; skipped: ${fixturesSkipped}`);
+  console.log(
+    `[lms-sync] Fixtures written: ${fixturesUpserted}; unchanged: ${fixturesUnchanged}; skipped: ${fixturesSkipped}`
+  );
 
   // ---------------------------------------------------------------------------
   // Step 3: After deadline → auto-assign missed picks
   // Step 3b: Progressive eliminate when a pick's fixture has finished
   // Step 4: When all included fixtures are finished → settle the gameweek
+  // Only touch GWs that are live / past deadline — not all 38 upcoming weeks.
   // ---------------------------------------------------------------------------
   let autoAssigned = 0;
   let progressiveScored = 0;
   let progressiveEliminated = 0;
   let settled = 0;
+  let gwsProcessed = 0;
+  let gwsSkippedUpcoming = 0;
+  const nowMs = Date.now();
+
   for (const gw of gwByNumber.values()) {
     if (gw.status === 'complete') continue;
 
+    const deadlineMs = gw.deadline_at ? new Date(gw.deadline_at).getTime() : NaN;
+    const startsMs = gw.starts_at ? new Date(gw.starts_at).getTime() : NaN;
+    const pastDeadline = Number.isFinite(deadlineMs) && nowMs >= deadlineMs;
+    const startedOrLive =
+      gw.status === 'live' || (Number.isFinite(startsMs) && nowMs >= startsMs);
+
+    // Future upcoming weeks: nothing to auto-assign / apply / settle yet
+    if (!pastDeadline && !startedOrLive) {
+      gwsSkippedUpcoming += 1;
+      continue;
+    }
+
+    gwsProcessed += 1;
+
     // Auto-assign only after the pick deadline has passed
-    const { data: gwRow } = await supabase
-      .from('lms_gameweeks')
-      .select('deadline_at')
-      .eq('id', gw.id)
-      .maybeSingle();
-    const deadlineMs = gwRow?.deadline_at ? new Date(gwRow.deadline_at as string).getTime() : NaN;
-    if (Number.isFinite(deadlineMs) && Date.now() >= deadlineMs) {
+    if (pastDeadline) {
       const { data: assignRes, error: assignErr } = await supabase.rpc(
         'lms_auto_assign_missed_picks',
         { p_gameweek_id: gw.id }
@@ -509,23 +565,16 @@ async function main() {
       }
     }
 
-    // Settle only when every non-excluded fixture in this GW is finished
-    const { count, error: cntErr } = await supabase
+    // One fixture status read (was two HEAD count requests per GW)
+    const { data: fxStatuses, error: fxStatusErr } = await supabase
       .from('lms_fixtures')
-      .select('id', { count: 'exact', head: true })
+      .select('status')
       .eq('gameweek_id', gw.id)
       .eq('excluded_from_lms', false);
-    if (cntErr) throw cntErr;
-    if (!count || count < 1) continue;
-
-    const { count: unfinished, error: unfinishedErr } = await supabase
-      .from('lms_fixtures')
-      .select('id', { count: 'exact', head: true })
-      .eq('gameweek_id', gw.id)
-      .eq('excluded_from_lms', false)
-      .neq('status', 'finished');
-    if (unfinishedErr) throw unfinishedErr;
-    if ((unfinished ?? 0) > 0) continue;
+    if (fxStatusErr) throw fxStatusErr;
+    const statuses = (fxStatuses ?? []) as { status: string }[];
+    if (statuses.length < 1) continue;
+    if (statuses.some((f) => f.status !== 'finished')) continue;
 
     // Winner/rollover, no-picks, set GW status = complete
     const { data: settleRes, error: settleErr } = await supabase.rpc('lms_settle_gameweek_internal', {
@@ -549,7 +598,10 @@ async function main() {
     teamsLinked,
     teamsSkipped,
     fixturesUpserted,
+    fixturesUnchanged,
     fixturesSkipped,
+    gwsProcessed,
+    gwsSkippedUpcoming,
     autoAssigned,
     progressiveScored,
     progressiveEliminated,
