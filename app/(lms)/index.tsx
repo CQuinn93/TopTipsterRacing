@@ -24,6 +24,7 @@ import {
   lmsGetEliminationSummary,
   lmsGetGameweekPickStats,
   lmsGetHome,
+  lmsGetUserPoolForCompetition,
   lmsJoinErrorMessage,
   lmsListGameweeks,
   lmsListParticipants,
@@ -34,6 +35,7 @@ import {
   type LmsFixture,
   type LmsGameweek,
   type LmsGameweekPickStats,
+  type LmsUserPoolTeam,
   type LmsPendingJoin,
   type LmsPickStatOutcome,
   type LmsTeam,
@@ -44,6 +46,8 @@ import { LeagueTablePanel } from '@/components/lms/LeagueTablePanel';
 import { lmsDisplayTeamName } from '@/lib/lms/teamColours';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import { LmsPushNotificationsCard } from '@/components/lms/LmsPushNotificationsCard';
+import { SurvivalDonut } from '@/components/lms/SurvivalDonut';
+import { LmsUserPoolGrid } from '@/components/lms/LmsUserPoolGrid';
 
 type HomeTab = 'competitions' | 'join' | 'table';
 
@@ -86,6 +90,10 @@ export default function LmsHomeScreen() {
   );
   const [eliminationSummary, setEliminationSummary] = useState<LmsEliminationSummary | null>(null);
   const [eliminationLoading, setEliminationLoading] = useState(false);
+  const [poolCompetitionId, setPoolCompetitionId] = useState<string | null>(null);
+  const [poolTeams, setPoolTeams] = useState<LmsUserPoolTeam[]>([]);
+  const [poolLoading, setPoolLoading] = useState(false);
+  const [poolMenuOpen, setPoolMenuOpen] = useState(false);
   const [isStaff, setIsStaff] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -249,6 +257,43 @@ export default function LmsHomeScreen() {
       cancelled = true;
     };
   }, [gw?.id, pickStatsWindowOpen, pickStatsScope, pickStatsCompetitionId]);
+
+  useEffect(() => {
+    if (poolCompetitionId != null && !comps.some((c) => c.competition_id === poolCompetitionId)) {
+      setPoolCompetitionId(comps[0]?.competition_id ?? null);
+      setPoolMenuOpen(false);
+    } else if (poolCompetitionId == null && comps.length > 0) {
+      setPoolCompetitionId(comps[0].competition_id);
+    }
+  }, [comps, poolCompetitionId]);
+
+  /** Your pool grid for one competition (between / after gameweeks). */
+  useEffect(() => {
+    if (!userId || !poolCompetitionId || pickStatsWindowOpen) {
+      setPoolTeams([]);
+      setPoolLoading(false);
+      return;
+    }
+    const comp = comps.find((c) => c.competition_id === poolCompetitionId);
+    let cancelled = false;
+    setPoolLoading(true);
+    void lmsGetUserPoolForCompetition(poolCompetitionId, userId, {
+      currentGameweekId: gw?.id ?? null,
+      currentGameweekNumber: comp?.currentGameweekNumber ?? gw?.number ?? null,
+    })
+      .then((rows) => {
+        if (!cancelled) setPoolTeams(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setPoolTeams([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPoolLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, poolCompetitionId, pickStatsWindowOpen, comps, gw?.id, gw?.number]);
 
   /** Drop a stale competition filter if the user left that league. */
   useEffect(() => {
@@ -1144,6 +1189,35 @@ export default function LmsHomeScreen() {
           color: theme.colors.textMuted,
           marginTop: 4,
         },
+        donutScroll: {
+          marginHorizontal: -4,
+        },
+        donutScrollContent: {
+          flexDirection: 'row',
+          gap: 16,
+          paddingHorizontal: 4,
+          paddingVertical: 4,
+        },
+        donutCell: {
+          alignItems: 'center',
+          gap: 4,
+          minWidth: 72,
+        },
+        donutGwLabel: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          color: theme.colors.textSecondary,
+          textTransform: 'uppercase',
+          letterSpacing: 0.4,
+        },
+        donutOutLabel: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 10,
+          color: theme.colors.textMuted,
+        },
+        homeInsightsGap: {
+          gap: 10,
+        },
         pickGameFixture: {
           borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: theme.colors.border,
@@ -1470,7 +1544,7 @@ export default function LmsHomeScreen() {
     return (
       <View style={styles.pickStatsCard}>
         <View style={styles.pickStatsHead}>
-          <Text style={styles.pickStatsTitle}>Eliminations</Text>
+          <Text style={styles.pickStatsTitle}>Survival rate</Text>
           <Text style={styles.pickStatsMeta}>
             {eliminationLoading ? 'Loading…' : scopeLabel}
           </Text>
@@ -1482,20 +1556,32 @@ export default function LmsHomeScreen() {
           <ActivityIndicator color={theme.colors.accent} style={{ marginVertical: 8 }} />
         ) : (
           <>
-            {rows.map((row, i) => (
-              <View
-                key={row.gameweek_id}
-                style={[
-                  styles.eliminationRow,
-                  i === rows.length - 1 && styles.eliminationRowLast,
-                ]}
-              >
-                <Text style={styles.eliminationGw}>Gameweek {row.gameweek_number}</Text>
-                <Text style={styles.eliminationCount}>
-                  {row.eliminated_count} out
-                </Text>
-              </View>
-            ))}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.donutScroll}
+              contentContainerStyle={styles.donutScrollContent}
+            >
+              {rows.map((row) => {
+                const survivalPct =
+                  row.survival_pct ??
+                  (row.entrants_count > 0
+                    ? Math.round(
+                        ((row.entrants_count - row.eliminated_count) / row.entrants_count) *
+                          100
+                      )
+                    : 100);
+                return (
+                  <View key={row.gameweek_id} style={styles.donutCell}>
+                    <Text style={styles.donutGwLabel}>GW{row.gameweek_number}</Text>
+                    <SurvivalDonut survivalPct={survivalPct} size={58} strokeWidth={7} />
+                    <Text style={styles.donutOutLabel}>
+                      {row.eliminated_count} out
+                    </Text>
+                  </View>
+                );
+              })}
+            </ScrollView>
             {stillStanding > 0 ? (
               <Text style={styles.eliminationFooter}>
                 {stillStanding} still standing · {scopeLabel}
@@ -1503,6 +1589,44 @@ export default function LmsHomeScreen() {
             ) : null}
           </>
         )}
+      </View>
+    );
+  };
+
+  const renderUserPool = () => {
+    if (!gw || pickStatsWindowOpen || comps.length === 0 || !poolCompetitionId) return null;
+    const selected = comps.find((c) => c.competition_id === poolCompetitionId);
+    if (!selected) return null;
+
+    return (
+      <LmsUserPoolGrid
+        competitionName={selected.name}
+        menuOpen={poolMenuOpen}
+        onToggleMenu={() => setPoolMenuOpen((o) => !o)}
+        competitions={comps.map((c) => ({
+          competition_id: c.competition_id,
+          name: c.name,
+        }))}
+        selectedCompetitionId={poolCompetitionId}
+        onSelectCompetition={(id) => {
+          setPoolCompetitionId(id);
+          setPoolMenuOpen(false);
+        }}
+        teams={poolTeams}
+        loading={poolLoading}
+      />
+    );
+  };
+
+  const renderBetweenGameweeksInsights = () => {
+    if (!gw || pickStatsWindowOpen) return null;
+    const elimination = renderEliminationSummary();
+    const pool = renderUserPool();
+    if (!elimination && !pool) return null;
+    return (
+      <View style={styles.homeInsightsGap}>
+        {elimination}
+        {pool}
       </View>
     );
   };
@@ -1798,7 +1922,7 @@ export default function LmsHomeScreen() {
               </View>
             ) : null}
 
-            {pickStatsWindowOpen ? renderPickStats() : renderEliminationSummary()}
+            {pickStatsWindowOpen ? renderPickStats() : renderBetweenGameweeksInsights()}
 
             <View style={styles.deadlineAlertsWrap}>
               <LmsPushNotificationsCard />

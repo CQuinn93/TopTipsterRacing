@@ -939,6 +939,8 @@ export type LmsEliminationSummaryGameweek = {
   gameweek_id: string;
   gameweek_number: number;
   eliminated_count: number;
+  entrants_count: number;
+  survival_pct: number;
 };
 
 export type LmsEliminationSummary = {
@@ -970,9 +972,66 @@ export async function lmsGetEliminationSummary(
       gameweek_id: g.gameweek_id,
       gameweek_number: Number(g.gameweek_number ?? 0),
       eliminated_count: Number(g.eliminated_count ?? 0),
+      entrants_count: Number(g.entrants_count ?? 0),
+      survival_pct: Number(g.survival_pct ?? 100),
     })),
     error: raw.error,
   };
+}
+
+export type LmsUserPoolTeam = {
+  team_id: string;
+  team: LmsTeam;
+  used: boolean;
+  gameweek_number: number | null;
+};
+
+/** Competition pool teams for one player — used teams greyed with GW label. */
+export async function lmsGetUserPoolForCompetition(
+  competitionId: string,
+  userId: string,
+  opts?: {
+    currentGameweekId?: string | null;
+    currentGameweekNumber?: number | null;
+  }
+): Promise<LmsUserPoolTeam[]> {
+  const [poolIds, allTeams, completedPicks, currentPick] = await Promise.all([
+    lmsListCompetitionTeamIds(competitionId),
+    lmsListTeams(),
+    lmsListCompletedPicksForUser(competitionId, userId),
+    opts?.currentGameweekId
+      ? lmsGetMyPick(competitionId, userId, opts.currentGameweekId)
+      : Promise.resolve(null),
+  ]);
+
+  const teamById = new Map(allTeams.map((t) => [t.id, t]));
+  const usedGwByTeamId = new Map<string, number>();
+
+  for (const p of completedPicks) {
+    usedGwByTeamId.set(p.team_id, p.gameweek_number);
+  }
+  if (currentPick?.team_id && opts?.currentGameweekNumber != null) {
+    usedGwByTeamId.set(currentPick.team_id, opts.currentGameweekNumber);
+  }
+
+  return poolIds
+    .map((id) => {
+      const team = teamById.get(id);
+      if (!team) return null;
+      const gwNum = usedGwByTeamId.get(id) ?? null;
+      return {
+        team_id: id,
+        team,
+        used: gwNum != null,
+        gameweek_number: gwNum,
+      };
+    })
+    .filter((row): row is LmsUserPoolTeam => row != null)
+    .sort((a, b) =>
+      (a.team.short_name || a.team.name).localeCompare(b.team.short_name || b.team.name, undefined, {
+        sensitivity: 'base',
+      })
+    );
 }
 
 /** All picks for a competition gameweek (same-comp members can read via RLS). */
