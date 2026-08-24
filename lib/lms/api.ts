@@ -995,7 +995,17 @@ export async function lmsGetEliminationSummary(
     p_competition_id: competitionId ?? null,
   });
   if (error) throw error;
-  const raw = (data ?? {}) as LmsEliminationSummary & { gameweeks?: LmsEliminationSummaryGameweek[] };
+  return mapEliminationSummary(data, season, competitionId);
+}
+
+function mapEliminationSummary(
+  data: unknown,
+  season: string,
+  competitionId?: string | null
+): LmsEliminationSummary {
+  const raw = (data ?? {}) as LmsEliminationSummary & {
+    gameweeks?: LmsEliminationSummaryGameweek[];
+  };
   return {
     success: !!raw.success,
     season: raw.season ?? season,
@@ -1019,7 +1029,92 @@ export type LmsUserPoolTeam = {
   gameweek_number: number | null;
 };
 
-/** Competition pool teams for one player — used teams greyed with GW label. */
+export type LmsHomeInsights = {
+  success: boolean;
+  season: string;
+  eliminations: {
+    overall: LmsEliminationSummary | null;
+    byCompetition: Record<string, LmsEliminationSummary>;
+  };
+  /** competition_id → pool teams (used + available). */
+  pools: Record<string, LmsUserPoolTeam[]>;
+  error?: string;
+};
+
+function mapPoolTeamRow(row: {
+  team_id?: string;
+  name?: string;
+  short_name?: string;
+  slug?: string;
+  used?: boolean;
+  gameweek_number?: number | null;
+}): LmsUserPoolTeam | null {
+  if (!row.team_id) return null;
+  return {
+    team_id: row.team_id,
+    team: {
+      id: row.team_id,
+      name: row.name ?? '',
+      short_name: row.short_name ?? '',
+      slug: row.slug ?? '',
+    } as LmsTeam,
+    used: !!row.used,
+    gameweek_number: row.gameweek_number != null ? Number(row.gameweek_number) : null,
+  };
+}
+
+/** One RPC: survival summaries (overall + per league) and pools for all of the user’s competitions. */
+export async function lmsGetHomeInsights(season = '2026/27'): Promise<LmsHomeInsights> {
+  const { data, error } = await db.rpc('lms_get_home_insights', { p_season: season });
+  if (error) throw error;
+  const raw = (data ?? {}) as {
+    success?: boolean;
+    season?: string;
+    error?: string;
+    eliminations?: {
+      overall?: unknown;
+      by_competition?: Record<string, unknown>;
+    };
+    pools?: Record<
+      string,
+      Array<{
+        team_id?: string;
+        name?: string;
+        short_name?: string;
+        slug?: string;
+        used?: boolean;
+        gameweek_number?: number | null;
+      }>
+    >;
+  };
+
+  const byCompetition: Record<string, LmsEliminationSummary> = {};
+  for (const [id, summary] of Object.entries(raw.eliminations?.by_competition ?? {})) {
+    byCompetition[id] = mapEliminationSummary(summary, season, id);
+  }
+
+  const pools: Record<string, LmsUserPoolTeam[]> = {};
+  for (const [id, rows] of Object.entries(raw.pools ?? {})) {
+    pools[id] = (rows ?? [])
+      .map(mapPoolTeamRow)
+      .filter((t): t is LmsUserPoolTeam => t != null);
+  }
+
+  return {
+    success: !!raw.success,
+    season: raw.season ?? season,
+    eliminations: {
+      overall: raw.eliminations?.overall
+        ? mapEliminationSummary(raw.eliminations.overall, season, null)
+        : null,
+      byCompetition,
+    },
+    pools,
+    error: raw.error,
+  };
+}
+
+/** @deprecated Prefer lmsGetHomeInsights — kept for callers that only need one pool. */
 export async function lmsGetUserPoolForCompetition(
   competitionId: string,
   userId: string,
@@ -1028,6 +1123,9 @@ export async function lmsGetUserPoolForCompetition(
     currentGameweekNumber?: number | null;
   }
 ): Promise<LmsUserPoolTeam[]> {
+  const insights = await lmsGetHomeInsights('2026/27');
+  if (insights.pools[competitionId]) return insights.pools[competitionId];
+
   const [poolIds, allTeams, completedPicks, currentPick] = await Promise.all([
     lmsListCompetitionTeamIds(competitionId),
     lmsListTeams(),

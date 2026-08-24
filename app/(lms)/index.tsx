@@ -21,10 +21,9 @@ import { useSidebar } from '@/contexts/SidebarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   lmsCreateCompetition,
-  lmsGetEliminationSummary,
   lmsGetGameweekPickStats,
   lmsGetHome,
-  lmsGetUserPoolForCompetition,
+  lmsGetHomeInsights,
   lmsJoinErrorMessage,
   lmsListGameweeks,
   lmsListParticipants,
@@ -32,10 +31,10 @@ import {
   lmsRequestJoin,
   type LmsCompetitionHomeSummary,
   type LmsEliminationSummary,
+  type LmsHomeInsights,
   type LmsFixture,
   type LmsGameweek,
   type LmsGameweekPickStats,
-  type LmsUserPoolTeam,
   type LmsPendingJoin,
   type LmsPickStatOutcome,
   type LmsTeam,
@@ -90,9 +89,8 @@ export default function LmsHomeScreen() {
   );
   const [eliminationSummary, setEliminationSummary] = useState<LmsEliminationSummary | null>(null);
   const [eliminationLoading, setEliminationLoading] = useState(false);
+  const [homeInsights, setHomeInsights] = useState<LmsHomeInsights | null>(null);
   const [poolCompetitionId, setPoolCompetitionId] = useState<string | null>(null);
-  const [poolTeams, setPoolTeams] = useState<LmsUserPoolTeam[]>([]);
-  const [poolLoading, setPoolLoading] = useState(false);
   const [poolMenuOpen, setPoolMenuOpen] = useState(false);
   const [homePanelExpanded, setHomePanelExpanded] = useState(true);
   const [isStaff, setIsStaff] = useState(false);
@@ -144,9 +142,10 @@ export default function LmsHomeScreen() {
   const load = useCallback(async () => {
     if (!userId) return;
     try {
-      const [home, role] = await Promise.all([
+      const [home, role, insights] = await Promise.all([
         lmsGetHome('2026/27'),
         getProfileRole(userId),
+        lmsGetHomeInsights('2026/27').catch(() => null),
       ]);
       const staff = isStaffRole(role);
       setIsStaff(staff);
@@ -154,6 +153,7 @@ export default function LmsHomeScreen() {
       setPending(home.pending);
       setGw(home.nextUp.gameweek);
       setFixtures(home.nextUp.fixtures);
+      setHomeInsights(insights?.success ? insights : null);
       fxIndexRef.current = 0;
       setFxIndex(0);
       fixtureSlideAnim.setValue(0);
@@ -227,37 +227,29 @@ export default function LmsHomeScreen() {
     };
   }, [gw?.id, gw?.status, pickStatsWindowOpen, pickStatsScope, pickStatsCompetitionId]);
 
-  /** Elimination summary when pick stats are hidden (picks open or gameweek complete). */
+  /** Derive survival card from the single home-insights payload (no extra round-trip). */
   useEffect(() => {
-    if (!gw?.id || pickStatsWindowOpen) {
+    if (!gw?.id || pickStatsWindowOpen || !homeInsights) {
       setEliminationSummary(null);
       setEliminationLoading(false);
       return;
     }
-    const competitionId =
-      pickStatsScope === 'league' ? pickStatsCompetitionId : null;
-    if (pickStatsScope === 'league' && !competitionId) {
-      setEliminationSummary(null);
-      setEliminationLoading(false);
+    setEliminationLoading(false);
+    if (pickStatsScope === 'league') {
+      const id = pickStatsCompetitionId;
+      setEliminationSummary(
+        id ? homeInsights.eliminations.byCompetition[id] ?? null : null
+      );
       return;
     }
-    let cancelled = false;
-    setEliminationLoading(true);
-    void lmsGetEliminationSummary('2026/27', competitionId)
-      .then((summary) => {
-        if (cancelled) return;
-        setEliminationSummary(summary.success ? summary : null);
-      })
-      .catch(() => {
-        if (!cancelled) setEliminationSummary(null);
-      })
-      .finally(() => {
-        if (!cancelled) setEliminationLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [gw?.id, pickStatsWindowOpen, pickStatsScope, pickStatsCompetitionId]);
+    setEliminationSummary(homeInsights.eliminations.overall);
+  }, [
+    gw?.id,
+    pickStatsWindowOpen,
+    homeInsights,
+    pickStatsScope,
+    pickStatsCompetitionId,
+  ]);
 
   useEffect(() => {
     if (poolCompetitionId != null && !comps.some((c) => c.competition_id === poolCompetitionId)) {
@@ -268,33 +260,12 @@ export default function LmsHomeScreen() {
     }
   }, [comps, poolCompetitionId]);
 
-  /** Your pool grid for one competition (between / after gameweeks). */
-  useEffect(() => {
-    if (!userId || !poolCompetitionId || pickStatsWindowOpen) {
-      setPoolTeams([]);
-      setPoolLoading(false);
-      return;
-    }
-    const comp = comps.find((c) => c.competition_id === poolCompetitionId);
-    let cancelled = false;
-    setPoolLoading(true);
-    void lmsGetUserPoolForCompetition(poolCompetitionId, userId, {
-      currentGameweekId: gw?.id ?? null,
-      currentGameweekNumber: comp?.currentGameweekNumber ?? gw?.number ?? null,
-    })
-      .then((rows) => {
-        if (!cancelled) setPoolTeams(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setPoolTeams([]);
-      })
-      .finally(() => {
-        if (!cancelled) setPoolLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [userId, poolCompetitionId, pickStatsWindowOpen, comps, gw?.id, gw?.number]);
+  const poolTeams = useMemo(() => {
+    if (!poolCompetitionId || pickStatsWindowOpen || !homeInsights) return [];
+    return homeInsights.pools[poolCompetitionId] ?? [];
+  }, [homeInsights, poolCompetitionId, pickStatsWindowOpen]);
+
+  const poolLoading = !pickStatsWindowOpen && !!poolCompetitionId && !homeInsights;
 
   /** Drop a stale competition filter if the user left that league. */
   useEffect(() => {
