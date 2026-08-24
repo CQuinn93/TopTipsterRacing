@@ -122,28 +122,52 @@ export function LmsUserPoolGrid({
                     : `${abbrev}, still available`
                 }
               >
-                <View style={[styles.chipWrap, entry.used && styles.chipWrapUsed]}>
-                  <TeamColourChip
-                    shortName={entry.team.short_name}
-                    name={entry.team.name}
-                    slug={entry.team.slug}
-                    size={34}
-                  />
+                <View style={styles.crestStack}>
+                  <View style={[styles.chipWrap, entry.used && styles.chipWrapUsed]}>
+                    <TeamColourChip
+                      shortName={entry.team.short_name}
+                      name={entry.team.name}
+                      slug={entry.team.slug}
+                      size={34}
+                    />
+                  </View>
+                  {entry.used && entry.gameweek_number != null ? (
+                    <View
+                      style={[
+                        styles.gwBadge,
+                        {
+                          backgroundColor: theme.colors.surface,
+                          borderColor: theme.colors.accent,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.gwTag,
+                          {
+                            color: theme.colors.accent,
+                            fontFamily: theme.fontFamily.baiBold,
+                          },
+                        ]}
+                      >
+                        GW{entry.gameweek_number}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
                 <Text
                   style={[
                     styles.abbrev,
-                    { color: entry.used ? theme.colors.textMuted : theme.colors.text },
+                    {
+                      color: entry.used ? theme.colors.textMuted : theme.colors.text,
+                      fontFamily: theme.fontFamily.baiSemiBold,
+                      opacity: entry.used ? 0.55 : 1,
+                    },
                   ]}
                   numberOfLines={1}
                 >
                   {abbrev}
                 </Text>
-                {entry.used && entry.gameweek_number != null ? (
-                  <Text style={[styles.gwTag, { color: theme.colors.textMuted }]}>
-                    GW{entry.gameweek_number}
-                  </Text>
-                ) : null}
               </View>
             );
           })}
@@ -231,22 +255,34 @@ const styles = StyleSheet.create({
     gap: 3,
     minWidth: 0,
   },
+  crestStack: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   chipWrap: {
     opacity: 1,
   },
   chipWrapUsed: {
-    opacity: 0.38,
+    opacity: 0.22,
+  },
+  gwBadge: {
+    position: 'absolute',
+    alignSelf: 'center',
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+    borderRadius: 4,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   abbrev: {
-    fontFamily: 'BaiJamjuree-SemiBold',
     fontSize: 10,
     letterSpacing: 0.3,
     textAlign: 'center',
   },
   gwTag: {
-    fontFamily: 'BaiJamjuree-Bold',
     fontSize: 9,
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
     textTransform: 'uppercase',
   },
 });

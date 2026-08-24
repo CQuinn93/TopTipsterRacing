@@ -94,6 +94,7 @@ export default function LmsHomeScreen() {
   const [poolTeams, setPoolTeams] = useState<LmsUserPoolTeam[]>([]);
   const [poolLoading, setPoolLoading] = useState(false);
   const [poolMenuOpen, setPoolMenuOpen] = useState(false);
+  const [homePanelExpanded, setHomePanelExpanded] = useState(true);
   const [isStaff, setIsStaff] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -660,6 +661,20 @@ export default function LmsHomeScreen() {
           borderColor: theme.colors.border,
           overflow: 'hidden',
         },
+        homePanelTabsRow: {
+          flexDirection: 'row',
+          alignItems: 'stretch',
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+        },
+        homePanelCollapseBtn: {
+          paddingHorizontal: 10,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderLeftWidth: StyleSheet.hairlineWidth,
+          borderLeftColor: theme.colors.border,
+        },
         panelBody: {
           paddingHorizontal: theme.spacing.md,
           paddingTop: theme.spacing.md,
@@ -771,9 +786,8 @@ export default function LmsHomeScreen() {
           borderRadius: 3,
         },
         tabs: {
+          flex: 1,
           flexDirection: 'row',
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: theme.colors.border,
           backgroundColor: theme.colors.surface,
         },
         tab: {
@@ -792,6 +806,9 @@ export default function LmsHomeScreen() {
           textAlign: 'center',
         },
         tabTextActive: { color: theme.colors.accent },
+        tabCollapsedActive: {
+          borderBottomColor: 'transparent',
+        },
         sectionLabel: {
           fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: 11,
@@ -1922,38 +1939,58 @@ export default function LmsHomeScreen() {
               </View>
             ) : null}
 
-            {pickStatsWindowOpen ? renderPickStats() : renderBetweenGameweeksInsights()}
-
-            <View style={styles.deadlineAlertsWrap}>
-              <LmsPushNotificationsCard />
-            </View>
-
             <View style={styles.homePanel}>
-              <View style={styles.tabs}>
-                {(
-                  [
-                    { key: 'competitions' as const, label: 'My competitions' },
-                    { key: 'join' as const, label: 'Join' },
-                    { key: 'table' as const, label: 'Table' },
-                  ] as const
-                ).map((t) => {
-                  const active = tab === t.key;
-                  return (
-                    <Pressable
-                      key={t.key}
-                      style={[styles.tab, active && styles.tabActive]}
-                      onPress={() => setTab(t.key)}
-                      accessibilityRole="tab"
-                      accessibilityState={{ selected: active }}
-                    >
-                      <Text style={[styles.tabText, active && styles.tabTextActive]}>
-                        {t.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
+              <View style={styles.homePanelTabsRow}>
+                <View style={styles.tabs}>
+                  {(
+                    [
+                      { key: 'competitions' as const, label: 'My competitions' },
+                      { key: 'join' as const, label: 'Join' },
+                      { key: 'table' as const, label: 'Table' },
+                    ] as const
+                  ).map((t) => {
+                    const active = tab === t.key;
+                    return (
+                      <Pressable
+                        key={t.key}
+                        style={[
+                          styles.tab,
+                          active && styles.tabActive,
+                          active && !homePanelExpanded && styles.tabCollapsedActive,
+                        ]}
+                        onPress={() => {
+                          setTab(t.key);
+                          if (!homePanelExpanded) setHomePanelExpanded(true);
+                        }}
+                        accessibilityRole="tab"
+                        accessibilityState={{ selected: active }}
+                      >
+                        <Text style={[styles.tabText, active && styles.tabTextActive]}>
+                          {t.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Pressable
+                  style={styles.homePanelCollapseBtn}
+                  onPress={() => setHomePanelExpanded((v) => !v)}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: homePanelExpanded }}
+                  accessibilityLabel={
+                    homePanelExpanded ? 'Collapse competitions panel' : 'Expand competitions panel'
+                  }
+                  hitSlop={6}
+                >
+                  <Ionicons
+                    name={homePanelExpanded ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={theme.colors.textMuted}
+                  />
+                </Pressable>
               </View>
 
+              {homePanelExpanded ? (
               <View style={styles.panelBody}>
                 {tab === 'competitions' ? (
                   <>
@@ -2212,6 +2249,14 @@ export default function LmsHomeScreen() {
 
                 {tab === 'table' ? <LeagueTablePanel refreshKey={tableRefreshKey} /> : null}
               </View>
+              ) : null}
+            </View>
+
+
+            {pickStatsWindowOpen ? renderPickStats() : renderBetweenGameweeksInsights()}
+
+            <View style={styles.deadlineAlertsWrap}>
+              <LmsPushNotificationsCard />
             </View>
 
             <LmsTrademarkDisclaimer />
