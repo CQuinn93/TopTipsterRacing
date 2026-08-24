@@ -1717,11 +1717,21 @@ export default function LmsCompetitionDashboard() {
           paddingVertical: 12,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: theme.colors.border,
+        },
+        fixtureInner: {
+          flex: 1,
+          minWidth: 0,
+        },
+        fixtureTeamsRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
           gap: 8,
         },
         fixtureTeam: {
-          flex: 1,
+          flex: 2,
+          minWidth: 0,
           gap: 4,
+          alignItems: 'flex-start',
         },
         fixtureTeamAway: {
           alignItems: 'flex-end',
@@ -1729,6 +1739,7 @@ export default function LmsCompetitionDashboard() {
         fixtureTeamMain: {
           flexDirection: 'row',
           alignItems: 'center',
+          alignSelf: 'stretch',
           gap: 8,
           paddingVertical: 4,
           paddingHorizontal: 6,
@@ -1759,9 +1770,11 @@ export default function LmsCompetitionDashboard() {
           textAlign: 'right',
         },
         scoreBox: {
+          flex: 1,
           minWidth: 52,
           alignItems: 'center',
-          paddingHorizontal: 6,
+          justifyContent: 'center',
+          paddingHorizontal: 4,
           gap: 2,
         },
         scoreText: {
@@ -2515,8 +2528,8 @@ export default function LmsCompetitionDashboard() {
           excluded && { opacity: 0.55 },
         ]}
       >
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View style={styles.fixtureInner}>
+          <View style={styles.fixtureTeamsRow}>
             <View style={styles.fixtureTeam}>
               <View
                 style={[styles.fixtureTeamMain, homeWin && styles.fixtureTeamWin]}
