@@ -935,6 +935,46 @@ export async function lmsGetGameweekPickStats(
   };
 }
 
+export type LmsEliminationSummaryGameweek = {
+  gameweek_id: string;
+  gameweek_number: number;
+  eliminated_count: number;
+};
+
+export type LmsEliminationSummary = {
+  success: boolean;
+  season: string;
+  competition_id: string | null;
+  still_standing: number;
+  gameweeks: LmsEliminationSummaryGameweek[];
+  error?: string;
+};
+
+/** Eliminations per completed gameweek (home card when pick stats are hidden). */
+export async function lmsGetEliminationSummary(
+  season = '2026/27',
+  competitionId?: string | null
+): Promise<LmsEliminationSummary> {
+  const { data, error } = await db.rpc('lms_get_elimination_summary', {
+    p_season: season,
+    p_competition_id: competitionId ?? null,
+  });
+  if (error) throw error;
+  const raw = (data ?? {}) as LmsEliminationSummary & { gameweeks?: LmsEliminationSummaryGameweek[] };
+  return {
+    success: !!raw.success,
+    season: raw.season ?? season,
+    competition_id: raw.competition_id ?? competitionId ?? null,
+    still_standing: Number(raw.still_standing ?? 0),
+    gameweeks: (raw.gameweeks ?? []).map((g) => ({
+      gameweek_id: g.gameweek_id,
+      gameweek_number: Number(g.gameweek_number ?? 0),
+      eliminated_count: Number(g.eliminated_count ?? 0),
+    })),
+    error: raw.error,
+  };
+}
+
 /** All picks for a competition gameweek (same-comp members can read via RLS). */
 export async function lmsListPicksForGameweek(
   competitionId: string,
