@@ -22,13 +22,20 @@ export function StandingPlayerCards({ players, picksByUserId, onPressPlayer }: P
           (a, b) => a.gameweek_number - b.gameweek_number
         );
         const name = p.username?.trim() || p.user_id.slice(0, 8);
+        const alive = p.status === 'active' || p.status === 'winner';
         return (
           <Pressable
             key={p.id}
-            style={styles.card}
+            style={[
+              styles.card,
+              {
+                borderColor: alive ? theme.colors.accent : theme.colors.error,
+                borderWidth: 1.5,
+              },
+            ]}
             onPress={() => onPressPlayer?.(p.user_id)}
             accessibilityRole="button"
-            accessibilityLabel={`${name}, ${picks.length} teams used`}
+            accessibilityLabel={`${name}, ${alive ? 'still in' : 'eliminated'}, ${picks.length} teams used`}
           >
             <Text style={styles.name} numberOfLines={1}>
               {name}
@@ -78,13 +85,20 @@ export function StandingPlayerPoolCard({ player, poolTeams, picks, onPress }: Po
   const styles = makeStyles(theme);
   const pickByTeamId = new Map(picks.map((p) => [p.team_id, p]));
   const name = player.username?.trim() || player.user_id.slice(0, 8);
+  const alive = player.status === 'active' || player.status === 'winner';
 
   return (
     <Pressable
-      style={styles.poolCard}
+      style={[
+        styles.poolCard,
+        {
+          borderColor: alive ? theme.colors.accent : theme.colors.error,
+          borderWidth: 1.5,
+        },
+      ]}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${name} pool`}
+      accessibilityLabel={`${name} pool, ${alive ? 'still in' : 'eliminated'}`}
     >
       <View style={styles.poolHead}>
         <Text style={styles.poolName} numberOfLines={1}>
