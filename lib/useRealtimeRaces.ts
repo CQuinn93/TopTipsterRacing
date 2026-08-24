@@ -1,14 +1,22 @@
 /**
- * Subscribe to Supabase Realtime updates on the `races` table.
+ * Subscribe to Realtime Broadcast updates on topic `races`.
  * When a race we care about is updated (e.g. is_finished set by update-race-results script),
  * calls onRaceUpdated after a short debounce so the UI can refetch.
  *
- * Ensure Realtime is enabled for `races` in Supabase: Database → Replication → enable for public.races.
+ * Requires migration 085 (Broadcast triggers + realtime.messages RLS). No table Replication needed.
  */
 import { useEffect, useRef } from 'react';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
 const DEBOUNCE_MS = 1200;
+const TOPIC = 'races';
+
+type BroadcastUpdatePayload = {
+  payload?: {
+    record?: { api_race_id?: string };
+  };
+};
 
 export function useRealtimeRaces(
   /** api_race_id values for races we care about (e.g. current competition or results view). */
@@ -27,34 +35,47 @@ export function useRealtimeRaces(
   useEffect(() => {
     if (raceApiIds.length === 0) return;
 
-    const channel = supabase
-      .channel(`races-updates-${raceApiIds.slice(0, 2).join('-')}-${Date.now()}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'races',
-        },
-        (payload: { new?: { api_race_id?: string } }) => {
-          const apiId = payload?.new?.api_race_id;
+    let cancelled = false;
+    let channel: RealtimeChannel | null = null;
+
+    const scheduleRefetch = () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = null;
+        onRaceUpdatedRef.current();
+      }, DEBOUNCE_MS);
+    };
+
+    (async () => {
+      await supabase.realtime.setAuth();
+      if (cancelled) return;
+
+      channel = supabase
+        .channel(TOPIC, { config: { private: true } })
+        .on('broadcast', { event: 'UPDATE' }, (msg: BroadcastUpdatePayload) => {
+          const apiId = msg?.payload?.record?.api_race_id;
           if (apiId && raceIdsSetRef.current.has(apiId)) {
-            if (debounceRef.current) clearTimeout(debounceRef.current);
-            debounceRef.current = setTimeout(() => {
-              debounceRef.current = null;
-              onRaceUpdatedRef.current();
-            }, DEBOUNCE_MS);
+            scheduleRefetch();
           }
-        }
-      )
-      .subscribe();
+        })
+        .subscribe();
+
+      if (cancelled) {
+        supabase.removeChannel(channel);
+        channel = null;
+      }
+    })();
 
     return () => {
+      cancelled = true;
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
-      supabase.removeChannel(channel);
+      if (channel) {
+        supabase.removeChannel(channel);
+        channel = null;
+      }
     };
   }, [raceApiIds.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps -- only resub when id list changes
 }

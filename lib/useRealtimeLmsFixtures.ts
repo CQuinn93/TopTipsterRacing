@@ -1,15 +1,22 @@
 /**
- * Subscribe to Supabase Realtime updates on `lms_fixtures`.
+ * Subscribe to Realtime Broadcast updates on topic `lms_fixtures`.
  * When a fixture we care about is updated (e.g. live score / finished from sync-lms-football),
  * calls onFixturesUpdated after a short debounce so the UI can refetch.
  *
- * Ensure Realtime is enabled for `lms_fixtures` in Supabase:
- * Database → Replication → enable for public.lms_fixtures.
+ * Requires migration 085 (Broadcast triggers + realtime.messages RLS). No table Replication needed.
  */
 import { useEffect, useRef } from 'react';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 
 const DEBOUNCE_MS = 1200;
+const TOPIC = 'lms_fixtures';
+
+type BroadcastUpdatePayload = {
+  payload?: {
+    record?: { id?: string };
+  };
+};
 
 export function useRealtimeLmsFixtures(
   /** Fixture row ids for the open competition gameweek. */
@@ -28,34 +35,47 @@ export function useRealtimeLmsFixtures(
   useEffect(() => {
     if (fixtureIds.length === 0) return;
 
-    const channel = supabase
-      .channel(`lms-fixtures-${fixtureIds.slice(0, 2).join('-')}-${Date.now()}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'lms_fixtures',
-        },
-        (payload: { new?: { id?: string } }) => {
-          const id = payload?.new?.id;
+    let cancelled = false;
+    let channel: RealtimeChannel | null = null;
+
+    const scheduleRefetch = () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        debounceRef.current = null;
+        onFixturesUpdatedRef.current();
+      }, DEBOUNCE_MS);
+    };
+
+    (async () => {
+      await supabase.realtime.setAuth();
+      if (cancelled) return;
+
+      channel = supabase
+        .channel(TOPIC, { config: { private: true } })
+        .on('broadcast', { event: 'UPDATE' }, (msg: BroadcastUpdatePayload) => {
+          const id = msg?.payload?.record?.id;
           if (id && fixtureIdsSetRef.current.has(id)) {
-            if (debounceRef.current) clearTimeout(debounceRef.current);
-            debounceRef.current = setTimeout(() => {
-              debounceRef.current = null;
-              onFixturesUpdatedRef.current();
-            }, DEBOUNCE_MS);
+            scheduleRefetch();
           }
-        }
-      )
-      .subscribe();
+        })
+        .subscribe();
+
+      if (cancelled) {
+        supabase.removeChannel(channel);
+        channel = null;
+      }
+    })();
 
     return () => {
+      cancelled = true;
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
-      supabase.removeChannel(channel);
+      if (channel) {
+        supabase.removeChannel(channel);
+        channel = null;
+      }
     };
   }, [fixtureIds.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps -- only resub when id list changes
 }
