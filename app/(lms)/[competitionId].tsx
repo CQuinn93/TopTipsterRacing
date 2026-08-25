@@ -1091,7 +1091,11 @@ export default function LmsCompetitionDashboard() {
   /** After settle / before the open GW goes live — alternate Standing layouts. */
   const standingBetweenWeeks = !currentGw || currentGw.status === 'upcoming';
 
+  // Wait until shell finishes — loadShell clears board state, and an early
+  // fetch (while currentGw was still null) would not re-run if we stayed
+  // "between weeks", leaving Standing empty until you leave and re-enter the tab.
   useEffect(() => {
+    if (loading) return;
     if (tab !== 'leaderboard' || !standingBetweenWeeks || !competitionId) return;
     if (standingBoardLoadedRef.current) return;
     let cancelled = false;
@@ -1127,7 +1131,7 @@ export default function LmsCompetitionDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [tab, standingBetweenWeeks, competitionId]);
+  }, [tab, standingBetweenWeeks, competitionId, loading]);
 
   useEffect(() => {
     if (standingBetweenWeeks) {
