@@ -4,8 +4,7 @@ import { Slot, useRouter, useSegments } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, NestedThemeProvider } from '@/contexts/ThemeContext';
-import { lightTheme } from '@/constants/theme';
-import { withRacingAccent } from '@/constants/sportThemes';
+import { withRacingUi } from '@/constants/sportThemes';
 import { useAuth } from '@/contexts/AuthContext';
 import { AppLockProvider, useAppLock } from '@/contexts/AppLockContext';
 import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
@@ -27,13 +26,11 @@ function WebSidebar() {
   const theme = useTheme();
   const router = useRouter();
   const segments = useSegments();
-  const isLight = String(theme.colors.background) === String(lightTheme.colors.background);
-
   const styles = StyleSheet.create({
     sidebar: {
       width: SIDEBAR_WIDTH,
       flexShrink: 0,
-      backgroundColor: isLight ? '#ffffff' : theme.colors.surface,
+      backgroundColor: theme.colors.surface,
       borderRightWidth: 1,
       borderRightColor: theme.colors.border,
       paddingTop: 24,
@@ -46,17 +43,16 @@ function WebSidebar() {
       elevation: 4,
     },
     logo: {
-      fontFamily: theme.fontFamily.regular,
-      fontSize: 13,
-      fontWeight: '700',
+      fontFamily: theme.fontFamily.baiBold,
+      fontSize: 15,
       color: theme.colors.text,
-      marginBottom: 4,
+      marginBottom: 2,
       paddingHorizontal: 8,
     },
     tagline: {
-      fontFamily: theme.fontFamily.light,
-      fontSize: 10,
-      color: theme.colors.textSecondary,
+      fontFamily: theme.fontFamily.baiLight,
+      fontSize: 11,
+      color: theme.colors.accent,
       marginBottom: 20,
       paddingHorizontal: 8,
     },
@@ -64,9 +60,8 @@ function WebSidebar() {
       marginBottom: 14,
     },
     navLabel: {
-      fontFamily: theme.fontFamily.regular,
-      fontSize: 9,
-      fontWeight: '600',
+      fontFamily: theme.fontFamily.baiMedium,
+      fontSize: 10,
       color: theme.colors.textMuted,
       textTransform: 'uppercase',
       letterSpacing: 0.5,
@@ -76,23 +71,25 @@ function WebSidebar() {
     navItem: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingVertical: 8,
+      paddingVertical: 10,
       paddingHorizontal: 8,
-      borderRadius: 8,
-      marginBottom: 2,
+      borderRadius: 0,
+      marginBottom: 0,
       gap: 6,
+      borderBottomWidth: 2,
+      borderBottomColor: 'transparent',
     },
     navItemActive: {
-      backgroundColor: theme.colors.accentMuted,
+      borderBottomColor: theme.colors.accent,
+      backgroundColor: 'transparent',
     },
     navItemText: {
-      fontFamily: theme.fontFamily.regular,
-      fontSize: 11,
-      color: theme.colors.text,
+      fontFamily: theme.fontFamily.baiMedium,
+      fontSize: 13,
+      color: theme.colors.textMuted,
     },
     navItemTextActive: {
       color: theme.colors.accent,
-      fontWeight: '600',
     },
     homeLink: {
       flexDirection: 'row',
@@ -105,9 +102,8 @@ function WebSidebar() {
       borderTopColor: theme.colors.border,
     },
     homeLinkText: {
-      fontFamily: theme.fontFamily.regular,
-      fontSize: 12,
-      fontWeight: '600',
+      fontFamily: theme.fontFamily.baiMedium,
+      fontSize: 13,
       color: theme.colors.accent,
     },
   });
@@ -158,8 +154,6 @@ function MobileWebLayout() {
   const segments = useSegments();
   const { openSidebar } = useSidebar();
   const insets = useSafeAreaInsets();
-  const isLight = String(theme.colors.background) === String(lightTheme.colors.background);
-
   const currentSegment = String(segments[segments.length - 1] ?? 'index');
   const tabTitles: Record<string, string> = {
     index: 'Home',
@@ -195,20 +189,17 @@ function MobileWebLayout() {
       flexDirection: 'row',
       alignItems: 'center',
       flexShrink: 0,
-      paddingHorizontal: 12,
-      paddingVertical: 12,
-      paddingTop: Math.max(12, insets.top),
-      backgroundColor: isLight ? theme.colors.accent : theme.colors.background,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
+      paddingHorizontal: theme.spacing.lg,
+      paddingVertical: theme.spacing.sm,
+      paddingTop: Math.max(theme.spacing.sm, insets.top + 6),
+      backgroundColor: theme.colors.background,
+      gap: theme.spacing.md,
     },
     headerTitle: {
       flex: 1,
-      fontFamily: theme.fontFamily.regular,
-      fontSize: 15,
-      fontWeight: '600',
-      color: isLight ? theme.colors.white : theme.colors.text,
-      marginLeft: 6,
+      fontFamily: theme.fontFamily.baiBold,
+      fontSize: 18,
+      color: theme.colors.text,
     },
     content: {
       flex: 1,
@@ -250,7 +241,7 @@ function MobileWebLayout() {
     <View style={[styles.wrapper, webMobileShell]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={openSidebar} hitSlop={12} style={{ padding: 4 }}>
-          <Ionicons name="menu" size={22} color={isLight ? theme.colors.white : theme.colors.text} />
+          <Ionicons name="menu" size={24} color={theme.colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{headerTitle}</Text>
       </View>
@@ -322,7 +313,7 @@ function AppLayoutWebContent() {
   const { session } = useAuth();
   const { isLocked } = useAppLock();
   const baseTheme = useTheme();
-  const racingTheme = useMemo(() => withRacingAccent(baseTheme), [baseTheme]);
+  const racingTheme = useMemo(() => withRacingUi(baseTheme), [baseTheme]);
   const isNarrow = width < MOBILE_BREAKPOINT;
 
   return (

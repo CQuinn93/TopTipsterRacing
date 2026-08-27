@@ -17,3 +17,19 @@ export function withRacingAccent(base: Theme = darkTheme): Theme {
     },
   };
 }
+
+/**
+ * Racing sport theme: keep gold accent, but use Bai Jamjuree as the default
+ * type stack so the in-app chrome matches Last Man Standing.
+ */
+export function withRacingUi(base: Theme = darkTheme): Theme {
+  const accented = withRacingAccent(base);
+  return {
+    ...accented,
+    fontFamily: {
+      ...accented.fontFamily,
+      regular: accented.fontFamily.bai,
+      light: accented.fontFamily.baiLight,
+    },
+  };
+}

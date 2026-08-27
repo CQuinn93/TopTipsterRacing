@@ -3,8 +3,7 @@ import { TouchableOpacity } from 'react-native';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme, NestedThemeProvider } from '@/contexts/ThemeContext';
-import { lightTheme } from '@/constants/theme';
-import { withRacingAccent } from '@/constants/sportThemes';
+import { withRacingUi } from '@/constants/sportThemes';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar, SidebarProvider } from '@/contexts/SidebarContext';
 import { AppSidebar } from '@/components/AppSidebar';
@@ -17,29 +16,27 @@ import { AppLockProvider, useAppLock } from '@/contexts/AppLockContext';
 function MenuHeaderButton() {
   const theme = useTheme();
   const { openSidebar } = useSidebar();
-  const isLight = theme.colors.background === lightTheme.colors.background;
-  const iconColor = isLight ? theme.colors.white : theme.colors.text;
   return (
     <TouchableOpacity onPress={openSidebar} style={{ marginLeft: 12 }} hitSlop={12}>
-      <Ionicons name="menu" size={24} color={iconColor} />
+      <Ionicons name="menu" size={24} color={theme.colors.text} />
     </TouchableOpacity>
   );
 }
 
 function AppTabs() {
   const theme = useTheme();
-  const isLight = theme.colors.background === lightTheme.colors.background;
   return (
     <Tabs
       tabBar={(props) => <RacingTabBar {...props} />}
       screenOptions={{
-        headerStyle: { backgroundColor: isLight ? theme.colors.accent : theme.colors.background },
-        headerTintColor: isLight ? theme.colors.white : theme.colors.text,
-        headerTitleStyle: { fontFamily: theme.fontFamily.regular },
+        headerStyle: { backgroundColor: theme.colors.background },
+        headerTintColor: theme.colors.text,
+        headerTitleStyle: { fontFamily: theme.fontFamily.baiBold, fontSize: 17 },
+        headerShadowVisible: false,
         headerLeft: () => <MenuHeaderButton />,
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Home', tabBarLabel: 'Home' }} />
+      <Tabs.Screen name="index" options={{ title: 'Home', tabBarLabel: 'Home', headerShown: false }} />
       <Tabs.Screen
         name="selections"
         options={{ title: 'My selections', tabBarLabel: 'Selections' }}
@@ -66,7 +63,7 @@ function AppLayoutContent() {
   const { session } = useAuth();
   const { isLocked } = useAppLock();
   const baseTheme = useTheme();
-  const racingTheme = useMemo(() => withRacingAccent(baseTheme), [baseTheme]);
+  const racingTheme = useMemo(() => withRacingUi(baseTheme), [baseTheme]);
 
   useEffect(() => {
     if (session) void setLastRoute('/(app)');

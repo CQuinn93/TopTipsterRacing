@@ -15,10 +15,11 @@ import {
 import { useFocusEffect } from 'expo-router';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
-import { lightTheme } from '@/constants/theme';
+import { useSidebar } from '@/contexts/SidebarContext';
 import { getAvailableRacesForUser } from '@/lib/availableRacesCache';
 import { fetchHomeSummaryByComp, type HomeSummaryByComp } from '@/lib/homeSummary';
 import { useForceRefresh } from '@/contexts/ForceRefreshContext';
@@ -32,6 +33,8 @@ import { HomeLeaderboardPanel } from '@/components/HomeLeaderboardPanel';
 import { HomeSelectionsAndResults } from '@/components/HomeSelectionsAndResults';
 export default function HomeScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const { openSidebar } = useSidebar();
   const { userId, session } = useAuth();
   const [displayName, setDisplayName] = useState<string>('');
   const [participations, setParticipations] = useState<ParticipationRow[]>([]);
@@ -212,10 +215,6 @@ export default function HomeScreen() {
 
   const styles = useMemo(
     () => {
-      const isLight = String(theme.colors.background) === String(lightTheme.colors.background);
-      const cardBorder = isLight ? theme.colors.white : theme.colors.border;
-      const cardBorderWidth = isLight ? 2 : 1;
-      const webCard = isWeb ? { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 3 } : {};
       const compact = isNarrowWeb;
       return StyleSheet.create({
         wrapper: { flex: 1, backgroundColor: theme.colors.background, ...(isWeb && { paddingHorizontal: 0 }) },
@@ -231,13 +230,44 @@ export default function HomeScreen() {
         },
         content: {
           padding: theme.spacing.md,
-          ...(isWeb && { padding: 24, paddingBottom: 48 }),
+          paddingTop: 0,
+          ...(isWeb && { padding: 24, paddingBottom: 48, paddingTop: 0 }),
           ...(isWeb && !compact && { paddingHorizontal: 28 }),
         },
+        header: {
+          paddingTop:
+            Platform.OS === 'web'
+              ? Math.max(theme.spacing.md, insets.top + 6)
+              : insets.top + theme.spacing.sm,
+          paddingHorizontal: theme.spacing.md,
+          paddingBottom: theme.spacing.sm,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.spacing.md,
+          ...(isWeb && !compact && { paddingHorizontal: 28 }),
+        },
+        headerMenu: { padding: 4 },
+        headerTitleBlock: { flex: 1 },
+        headerRefresh: {
+          padding: 6,
+          minWidth: 36,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        headerTitle: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 20,
+          color: theme.colors.text,
+        },
+        headerSub: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 13,
+          color: theme.colors.accent,
+          marginTop: 2,
+        },
         sectionTitle: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiBold,
           fontSize: compact ? 13 : 15,
-          fontWeight: '700',
           color: theme.colors.text,
           marginTop: theme.spacing.lg,
           marginBottom: compact ? theme.spacing.xs : theme.spacing.sm,
@@ -246,33 +276,23 @@ export default function HomeScreen() {
           marginTop: 0,
           marginBottom: theme.spacing.sm,
         },
-        headerStrip: {
-          marginHorizontal: isWideWeb ? 0 : -theme.spacing.md,
-          paddingHorizontal: theme.spacing.md,
-          paddingVertical: theme.spacing.lg,
-          paddingTop: theme.spacing.lg + 4,
-          marginBottom: theme.spacing.lg,
-          borderBottomWidth: 1,
-          borderBottomColor: theme.colors.border,
+        homePanel: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.lg,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          overflow: 'hidden',
+          marginBottom: theme.spacing.md,
         },
-        headerStripInner: {
+        homePanelTabsRow: {
           flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
+          alignItems: 'stretch',
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
         },
-        headerWelcome: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 10 : 12,
-          color: theme.colors.textMuted,
-          marginBottom: 4,
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-        },
-        headerHello: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 18 : 22,
-          fontWeight: '700',
-          color: theme.colors.text,
+        panelBody: {
+          padding: compact ? theme.spacing.sm : theme.spacing.md,
         },
         accountLink: {
           flexDirection: 'row',
@@ -280,7 +300,7 @@ export default function HomeScreen() {
           gap: theme.spacing.xs,
         },
         accountLinkText: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiMedium,
           fontSize: 14,
           color: theme.colors.text,
         },
@@ -293,23 +313,21 @@ export default function HomeScreen() {
           marginBottom: theme.spacing.md,
         },
         primaryButtonText: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: 14,
           color: theme.colors.black,
-          fontWeight: '600',
         },
         heroCard: {
           backgroundColor: theme.colors.surface,
-          borderRadius: isWeb ? 16 : theme.radius.lg,
+          borderRadius: theme.radius.lg,
           padding: isWeb ? 24 : theme.spacing.md,
           marginBottom: theme.spacing.lg,
-          borderWidth: 2,
+          borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.accent,
           overflow: 'hidden',
-          ...webCard,
         },
         heroEyebrow: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiMedium,
           fontSize: 10,
           color: theme.colors.textMuted,
           marginBottom: theme.spacing.xs,
@@ -317,14 +335,13 @@ export default function HomeScreen() {
           letterSpacing: 0.8,
         },
         heroTitle: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiBold,
           fontSize: 20,
-          fontWeight: '700',
           color: theme.colors.text,
           marginBottom: theme.spacing.sm,
         },
         heroBody: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiLight,
           fontSize: 14,
           color: theme.colors.textSecondary,
           lineHeight: 21,
@@ -342,15 +359,14 @@ export default function HomeScreen() {
           borderRadius: theme.radius.md,
         },
         heroCtaText: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: 15,
-          fontWeight: '600',
           color: theme.colors.black,
         },
         homePrimaryRow: {
           flexDirection: 'row',
           gap: theme.spacing.sm,
-          marginBottom: theme.spacing.lg,
+          marginBottom: theme.spacing.md,
         },
         homePrimaryBtn: {
           flex: 1,
@@ -373,31 +389,27 @@ export default function HomeScreen() {
           paddingHorizontal: theme.spacing.sm,
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.md,
-          borderWidth: 1,
+          borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
         },
         homePrimaryBtnText: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: compact ? 11 : 13,
-          fontWeight: '600',
-          color: theme.colors.white,
+          color: theme.colors.black,
         },
         homePrimaryBtnTextSecondary: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: compact ? 11 : 13,
-          fontWeight: '600',
           color: theme.colors.accent,
         },
         competitionsCard: {
-          backgroundColor: theme.colors.surface,
-          borderRadius: isWeb ? 14 : theme.radius.lg,
-          padding: compact ? theme.spacing.sm : (isWeb ? 20 : theme.spacing.sm),
+          backgroundColor: theme.colors.background,
+          borderRadius: theme.radius.md,
+          padding: compact ? theme.spacing.sm : theme.spacing.md,
           marginBottom: theme.spacing.sm,
-          marginTop: compact ? 0 : theme.spacing.xs,
-          borderWidth: cardBorderWidth,
-          borderColor: cardBorder,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
           overflow: 'hidden',
-          ...webCard,
         },
         compInfoInnerCard: {
           flexDirection: 'row',
@@ -499,9 +511,6 @@ export default function HomeScreen() {
         compTabsRow: {
           flexDirection: 'row',
           width: '100%',
-          marginBottom: theme.spacing.md,
-          borderBottomWidth: StyleSheet.hairlineWidth,
-          borderBottomColor: theme.colors.border,
         },
         compTab: {
           flex: 1,
@@ -531,15 +540,14 @@ export default function HomeScreen() {
         compDropdownTrigger: {
           flexDirection: 'row',
           alignItems: 'center',
-          backgroundColor: theme.colors.surface,
+          backgroundColor: theme.colors.background,
           borderRadius: theme.radius.md,
           paddingVertical: compact ? theme.spacing.sm : theme.spacing.md,
           paddingHorizontal: theme.spacing.md,
-          borderWidth: cardBorderWidth,
-          borderColor: cardBorder,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
           marginBottom: theme.spacing.sm,
           gap: theme.spacing.sm,
-          ...webCard,
         },
         compDropdownTextBlock: {
           flex: 1,
@@ -642,11 +650,11 @@ export default function HomeScreen() {
           flex: 1,
         },
         statCard: {
-          backgroundColor: theme.colors.accentMuted ?? 'rgba(21, 128, 61, 0.15)',
+          backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.md,
           padding: compact ? theme.spacing.xs : theme.spacing.sm,
-          borderWidth: 1,
-          borderColor: theme.colors.accentDim ?? theme.colors.accent,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
           alignItems: 'center',
         },
         statCardLabel: {
@@ -755,29 +763,55 @@ export default function HomeScreen() {
         },
       });
     },
-    [theme, isWeb, isNarrowWeb, isWideWeb]
+    [theme, isWeb, isNarrowWeb, isWideWeb, insets.top]
+  );
+
+  const homeHeader = (
+    <View style={styles.header}>
+      {Platform.OS !== 'web' ? (
+        <TouchableOpacity
+          style={styles.headerMenu}
+          onPress={openSidebar}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Open menu"
+        >
+          <Ionicons name="menu" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+      ) : null}
+      <View style={styles.headerTitleBlock}>
+        <Text style={styles.headerTitle}>Top Tipster Racing</Text>
+        <Text style={styles.headerSub}>
+          {displayName ? `Hello ${displayName}` : 'Racing festivals'}
+        </Text>
+      </View>
+      <TouchableOpacity
+        style={styles.headerRefresh}
+        onPress={onRefresh}
+        disabled={refreshing}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Refresh"
+      >
+        {refreshing ? (
+          <ActivityIndicator size="small" color={theme.colors.accent} />
+        ) : (
+          <Ionicons name="refresh" size={22} color={theme.colors.text} />
+        )}
+      </TouchableOpacity>
+    </View>
   );
 
   const homeScroll = (
     <ScrollView
         ref={scrollRef}
         style={[styles.container, isWideWeb && styles.webHomeScroll]}
-        contentContainerStyle={[styles.content, { paddingBottom: theme.spacing.lg, paddingTop: theme.spacing.sm }]}
+        contentContainerStyle={[styles.content, { paddingBottom: theme.spacing.lg }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} />
         }
       >
-        {/* Header strip */}
-        <View style={styles.headerStrip}>
-          <View style={styles.headerStripInner}>
-            <View>
-              <Text style={styles.headerWelcome}>Top Tipster Racing</Text>
-              <Text style={styles.headerHello}>Hello {displayName || '…'}</Text>
-            </View>
-          </View>
-        </View>
-
         {!hasJoinedAny && (
           <View style={styles.heroCard}>
             <Text style={styles.heroEyebrow}>Get started</Text>
@@ -804,7 +838,7 @@ export default function HomeScreen() {
                 onPress={() => router.push('/(app)/selections')}
                 activeOpacity={0.85}
               >
-                <Ionicons name="list-outline" size={20} color={theme.colors.white} />
+                <Ionicons name="list-outline" size={20} color={theme.colors.black} />
                 <Text style={styles.homePrimaryBtnText}>My selections</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -817,23 +851,26 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
-            <Text style={[styles.sectionTitle, styles.sectionTitleFirst]}>Your competitions</Text>
-            <View style={styles.compTabsRow}>
-              {(['upcoming', 'live', 'complete'] as const).map((tab) => {
-                const isActive = compTab === tab;
-                const label = tab === 'upcoming' ? 'Upcoming' : tab === 'live' ? 'Live' : 'Complete';
-                return (
-                  <TouchableOpacity
-                    key={tab}
-                    style={[styles.compTab, isActive && styles.compTabActive]}
-                    onPress={() => setCompTab(tab)}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={[styles.compTabText, isActive && styles.compTabTextActive]}>{label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            <View style={styles.homePanel}>
+              <View style={styles.homePanelTabsRow}>
+                <View style={styles.compTabsRow}>
+                  {(['upcoming', 'live', 'complete'] as const).map((tab) => {
+                    const isActive = compTab === tab;
+                    const label = tab === 'upcoming' ? 'Upcoming' : tab === 'live' ? 'Live' : 'Complete';
+                    return (
+                      <TouchableOpacity
+                        key={tab}
+                        style={[styles.compTab, isActive && styles.compTabActive]}
+                        onPress={() => setCompTab(tab)}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={[styles.compTabText, isActive && styles.compTabTextActive]}>{label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+              <View style={styles.panelBody}>
             <Text style={styles.homeCompHint}>
               Browse by festival phase. Make picks in My selections when racecards are published.
             </Text>
@@ -942,6 +979,8 @@ export default function HomeScreen() {
                 </View>
               );
             })() : null}
+              </View>
+            </View>
 
             {/* Quick links: hidden on web (leaderboard is in sidebar; selections+results below) */}
             {(!isWeb || isNarrowWeb) && (
@@ -980,12 +1019,20 @@ export default function HomeScreen() {
   if (Platform.OS === 'web' && hasJoinedAny && effectiveCompId && !isNarrowWeb) {
     const compName = summaryByComp?.byComp[effectiveCompId]?.name ?? compListFiltered.find((c) => c.id === effectiveCompId)?.name ?? 'Competition';
     return (
-      <View style={[styles.wrapper, { flexDirection: 'row', gap: 24, paddingRight: 24, alignItems: 'flex-start' }]}>
-        <View style={{ flex: 1, minWidth: 0, alignItems: 'center' }}>{mainContent}</View>
-        <HomeLeaderboardPanel competitionId={effectiveCompId} competitionName={compName} />
+      <View style={styles.wrapper}>
+        {homeHeader}
+        <View style={[styles.wrapper, { flexDirection: 'row', gap: 24, paddingRight: 24, alignItems: 'flex-start' }]}>
+          <View style={{ flex: 1, minWidth: 0, alignItems: 'center' }}>{mainContent}</View>
+          <HomeLeaderboardPanel competitionId={effectiveCompId} competitionName={compName} />
+        </View>
       </View>
     );
   }
 
-  return <View style={styles.wrapper}>{mainContent}</View>;
+  return (
+    <View style={styles.wrapper}>
+      {homeHeader}
+      {mainContent}
+    </View>
+  );
 }

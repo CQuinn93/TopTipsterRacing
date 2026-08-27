@@ -53,11 +53,9 @@ export function AppSidebar() {
           borderBottomColor: theme.colors.border,
         },
         headerTitle: {
-          fontFamily:
-            variant === 'lms' ? theme.fontFamily.baiBold : theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiBold,
           fontSize: 18,
           color: theme.colors.text,
-          fontWeight: '700',
         },
         closeBtn: { padding: 4 },
         buttons: {
@@ -76,14 +74,12 @@ export function AppSidebar() {
         },
         menuButtonText: {
           flex: 1,
-          fontFamily:
-            variant === 'lms' ? theme.fontFamily.baiMedium : theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiMedium,
           fontSize: 15,
           color: theme.colors.text,
-          fontWeight: '600',
         },
       }),
-    [theme, variant]
+    [theme]
   );
 
   const goTo = (path: string, mode: 'push' | 'replace' = 'push') => {
