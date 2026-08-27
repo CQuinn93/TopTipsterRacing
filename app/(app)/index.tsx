@@ -28,12 +28,14 @@ import type { ParticipationRow } from '@/lib/availableRacesCache';
 import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
 import { getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
-import { HomeLeaderboardPanel } from '@/components/HomeLeaderboardPanel';
+import { racingCreateCompetition } from '@/lib/racingAdminApi';
+import { getProfileRole, isStaffRole } from '@/lib/adminSession';
+import { RacingPointsPanel } from '@/components/RacingPointsPanel';
 
 const RACE_CYCLE_MS = 6500;
 const RACE_SLIDE_MS = 380;
 
-type HomeTab = 'competitions' | 'join' | 'table';
+type HomeTab = 'competitions' | 'join' | 'points';
 
 type PendingJoin = {
   competition_id: string;
@@ -63,6 +65,13 @@ export default function HomeScreen() {
   const [homePanelExpanded, setHomePanelExpanded] = useState(true);
   const [joinCode, setJoinCode] = useState('');
   const [joining, setJoining] = useState(false);
+  const [isStaff, setIsStaff] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createStartDate, setCreateStartDate] = useState('');
+  const [createEndDate, setCreateEndDate] = useState('');
+  const [createAccessCode, setCreateAccessCode] = useState('');
+  const [creating, setCreating] = useState(false);
   const [raceIndex, setRaceIndex] = useState(0);
   const [raceCardWidth, setRaceCardWidth] = useState(0);
   const raceSlideX = useRef(new Animated.Value(0)).current;
@@ -74,11 +83,30 @@ export default function HomeScreen() {
 
   useEffect(() => {
     const next = String(params.tab ?? '').trim();
-    if (next === 'join' || next === 'table' || next === 'competitions') {
+    if (next === 'join' || next === 'points' || next === 'competitions') {
       setTab(next);
       setHomePanelExpanded(true);
     }
   }, [params.tab]);
+
+  useEffect(() => {
+    if (!userId) {
+      setIsStaff(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const role = await getProfileRole(userId);
+        if (!cancelled) setIsStaff(isStaffRole(role));
+      } catch {
+        if (!cancelled) setIsStaff(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   useEffect(() => {
     if (!userId) return;
@@ -296,12 +324,6 @@ export default function HomeScreen() {
     };
   });
 
-  const tableCompId = comps.find((c) => c.status === 'live')?.id ?? comps[0]?.id ?? null;
-  const tableCompName =
-    (tableCompId && summaryByComp?.byComp[tableCompId]?.name) ||
-    comps.find((c) => c.id === tableCompId)?.name ||
-    'Competition';
-
   const onJoin = async () => {
     if (!userId) {
       Alert.alert('Error', 'You must be signed in.');
@@ -337,6 +359,53 @@ export default function HomeScreen() {
       await load(true);
     } finally {
       setJoining(false);
+    }
+  };
+
+  const onCreateCompetition = async () => {
+    const name = createName.trim();
+    if (!name) {
+      Alert.alert('Error', 'Please enter a competition name.');
+      return;
+    }
+    const start = createStartDate.trim();
+    const end = createEndDate.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+      Alert.alert('Error', 'Enter start and end dates as YYYY-MM-DD.');
+      return;
+    }
+    if (end < start) {
+      Alert.alert('Error', 'End date must be on or after the start date.');
+      return;
+    }
+    const code = createAccessCode.trim().toUpperCase().slice(0, 6) || null;
+    setCreating(true);
+    try {
+      const result = await racingCreateCompetition({
+        name,
+        festivalStartDate: start,
+        festivalEndDate: end,
+        accessCode: code,
+      });
+      if (!result.success) {
+        Alert.alert('Error', result.error ?? 'Could not create competition');
+        return;
+      }
+      Alert.alert(
+        'Created',
+        code ? `Competition created. Access code: ${code}` : 'Competition created.'
+      );
+      setCreateName('');
+      setCreateStartDate('');
+      setCreateEndDate('');
+      setCreateAccessCode('');
+      setShowCreate(false);
+      setTab('competitions');
+      await load(true);
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not create competition');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -622,6 +691,63 @@ export default function HomeScreen() {
           textTransform: 'uppercase',
           color: theme.colors.accent,
         },
+        createToggle: {
+          alignSelf: 'flex-start',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          paddingVertical: 6,
+          marginBottom: 8,
+        },
+        createToggleText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.accent,
+        },
+        createPanel: {
+          backgroundColor: theme.colors.background,
+          borderRadius: theme.radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          padding: 12,
+          gap: 10,
+          marginBottom: 12,
+        },
+        createInput: {
+          fontFamily: theme.fontFamily.input,
+          fontSize: 14,
+          color: theme.colors.text,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.sm,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          backgroundColor: theme.colors.surface,
+        },
+        createFieldLabel: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          letterSpacing: 1,
+          textTransform: 'uppercase',
+          color: theme.colors.textMuted,
+        },
+        createHint: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          lineHeight: 16,
+        },
+        createSubmit: {
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.sm,
+          paddingVertical: 10,
+          alignItems: 'center',
+        },
+        createSubmitText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.black,
+        },
         badge: {
           fontFamily: theme.fontFamily.baiMedium,
           fontSize: 11,
@@ -645,7 +771,26 @@ export default function HomeScreen() {
           fontSize: 13,
           color: theme.colors.accent,
         },
-        tableWrap: { minHeight: 120 },
+        emptyRacesBanner: {
+          backgroundColor: theme.colors.accentMuted,
+          borderRadius: theme.radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.accent,
+          paddingVertical: 12,
+          paddingHorizontal: 14,
+          gap: 6,
+        },
+        emptyRacesTitle: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 13,
+          color: theme.colors.accent,
+        },
+        emptyRacesBody: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 13,
+          lineHeight: 18,
+          color: theme.colors.text,
+        },
         selectionsPanel: {
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.lg,
@@ -675,12 +820,8 @@ export default function HomeScreen() {
   const raceSlideStyle = { transform: [{ translateX: raceSlideX }] };
 
   const renderNextRace = () => {
-    if (upcomingRaces.length === 0 && participations.length === 0) return null;
-    const dayNum = activeRace
-      ? dayNumberByKey.get(`${activeRace.competitionId}:${activeRace.raceDate}`)
-      : null;
     const inPlay =
-      activeRace &&
+      !!activeRace &&
       new Date(activeRace.firstRaceUtc).getTime() <= nowMs &&
       new Date(activeRace.lastRaceUtc).getTime() > nowMs;
 
@@ -688,11 +829,11 @@ export default function HomeScreen() {
       <View style={styles.spotlightWrap}>
         <View style={styles.spotlight}>
           <View style={styles.spotlightHead}>
-            <Text style={styles.spotlightTitle}>
-              {dayNum != null ? `Next race · Day ${dayNum}` : 'Next race'}
-            </Text>
+            <Text style={styles.spotlightTitle}>Next up for you</Text>
             <Text style={styles.spotlightMeta} numberOfLines={1}>
-              {upcomingRaces.length ? `${raceIndex + 1}/${upcomingRaces.length}` : 'No races'}
+              {upcomingRaces.length
+                ? `${raceIndex + 1}/${upcomingRaces.length}`
+                : 'No active races'}
             </Text>
           </View>
 
@@ -758,7 +899,7 @@ export default function HomeScreen() {
               </Animated.View>
             </Pressable>
           ) : (
-            <Text style={styles.empty}>No upcoming race days yet.</Text>
+            <Text style={styles.empty}>No active races right now.</Text>
           )}
 
           {upcomingRaces.length > 1 ? (
@@ -828,6 +969,19 @@ export default function HomeScreen() {
           />
         }
       >
+        {upcomingRaces.length === 0 ? (
+          <View
+            style={styles.emptyRacesBanner}
+            accessibilityRole="text"
+            accessibilityLabel="No races available"
+          >
+            <Text style={styles.emptyRacesTitle}>You've no races available</Text>
+            <Text style={styles.emptyRacesBody}>
+              Once races become available for your competitions, they will show here.
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.homePanel}>
           <View style={styles.homePanelTabsRow}>
             <View style={styles.tabs}>
@@ -835,7 +989,7 @@ export default function HomeScreen() {
                 [
                   { key: 'competitions' as const, label: 'My competitions' },
                   { key: 'join' as const, label: 'Join' },
-                  { key: 'table' as const, label: 'Table' },
+                  { key: 'points' as const, label: 'Points system' },
                 ] as const
               ).map((t) => {
                 const active = tab === t.key;
@@ -903,6 +1057,129 @@ export default function HomeScreen() {
 
                   <View>
                     <Text style={styles.sectionLabel}>Your leagues</Text>
+                    {isStaff ? (
+                      <>
+                        <Pressable
+                          style={styles.createToggle}
+                          onPress={() => setShowCreate((v) => !v)}
+                          accessibilityRole="button"
+                          accessibilityState={{ expanded: showCreate }}
+                          accessibilityLabel="Create competition"
+                        >
+                          <Ionicons
+                            name={showCreate ? 'chevron-up' : 'add-circle-outline'}
+                            size={18}
+                            color={theme.colors.accent}
+                          />
+                          <Text style={styles.createToggleText}>Create competition</Text>
+                        </Pressable>
+                        {showCreate ? (
+                          <View style={styles.createPanel}>
+                            <Text style={styles.createFieldLabel}>Competition name</Text>
+                            <TextInput
+                              style={styles.createInput}
+                              value={createName}
+                              onChangeText={setCreateName}
+                              placeholder="e.g. Cheltenham office league"
+                              placeholderTextColor={theme.colors.textMuted}
+                              autoCorrect={false}
+                              editable={!creating}
+                            />
+                            <Text style={styles.createFieldLabel}>Start date</Text>
+                            {Platform.OS === 'web' ? (
+                              // @ts-expect-error web date input
+                              <input
+                                type="date"
+                                value={createStartDate}
+                                onChange={(e: { target: { value: string } }) =>
+                                  setCreateStartDate(e.target.value)
+                                }
+                                disabled={creating}
+                                style={{
+                                  fontFamily: theme.fontFamily.input,
+                                  fontSize: 14,
+                                  color: theme.colors.text,
+                                  backgroundColor: theme.colors.surface,
+                                  border: `1px solid ${theme.colors.border}`,
+                                  borderRadius: 6,
+                                  padding: 10,
+                                  width: '100%',
+                                }}
+                              />
+                            ) : (
+                              <TextInput
+                                style={styles.createInput}
+                                value={createStartDate}
+                                onChangeText={setCreateStartDate}
+                                placeholder="YYYY-MM-DD"
+                                placeholderTextColor={theme.colors.textMuted}
+                                autoCapitalize="none"
+                                editable={!creating}
+                              />
+                            )}
+                            <Text style={styles.createFieldLabel}>End date</Text>
+                            {Platform.OS === 'web' ? (
+                              // @ts-expect-error web date input
+                              <input
+                                type="date"
+                                value={createEndDate}
+                                onChange={(e: { target: { value: string } }) =>
+                                  setCreateEndDate(e.target.value)
+                                }
+                                disabled={creating}
+                                min={createStartDate || undefined}
+                                style={{
+                                  fontFamily: theme.fontFamily.input,
+                                  fontSize: 14,
+                                  color: theme.colors.text,
+                                  backgroundColor: theme.colors.surface,
+                                  border: `1px solid ${theme.colors.border}`,
+                                  borderRadius: 6,
+                                  padding: 10,
+                                  width: '100%',
+                                }}
+                              />
+                            ) : (
+                              <TextInput
+                                style={styles.createInput}
+                                value={createEndDate}
+                                onChangeText={setCreateEndDate}
+                                placeholder="YYYY-MM-DD"
+                                placeholderTextColor={theme.colors.textMuted}
+                                autoCapitalize="none"
+                                editable={!creating}
+                              />
+                            )}
+                            <Text style={styles.createFieldLabel}>Access code (optional)</Text>
+                            <TextInput
+                              style={styles.createInput}
+                              value={createAccessCode}
+                              onChangeText={setCreateAccessCode}
+                              placeholder="e.g. PN2027"
+                              placeholderTextColor={theme.colors.textMuted}
+                              maxLength={6}
+                              autoCapitalize="characters"
+                              editable={!creating}
+                            />
+                            <Text style={styles.createHint}>
+                              Festival dates set the competition window. Share the access code so
+                              others can request to join.
+                            </Text>
+                            <Pressable
+                              style={styles.createSubmit}
+                              onPress={() => void onCreateCompetition()}
+                              disabled={creating}
+                            >
+                              {creating ? (
+                                <ActivityIndicator color={theme.colors.black} size="small" />
+                              ) : (
+                                <Text style={styles.createSubmitText}>Create</Text>
+                              )}
+                            </Pressable>
+                          </View>
+                        ) : null}
+                      </>
+                    ) : null}
                     {comps.length === 0 ? (
                       <View style={styles.emptyBlock}>
                         <Text style={styles.empty}>
@@ -1000,18 +1277,7 @@ export default function HomeScreen() {
                 </View>
               ) : null}
 
-              {tab === 'table' ? (
-                <View style={styles.tableWrap}>
-                  {tableCompId ? (
-                    <HomeLeaderboardPanel
-                      competitionId={tableCompId}
-                      competitionName={tableCompName}
-                    />
-                  ) : (
-                    <Text style={styles.empty}>Join a competition to see the table.</Text>
-                  )}
-                </View>
-              ) : null}
+              {tab === 'points' ? <RacingPointsPanel compact /> : null}
             </View>
           ) : null}
         </View>
