@@ -721,9 +721,8 @@ export default function CompetitionHubScreen() {
           paddingBottom: theme.spacing.md,
         },
         panelLabel: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiMedium,
           fontSize: 11,
-          fontWeight: '700',
           color: activeAccent,
           letterSpacing: 1.4,
           textTransform: 'uppercase',
