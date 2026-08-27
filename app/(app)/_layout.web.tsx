@@ -1,59 +1,75 @@
-import { View, StyleSheet, useWindowDimensions, Platform, type ViewStyle, type DimensionValue } from 'react-native';
-import { useMemo } from 'react';
-import { Slot } from 'expo-router';
+import { useEffect, useMemo } from 'react';
+import { TouchableOpacity, View, StyleSheet, useWindowDimensions, Platform, type ViewStyle, type DimensionValue } from 'react-native';
+import { Stack } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme, NestedThemeProvider } from '@/contexts/ThemeContext';
 import { withRacingUi } from '@/constants/sportThemes';
 import { useAuth } from '@/contexts/AuthContext';
-import { AppLockProvider, useAppLock } from '@/contexts/AppLockContext';
-import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
-import { SidebarProvider } from '@/contexts/SidebarContext';
+import { useSidebar, SidebarProvider } from '@/contexts/SidebarContext';
 import { AppSidebar } from '@/components/AppSidebar';
 import { AppUnlockScreen } from '@/components/AppUnlockScreen';
+import { setLastRoute } from '@/lib/lastRoute';
+import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
+import { AppLockProvider, useAppLock } from '@/contexts/AppLockContext';
 
-/**
- * Web racing shell — LMS-style: no top tab strip.
- * Home owns the Top Tipster Racing header; other screens use Stack headers from native layout
- * via the shared Slot. Burger menu covers Results / Rules / etc.
- */
-function WebShell() {
+function MenuHeaderButton() {
+  const theme = useTheme();
+  const { openSidebar } = useSidebar();
+  return (
+    <TouchableOpacity onPress={openSidebar} style={{ marginLeft: 12 }} hitSlop={12}>
+      <Ionicons name="menu" size={24} color={theme.colors.text} />
+    </TouchableOpacity>
+  );
+}
+
+function AppStack() {
   const theme = useTheme();
   const { width } = useWindowDimensions();
   const isWide = width >= 768;
 
-  const webShell: ViewStyle | undefined =
+  const shell: ViewStyle | undefined =
     Platform.OS === 'web'
       ? {
+          flex: 1,
           width: '100%',
           height: '100vh' as DimensionValue,
           maxHeight: '100vh' as DimensionValue,
-          overflow: 'hidden',
+          ...(isWide ? { paddingHorizontal: 24, paddingTop: 12, paddingBottom: 20 } : null),
         }
       : undefined;
 
-  const styles = StyleSheet.create({
-    wrapper: {
-      flex: 1,
-      backgroundColor: theme.colors.background,
-      ...(isWide
-        ? {
-            paddingHorizontal: 24,
-            paddingTop: 20,
-            paddingBottom: 20,
-          }
-        : null),
-    },
-    content: {
-      flex: 1,
-      minHeight: 0,
-      width: '100%',
-      ...(isWide ? { maxWidth: 960, alignSelf: 'center' as const } : null),
-    },
-  });
-
   return (
-    <View style={[styles.wrapper, webShell]}>
-      <View style={styles.content}>
-        <Slot />
+    <View style={[{ flex: 1, backgroundColor: theme.colors.background }, shell]}>
+      <View
+        style={[
+          { flex: 1, minHeight: 0, width: '100%' },
+          isWide ? { maxWidth: 960, alignSelf: 'center' as const } : null,
+        ]}
+      >
+        <Stack
+          screenOptions={{
+            headerStyle: { backgroundColor: theme.colors.background },
+            headerTintColor: theme.colors.text,
+            headerTitleStyle: { fontFamily: theme.fontFamily.baiBold, fontSize: 17 },
+            headerShadowVisible: false,
+            headerLeft: () => <MenuHeaderButton />,
+            contentStyle: { backgroundColor: theme.colors.background },
+          }}
+        >
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="selections" options={{ title: 'Selections' }} />
+          <Stack.Screen name="competitions" options={{ title: 'Competitions' }} />
+          <Stack.Screen name="results" options={{ title: 'Results' }} />
+          <Stack.Screen name="leaderboard" options={{ title: 'Leaderboard' }} />
+          <Stack.Screen name="competition/[competitionId]" options={{ title: 'Competition' }} />
+          <Stack.Screen name="participant-selections" options={{ title: 'Selections' }} />
+          <Stack.Screen name="rules" options={{ title: 'Rules' }} />
+          <Stack.Screen name="points" options={{ title: 'Points system' }} />
+          <Stack.Screen name="account" options={{ title: 'Account' }} />
+          <Stack.Screen name="change-password" options={{ title: 'Change password' }} />
+          <Stack.Screen name="reminders" options={{ title: 'Reminders' }} />
+          <Stack.Screen name="tutorial-sandbox" options={{ title: 'Tutorial' }} />
+        </Stack>
       </View>
       <AppSidebar />
     </View>
@@ -66,11 +82,15 @@ function AppLayoutWebContent() {
   const baseTheme = useTheme();
   const racingTheme = useMemo(() => withRacingUi(baseTheme), [baseTheme]);
 
+  useEffect(() => {
+    if (session) void setLastRoute('/(app)');
+  }, [session?.user?.id]);
+
   return (
     <NestedThemeProvider theme={racingTheme}>
       <ForceRefreshProvider>
         <SidebarProvider initialVariant="racing">
-          {session && isLocked ? <AppUnlockScreen /> : <WebShell />}
+          {session && isLocked ? <AppUnlockScreen /> : <AppStack />}
         </SidebarProvider>
       </ForceRefreshProvider>
     </NestedThemeProvider>
