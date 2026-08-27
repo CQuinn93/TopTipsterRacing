@@ -16,7 +16,7 @@ import { useSidebar } from '@/contexts/SidebarContext';
 
 /**
  * Shared sport menu (hamburger).
- * Racing: Return to Home, Results, Competitions, Rules, Points
+ * Racing: Return to Home, Results, Rules
  * LMS: Return to Home, Table, Rules, How it works
  * Admin tools live on the competition hub Admin tab only.
  */
