@@ -16,7 +16,7 @@ import { useSidebar } from '@/contexts/SidebarContext';
 
 /**
  * Shared sport menu (hamburger).
- * Racing: Return to Home
+ * Racing: Return to Home, Results, Competitions, Rules, Points
  * LMS: Return to Home, Table, Rules, How it works
  * Admin tools live on the competition hub Admin tab only.
  */
@@ -146,7 +146,46 @@ export function AppSidebar() {
                   <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
                 </TouchableOpacity>
               </>
-            ) : null}
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={styles.menuButton}
+                  onPress={() => goTo('/(app)/results')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="trophy-outline" size={22} color={theme.colors.accent} />
+                  <Text style={styles.menuButtonText}>Results</Text>
+                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuButton}
+                  onPress={() => goTo('/(app)/competitions')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="people-outline" size={22} color={theme.colors.accent} />
+                  <Text style={styles.menuButtonText}>Competitions</Text>
+                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuButton}
+                  onPress={() => goTo('/(app)/rules')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="document-text-outline" size={22} color={theme.colors.accent} />
+                  <Text style={styles.menuButtonText}>Rules</Text>
+                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuButton}
+                  onPress={() => goTo('/(app)/points')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="ribbon-outline" size={22} color={theme.colors.accent} />
+                  <Text style={styles.menuButtonText}>Points system</Text>
+                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+                </TouchableOpacity>
+              </>
+            )}
           </ScrollView>
         </Pressable>
       </Pressable>

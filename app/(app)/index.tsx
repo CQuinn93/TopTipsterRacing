@@ -345,7 +345,10 @@ export default function HomeScreen() {
       StyleSheet.create({
         wrapper: { flex: 1, backgroundColor: theme.colors.background },
         header: {
-          paddingTop: Platform.OS === 'web' ? theme.spacing.sm : insets.top + theme.spacing.sm,
+          paddingTop:
+            Platform.OS === 'web'
+              ? Math.max(theme.spacing.md, insets.top + 6)
+              : insets.top + theme.spacing.sm,
           paddingHorizontal: theme.spacing.lg,
           paddingBottom: theme.spacing.sm,
           flexDirection: 'row',
@@ -643,6 +646,28 @@ export default function HomeScreen() {
           color: theme.colors.accent,
         },
         tableWrap: { minHeight: 120 },
+        selectionsPanel: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.lg,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          overflow: 'hidden',
+          paddingHorizontal: theme.spacing.md,
+          paddingTop: theme.spacing.md,
+          paddingBottom: theme.spacing.md,
+        },
+        selectionsHeadRow: {
+          flexDirection: 'row',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 8,
+          marginBottom: 8,
+        },
+        selectionsScope: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
       }),
     [theme, insets.top, insets.bottom, isNarrowWeb, isWideWeb]
   );
@@ -989,6 +1014,81 @@ export default function HomeScreen() {
               ) : null}
             </View>
           ) : null}
+        </View>
+
+        <View style={styles.selectionsPanel}>
+          <View style={styles.selectionsHeadRow}>
+            <Text style={[styles.sectionLabel, { marginBottom: 0 }]}>Selections</Text>
+            <Text style={styles.selectionsScope}>
+              {upcomingRaces.length > 0 ? 'upcoming race days' : 'no open days'}
+            </Text>
+          </View>
+          {upcomingRaces.length === 0 ? (
+            <Text style={styles.empty}>
+              {participations.length === 0
+                ? 'Join a competition to make daily picks.'
+                : 'No upcoming race days with open or live cards yet.'}
+            </Text>
+          ) : (
+            <View style={styles.list}>
+              {upcomingRaces.map((day, i) => {
+                const dayNum = dayNumberByKey.get(`${day.competitionId}:${day.raceDate}`);
+                const status = day.isLocked
+                  ? day.hasAllPicks
+                    ? 'Locked · picks in'
+                    : 'Locked'
+                  : day.hasAllPicks
+                    ? 'Picks complete'
+                    : `${day.pendingCount} pick${day.pendingCount === 1 ? '' : 's'} left`;
+                const timeLabel = new Date(day.firstRaceUtc).toLocaleString(undefined, {
+                  weekday: 'short',
+                  day: 'numeric',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                });
+                return (
+                  <Pressable
+                    key={`${day.competitionId}:${day.raceDayId}`}
+                    style={[styles.row, i === upcomingRaces.length - 1 && styles.rowLast]}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/(app)/selections',
+                        params: {
+                          competitionId: day.competitionId,
+                          raceDate: day.raceDate,
+                        },
+                      } as any)
+                    }
+                  >
+                    <View style={styles.rowCopy}>
+                      <View style={styles.rowTitleRow}>
+                        <Text style={styles.rowTitle} numberOfLines={1}>
+                          {day.course}
+                        </Text>
+                        {dayNum != null ? (
+                          <View style={styles.manageChip}>
+                            <Text style={styles.manageChipText}>Day {dayNum}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      <Text style={styles.rowMeta}>
+                        {day.competitionName} · {timeLabel}
+                      </Text>
+                      <Text
+                        style={
+                          !day.isLocked && !day.hasAllPicks ? styles.rowPickHint : styles.rowMeta
+                        }
+                      >
+                        {status}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={theme.colors.textMuted} />
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
         </View>
       </ScrollView>
     </View>
