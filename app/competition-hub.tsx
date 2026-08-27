@@ -538,12 +538,22 @@ export default function CompetitionHubScreen() {
         ]
       : tab === 'racing'
         ? [
-            {
-              key: 'top-tipster-racing',
-              title: 'Top Tipster Racing',
-              status: 'Closed',
-              unavailable: true,
-            },
+            isOwner
+              ? {
+                  key: 'top-tipster-racing',
+                  title: 'Top Tipster Racing',
+                  status: 'Open',
+                  onPress: () => {
+                    void setLastRoute('/(app)');
+                    router.replace('/(app)' as any);
+                  },
+                }
+              : {
+                  key: 'top-tipster-racing',
+                  title: 'Top Tipster Racing',
+                  status: 'Closed',
+                  unavailable: true,
+                },
           ]
         : tab === 'admin'
           ? [
