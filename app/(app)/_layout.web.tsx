@@ -237,14 +237,20 @@ function MobileWebLayout() {
     },
   });
 
+  const isHome = currentSegment === 'index' || currentSegment === '(app)';
+
   return (
     <View style={[styles.wrapper, webMobileShell]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={openSidebar} hitSlop={12} style={{ padding: 4 }}>
-          <Ionicons name="menu" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{headerTitle}</Text>
-      </View>
+      {!isHome ? (
+        <View style={styles.header}>
+          <TouchableOpacity onPress={openSidebar} hitSlop={12} style={{ padding: 4 }}>
+            <Ionicons name="menu" size={24} color={theme.colors.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle} numberOfLines={1}>{headerTitle}</Text>
+        </View>
+      ) : (
+        <View style={{ height: Math.max(0, insets.top) }} />
+      )}
       <View style={styles.tabBar}>
         {NAV_ITEMS.map((item) => {
           const active = isActive(item.href);

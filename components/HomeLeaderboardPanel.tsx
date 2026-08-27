@@ -116,18 +116,16 @@ export function HomeLeaderboardPanel({
     () =>
       StyleSheet.create({
         panel: {
-          width: 300,
+          width: '100%',
           flexShrink: 0,
-          backgroundColor: theme.colors.surface,
-          borderRadius: 12,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          padding: 16,
+          backgroundColor: 'transparent',
+          borderRadius: 0,
+          borderWidth: 0,
+          padding: 0,
         },
         title: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiBold,
           fontSize: 14,
-          fontWeight: '700',
           color: theme.colors.text,
           marginBottom: 12,
         },
@@ -144,9 +142,8 @@ export function HomeLeaderboardPanel({
           backgroundColor: theme.colors.accentMuted,
         },
         rank: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: 12,
-          fontWeight: '700',
           width: 20,
           color: theme.colors.textSecondary,
         },
@@ -155,14 +152,13 @@ export function HomeLeaderboardPanel({
         },
         name: {
           flex: 1,
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiMedium,
           fontSize: 13,
           color: theme.colors.text,
         },
         score: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: 12,
-          fontWeight: '600',
           color: theme.colors.textSecondary,
         },
         link: {
@@ -171,12 +167,12 @@ export function HomeLeaderboardPanel({
           justifyContent: 'center',
           marginTop: 12,
           paddingTop: 12,
-          borderTopWidth: 1,
+          borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: theme.colors.border,
           gap: 6,
         },
         linkText: {
-          fontFamily: theme.fontFamily.regular,
+          fontFamily: theme.fontFamily.baiMedium,
           fontSize: 13,
           fontWeight: '600',
           color: theme.colors.accent,

@@ -3,16 +3,17 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
   RefreshControl,
   ActivityIndicator,
   useWindowDimensions,
   Platform,
-  Modal,
   Pressable,
+  TextInput,
+  Alert,
+  Animated,
 } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,33 +27,58 @@ import { useForceRefresh } from '@/contexts/ForceRefreshContext';
 import type { ParticipationRow } from '@/lib/availableRacesCache';
 import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
 import { getCompetitionDisplayStatus } from '@/lib/appUtils';
-import { decimalToFractional } from '@/lib/oddsFormat';
-import { requestPermissionsAndSetup, scheduleSelectionReminders } from '@/lib/selectionReminderNotifications';
-import { getNotificationCompetitionIds } from '@/lib/notificationCompetitionPrefs';
+import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
 import { HomeLeaderboardPanel } from '@/components/HomeLeaderboardPanel';
-import { HomeSelectionsAndResults } from '@/components/HomeSelectionsAndResults';
+
+const RACE_CYCLE_MS = 6500;
+const RACE_SLIDE_MS = 380;
+
+type HomeTab = 'competitions' | 'join' | 'table';
+
+type PendingJoin = {
+  competition_id: string;
+  name: string;
+};
+
 export default function HomeScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { openSidebar } = useSidebar();
   const { userId, session } = useAuth();
-  const [displayName, setDisplayName] = useState<string>('');
+  const params = useLocalSearchParams<{ tab?: string }>();
+  const [displayName, setDisplayName] = useState('');
   const [participations, setParticipations] = useState<ParticipationRow[]>([]);
   const [availableRaces, setAvailableRaces] = useState<AvailableRaceDay[]>([]);
   const [summaryByComp, setSummaryByComp] = useState<HomeSummaryByComp | null>(null);
-  const [selectedCompId, setSelectedCompId] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingJoin[]>([]);
+  const [compStatusByCompId, setCompStatusByCompId] = useState<
+    Record<string, 'upcoming' | 'live' | 'complete'>
+  >({});
+  const [compDateRangeByCompId, setCompDateRangeByCompId] = useState<
+    Record<string, { start: string; end: string }>
+  >({});
+  const [creatorByCompId, setCreatorByCompId] = useState<Record<string, string | null>>({});
   const [refreshing, setRefreshing] = useState(false);
-  const [compStatusByCompId, setCompStatusByCompId] = useState<Record<string, 'upcoming' | 'live' | 'complete'>>({});
-  const [compPositionByCompId, setCompPositionByCompId] = useState<Record<string, number | null>>({});
-  const [participantCountByCompId, setParticipantCountByCompId] = useState<Record<string, number>>({});
-  const [compDaysByCompId, setCompDaysByCompId] = useState<Record<string, number>>({});
-  const [compDateRangeByCompId, setCompDateRangeByCompId] = useState<Record<string, { start: string; end: string }>>({});
-  const [compTab, setCompTab] = useState<'upcoming' | 'live' | 'complete'>('live');
-  const [compDropdownOpen, setCompDropdownOpen] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
+  const [tab, setTab] = useState<HomeTab>('competitions');
+  const [homePanelExpanded, setHomePanelExpanded] = useState(true);
+  const [joinCode, setJoinCode] = useState('');
+  const [joining, setJoining] = useState(false);
+  const [raceIndex, setRaceIndex] = useState(0);
+  const [raceCardWidth, setRaceCardWidth] = useState(0);
+  const raceSlideX = useRef(new Animated.Value(0)).current;
+  const raceCycleRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { width: windowWidth } = useWindowDimensions();
   const isNarrowWeb = Platform.OS === 'web' && windowWidth < 768;
   const isWideWeb = Platform.OS === 'web' && windowWidth >= 768;
+  const isWeb = Platform.OS === 'web';
+
+  useEffect(() => {
+    const next = String(params.tab ?? '').trim();
+    if (next === 'join' || next === 'table' || next === 'competitions') {
+      setTab(next);
+      setHomePanelExpanded(true);
+    }
+  }, [params.tab]);
 
   useEffect(() => {
     if (!userId) return;
@@ -72,7 +98,9 @@ export default function HomeScreen() {
         if (!cancelled) setDisplayName(session?.user?.email?.split('@')[0] ?? 'there');
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [userId, session?.user?.email]);
 
   const load = useCallback(
@@ -80,96 +108,92 @@ export default function HomeScreen() {
       if (!userId) return;
       if (isPullRefresh) setRefreshing(true);
       try {
-        const { participations: p, availableRaces: r } = await getAvailableRacesForUser(supabase, userId, forceRefresh);
+        const [{ participations: p, availableRaces: r }, pendingRes] = await Promise.all([
+          getAvailableRacesForUser(supabase, userId, forceRefresh),
+          supabase
+            .from('competition_join_requests')
+            .select('competition_id')
+            .eq('user_id', userId)
+            .eq('status', 'pending'),
+        ]);
         setParticipations(p);
         setAvailableRaces(r);
-        const optedIn = await getNotificationCompetitionIds(userId);
-        const optedInSet = new Set(optedIn);
-        const toSchedule = r.filter((day) => optedInSet.has(day.competitionId));
-        if (toSchedule.length > 0) {
-          requestPermissionsAndSetup().then((granted: boolean) => {
-            if (granted) scheduleSelectionReminders(toSchedule);
-          });
-        }
-        if (p.length > 0) {
-          const compIds = p.map((x) => x.competition_id);
-          const [summary, compsRes, partsCountRes] = await Promise.all([
-            fetchHomeSummaryByComp(supabase, userId, compIds),
-            supabase.from('competitions').select('id, festival_start_date, festival_end_date').in('id', compIds),
-            supabase.from('competition_participants').select('competition_id').in('competition_id', compIds),
-          ]);
-          setSummaryByComp(summary);
-          const statusByComp: Record<string, 'upcoming' | 'live' | 'complete'> = {};
-          const daysByComp: Record<string, number> = {};
-          const dateRangeByComp: Record<string, { start: string; end: string }> = {};
-          const countByComp: Record<string, number> = {};
-          for (const c of compsRes.data ?? []) {
-            const row = c as { id: string; festival_start_date: string; festival_end_date: string };
-            statusByComp[row.id] = getCompetitionDisplayStatus(row.festival_start_date, row.festival_end_date) ?? 'live';
-            const start = new Date(row.festival_start_date).getTime();
-            const end = new Date(row.festival_end_date).getTime();
-            daysByComp[row.id] = Math.max(1, Math.round((end - start) / (24 * 60 * 60 * 1000)) + 1);
-            dateRangeByComp[row.id] = {
-              start: new Date(row.festival_start_date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
-              end: new Date(row.festival_end_date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }),
-            };
-          }
-          for (const p of partsCountRes.data ?? []) {
-            const compId = (p as { competition_id: string }).competition_id;
-            countByComp[compId] = (countByComp[compId] ?? 0) + 1;
-          }
-          setCompStatusByCompId(statusByComp);
-          setCompDaysByCompId(daysByComp);
-          setCompDateRangeByCompId(dateRangeByComp);
-          setParticipantCountByCompId(countByComp);
 
-          if (compIds.length > 0) {
-            const { data: allSelections } = await supabase
-              .from('daily_selections')
-              .select('competition_id, user_id, selections')
-              .in('competition_id', compIds);
-            type SelRow = { competition_id: string; user_id: string; selections: Record<string, { oddsDecimal?: number }> | null };
-            const rows = (allSelections ?? []) as SelRow[];
-            const totalByCompUser: Record<string, Record<string, number>> = {};
-            const positionByComp: Record<string, number | null> = {};
-            for (const compId of compIds) totalByCompUser[compId] = {};
-            for (const row of rows) {
-              const sel = row.selections;
-              if (!sel) continue;
-              const compId = row.competition_id;
-              const uid = row.user_id;
-              let sum = 0;
-              for (const v of Object.values(sel)) {
-                if (v?.oddsDecimal != null) sum += Math.round(v.oddsDecimal * 10);
-              }
-              totalByCompUser[compId][uid] = (totalByCompUser[compId][uid] ?? 0) + sum;
-            }
-            for (const compId of compIds) {
-              const byUser = totalByCompUser[compId] ?? {};
-              const sorted = Object.entries(byUser).sort((a, b) => b[1] - a[1]);
-              const idx = sorted.findIndex(([uid]) => uid === userId);
-              positionByComp[compId] = idx >= 0 ? idx + 1 : null;
-            }
-            setCompPositionByCompId(positionByComp);
-          }
-
-          if (selectedCompId !== null && !p.some((x) => x.competition_id === selectedCompId)) {
-            setSelectedCompId(p[0]?.competition_id ?? null);
-          }
+        const pendingIds = (pendingRes.data ?? []).map(
+          (row) => (row as { competition_id: string }).competition_id
+        );
+        if (pendingIds.length > 0) {
+          const { data: pendingComps } = await supabase
+            .from('competitions')
+            .select('id, name')
+            .in('id', pendingIds);
+          const nameById = new Map(
+            (pendingComps ?? []).map((c) => {
+              const row = c as { id: string; name: string };
+              return [row.id, row.name] as const;
+            })
+          );
+          setPending(
+            pendingIds.map((id) => ({
+              competition_id: id,
+              name: nameById.get(id) ?? 'Competition',
+            }))
+          );
         } else {
-          setSummaryByComp(null);
-          setSelectedCompId(null);
-          setCompStatusByCompId({});
-          setCompPositionByCompId({});
-          setParticipantCountByCompId({});
-          setCompDaysByCompId({});
-          setCompDateRangeByCompId({});
+          setPending([]);
         }
+
+        if (p.length === 0) {
+          setSummaryByComp(null);
+          setCompStatusByCompId({});
+          setCompDateRangeByCompId({});
+          setCreatorByCompId({});
+          setTab((prev) => (prev === 'competitions' ? 'join' : prev));
+          return;
+        }
+
+        const compIds = p.map((x) => x.competition_id);
+        const [summary, compsRes] = await Promise.all([
+          fetchHomeSummaryByComp(supabase, userId, compIds),
+          supabase
+            .from('competitions')
+            .select('id, festival_start_date, festival_end_date, created_by_user_id')
+            .in('id', compIds),
+        ]);
+        setSummaryByComp(summary);
+
+        const statusByComp: Record<string, 'upcoming' | 'live' | 'complete'> = {};
+        const dateRangeByComp: Record<string, { start: string; end: string }> = {};
+        const creatorByComp: Record<string, string | null> = {};
+        for (const c of compsRes.data ?? []) {
+          const row = c as {
+            id: string;
+            festival_start_date: string;
+            festival_end_date: string;
+            created_by_user_id: string | null;
+          };
+          statusByComp[row.id] =
+            getCompetitionDisplayStatus(row.festival_start_date, row.festival_end_date) ?? 'live';
+          dateRangeByComp[row.id] = {
+            start: new Date(row.festival_start_date).toLocaleDateString(undefined, {
+              day: 'numeric',
+              month: 'short',
+            }),
+            end: new Date(row.festival_end_date).toLocaleDateString(undefined, {
+              day: 'numeric',
+              month: 'short',
+            }),
+          };
+          creatorByComp[row.id] = row.created_by_user_id;
+        }
+        setCompStatusByCompId(statusByComp);
+        setCompDateRangeByCompId(dateRangeByComp);
+        setCreatorByCompId(creatorByComp);
       } finally {
         if (isPullRefresh) setRefreshing(false);
       }
     },
-    [userId, selectedCompId]
+    [userId]
   );
 
   const onRefresh = useCallback(() => {
@@ -179,102 +203,286 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      if (userId) load(false);
+      if (userId) void load(false);
     }, [userId, load])
   );
 
   const { homeTrigger } = useForceRefresh();
   useEffect(() => {
-    if (userId && homeTrigger > 0) load(true);
+    if (userId && homeTrigger > 0) void load(true);
   }, [userId, homeTrigger, load]);
 
-  const hasJoinedAny = participations.length > 0;
-  const compList = summaryByComp
-    ? participations.map((p) => ({ id: p.competition_id, name: summaryByComp.byComp[p.competition_id]?.name ?? p.competition_id }))
-    : [];
-  const compListFiltered = compList.filter((c) => compStatusByCompId[c.id] === compTab);
-  const effectiveCompId =
-    selectedCompId && compListFiltered.some((c) => c.id === selectedCompId)
-      ? selectedCompId
-      : compListFiltered[0]?.id ?? null;
+  const nowMs = Date.now();
+  const upcomingRaces = useMemo(
+    () =>
+      availableRaces
+        .filter((d) => new Date(d.lastRaceUtc).getTime() > nowMs)
+        .sort((a, b) => a.firstRaceUtc.localeCompare(b.firstRaceUtc)),
+    [availableRaces, nowMs]
+  );
 
-  const currentSummary = summaryByComp && effectiveCompId ? summaryByComp.byComp[effectiveCompId] : null;
+  const dayNumberByKey = useMemo(() => {
+    const map = new Map<string, number>();
+    const byComp = new Map<string, string[]>();
+    for (const d of availableRaces) {
+      const list = byComp.get(d.competitionId) ?? [];
+      if (!list.includes(d.raceDate)) list.push(d.raceDate);
+      byComp.set(d.competitionId, list);
+    }
+    for (const [compId, dates] of byComp) {
+      const sorted = [...dates].sort();
+      sorted.forEach((date, i) => map.set(`${compId}:${date}`, i + 1));
+    }
+    return map;
+  }, [availableRaces]);
 
-  const compListFilteredIds = compListFiltered.map((c) => c.id).join(',');
   useEffect(() => {
-    if (compListFiltered.length === 0) {
-      setSelectedCompId(null);
+    if (raceIndex >= upcomingRaces.length) setRaceIndex(0);
+  }, [upcomingRaces.length, raceIndex]);
+
+  const goToRace = useCallback(
+    (next: number, opts?: { direction?: 'left' | 'right' }) => {
+      if (upcomingRaces.length === 0) return;
+      const target = ((next % upcomingRaces.length) + upcomingRaces.length) % upcomingRaces.length;
+      if (target === raceIndex) return;
+      const width = raceCardWidth > 0 ? raceCardWidth : 280;
+      const dir = opts?.direction === 'right' ? 1 : -1;
+      raceSlideX.setValue(-dir * width);
+      setRaceIndex(target);
+      Animated.timing(raceSlideX, {
+        toValue: 0,
+        duration: RACE_SLIDE_MS,
+        useNativeDriver: true,
+      }).start();
+    },
+    [upcomingRaces.length, raceIndex, raceCardWidth, raceSlideX]
+  );
+
+  useEffect(() => {
+    if (raceCycleRef.current) clearInterval(raceCycleRef.current);
+    if (upcomingRaces.length <= 1) return;
+    raceCycleRef.current = setInterval(() => {
+      goToRace(raceIndex + 1, { direction: 'left' });
+    }, RACE_CYCLE_MS);
+    return () => {
+      if (raceCycleRef.current) clearInterval(raceCycleRef.current);
+    };
+  }, [upcomingRaces.length, raceIndex, goToRace]);
+
+  const activeRace = upcomingRaces[raceIndex] ?? null;
+  const comps = participations.map((p) => {
+    const id = p.competition_id;
+    const name = summaryByComp?.byComp[id]?.name ?? id;
+    const status = compStatusByCompId[id] ?? 'live';
+    const range = compDateRangeByCompId[id];
+    const nextDay = upcomingRaces.find((d) => d.competitionId === id);
+    return {
+      id,
+      name,
+      status,
+      range,
+      isCreator: creatorByCompId[id] === userId,
+      pickHint: nextDay
+        ? nextDay.hasAllPicks
+          ? nextDay.isLocked
+            ? 'Selections locked'
+            : 'Picks complete'
+          : nextDay.isLocked
+            ? 'Selections locked'
+            : 'Pick available'
+        : status === 'complete'
+          ? 'Festival complete'
+          : null,
+    };
+  });
+
+  const tableCompId = comps.find((c) => c.status === 'live')?.id ?? comps[0]?.id ?? null;
+  const tableCompName =
+    (tableCompId && summaryByComp?.byComp[tableCompId]?.name) ||
+    comps.find((c) => c.id === tableCompId)?.name ||
+    'Competition';
+
+  const onJoin = async () => {
+    if (!userId) {
+      Alert.alert('Error', 'You must be signed in.');
       return;
     }
-    if (!compListFiltered.some((c) => c.id === selectedCompId)) {
-      setSelectedCompId(compListFiltered[0]?.id ?? null);
+    setJoining(true);
+    try {
+      const outcome = await joinCompetitionWithAccessCode({
+        userId,
+        code: joinCode,
+        displayNameToUse: displayName.trim() || 'Tipster',
+      });
+      if (outcome.kind === 'error') {
+        Alert.alert('Error', outcome.message);
+        return;
+      }
+      if (outcome.kind === 'invalid_code') {
+        Alert.alert('Invalid code', 'This access code is not recognised.');
+        return;
+      }
+      if (outcome.kind === 'already_in') {
+        Alert.alert('Already in', `You're already in "${outcome.competitionName}".`);
+        setTab('competitions');
+        await load(true);
+        return;
+      }
+      Alert.alert(
+        'Request sent',
+        `Your request to join "${outcome.competitionName}" has been sent. An admin will approve you soon.`
+      );
+      setJoinCode('');
+      setTab('competitions');
+      await load(true);
+    } finally {
+      setJoining(false);
     }
-  }, [compTab, compListFilteredIds]);
-
-  const isWeb = Platform.OS === 'web';
+  };
 
   const styles = useMemo(
-    () => {
-      const compact = isNarrowWeb;
-      return StyleSheet.create({
-        wrapper: { flex: 1, backgroundColor: theme.colors.background, ...(isWeb && { paddingHorizontal: 0 }) },
-        container: { flex: 1 },
-        webHomeScrollOuter: {
-          flex: 1,
-          width: '100%',
-          alignItems: 'center',
-        },
-        webHomeScroll: {
-          width: '100%',
-          maxWidth: 960,
-        },
-        content: {
-          padding: theme.spacing.md,
-          paddingTop: 0,
-          ...(isWeb && { padding: 24, paddingBottom: 48, paddingTop: 0 }),
-          ...(isWeb && !compact && { paddingHorizontal: 28 }),
-        },
+    () =>
+      StyleSheet.create({
+        wrapper: { flex: 1, backgroundColor: theme.colors.background },
         header: {
           paddingTop:
             Platform.OS === 'web'
               ? Math.max(theme.spacing.md, insets.top + 6)
               : insets.top + theme.spacing.sm,
-          paddingHorizontal: theme.spacing.md,
+          paddingHorizontal: theme.spacing.lg,
           paddingBottom: theme.spacing.sm,
           flexDirection: 'row',
           alignItems: 'center',
           gap: theme.spacing.md,
-          ...(isWeb && !compact && { paddingHorizontal: 28 }),
         },
         headerMenu: { padding: 4 },
-        headerTitleBlock: { flex: 1 },
+        titleBlock: { flex: 1 },
         headerRefresh: {
           padding: 6,
           minWidth: 36,
           alignItems: 'center',
           justifyContent: 'center',
         },
-        headerTitle: {
+        title: {
           fontFamily: theme.fontFamily.baiBold,
           fontSize: 20,
           color: theme.colors.text,
         },
-        headerSub: {
+        sub: {
           fontFamily: theme.fontFamily.baiLight,
           fontSize: 13,
           color: theme.colors.accent,
           marginTop: 2,
         },
-        sectionTitle: {
-          fontFamily: theme.fontFamily.baiBold,
-          fontSize: compact ? 13 : 15,
-          color: theme.colors.text,
-          marginTop: theme.spacing.lg,
-          marginBottom: compact ? theme.spacing.xs : theme.spacing.sm,
+        spotlightWrap: {
+          paddingHorizontal: theme.spacing.lg,
+          paddingBottom: theme.spacing.sm,
         },
-        sectionTitleFirst: {
-          marginTop: 0,
-          marginBottom: theme.spacing.sm,
+        spotlight: {
+          backgroundColor: theme.colors.surfaceElevated,
+          borderRadius: theme.radius.lg,
+          borderWidth: 1.5,
+          borderColor: theme.colors.accent,
+          paddingVertical: 16,
+          paddingHorizontal: 16,
+          gap: 12,
+          shadowColor: theme.colors.accent,
+          shadowOpacity: 0.18,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: 0 },
+          elevation: 4,
+        },
+        spotlightHead: {
+          flexDirection: 'row',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 8,
+        },
+        spotlightTitle: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 12,
+          letterSpacing: 1.2,
+          textTransform: 'uppercase',
+          color: theme.colors.accent,
+        },
+        spotlightMeta: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          flexShrink: 1,
+          textAlign: 'right',
+        },
+        cardTap: { paddingVertical: 6, overflow: 'hidden' },
+        cardSlide: { width: '100%' },
+        cardRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+        },
+        cardSide: { flex: 1, alignItems: 'center', gap: 6, minWidth: 0 },
+        cardCourse: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 15,
+          color: theme.colors.text,
+          textAlign: 'center',
+        },
+        cardComp: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          textAlign: 'center',
+        },
+        cardMid: { alignItems: 'center', minWidth: 72, gap: 4 },
+        cardVs: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        cardTime: {
+          fontFamily: theme.fontFamily.baiExtraLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          textAlign: 'center',
+        },
+        cardRaceName: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.text,
+          textAlign: 'center',
+        },
+        cardHint: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 10,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: theme.colors.accent,
+          textAlign: 'center',
+        },
+        dots: {
+          flexDirection: 'row',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: 5,
+          paddingTop: 2,
+        },
+        dot: {
+          width: 5,
+          height: 5,
+          borderRadius: 2.5,
+          backgroundColor: theme.colors.borderLight,
+        },
+        dotActive: {
+          backgroundColor: theme.colors.accent,
+          width: 14,
+          borderRadius: 3,
+        },
+        mainScroll: { flex: 1 },
+        mainScrollContent: {
+          paddingHorizontal: theme.spacing.lg,
+          paddingBottom: insets.bottom + theme.spacing.xl,
+          gap: theme.spacing.md,
+          flexGrow: 1,
+          ...(isWideWeb ? { maxWidth: 960, width: '100%', alignSelf: 'center' as const } : null),
         },
         homePanel: {
           backgroundColor: theme.colors.surface,
@@ -282,7 +490,6 @@ export default function HomeScreen() {
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
           overflow: 'hidden',
-          marginBottom: theme.spacing.md,
         },
         homePanelTabsRow: {
           flexDirection: 'row',
@@ -291,485 +498,271 @@ export default function HomeScreen() {
           borderBottomColor: theme.colors.border,
           backgroundColor: theme.colors.surface,
         },
-        panelBody: {
-          padding: compact ? theme.spacing.sm : theme.spacing.md,
-        },
-        accountLink: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.spacing.xs,
-        },
-        accountLinkText: {
-          fontFamily: theme.fontFamily.baiMedium,
-          fontSize: 14,
-          color: theme.colors.text,
-        },
-        primaryButton: {
-          backgroundColor: theme.colors.accent,
-          borderRadius: theme.radius.sm,
-          paddingVertical: theme.spacing.sm,
-          paddingHorizontal: theme.spacing.md,
-          alignItems: 'center',
-          marginBottom: theme.spacing.md,
-        },
-        primaryButtonText: {
-          fontFamily: theme.fontFamily.baiSemiBold,
-          fontSize: 14,
-          color: theme.colors.black,
-        },
-        heroCard: {
-          backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.lg,
-          padding: isWeb ? 24 : theme.spacing.md,
-          marginBottom: theme.spacing.lg,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.colors.accent,
-          overflow: 'hidden',
-        },
-        heroEyebrow: {
-          fontFamily: theme.fontFamily.baiMedium,
-          fontSize: 10,
-          color: theme.colors.textMuted,
-          marginBottom: theme.spacing.xs,
-          textTransform: 'uppercase',
-          letterSpacing: 0.8,
-        },
-        heroTitle: {
-          fontFamily: theme.fontFamily.baiBold,
-          fontSize: 20,
-          color: theme.colors.text,
-          marginBottom: theme.spacing.sm,
-        },
-        heroBody: {
-          fontFamily: theme.fontFamily.baiLight,
-          fontSize: 14,
-          color: theme.colors.textSecondary,
-          lineHeight: 21,
-          marginBottom: theme.spacing.md,
-        },
-        heroCta: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: theme.spacing.sm,
-          alignSelf: 'stretch',
-          paddingVertical: theme.spacing.md,
-          paddingHorizontal: theme.spacing.lg,
-          backgroundColor: theme.colors.accent,
-          borderRadius: theme.radius.md,
-        },
-        heroCtaText: {
-          fontFamily: theme.fontFamily.baiSemiBold,
-          fontSize: 15,
-          color: theme.colors.black,
-        },
-        homePrimaryRow: {
-          flexDirection: 'row',
-          gap: theme.spacing.sm,
-          marginBottom: theme.spacing.md,
-        },
-        homePrimaryBtn: {
-          flex: 1,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-          paddingVertical: compact ? theme.spacing.sm : theme.spacing.md,
-          paddingHorizontal: theme.spacing.sm,
-          backgroundColor: theme.colors.accent,
-          borderRadius: theme.radius.md,
-        },
-        homePrimaryBtnSecondary: {
-          flex: 1,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-          paddingVertical: compact ? theme.spacing.sm : theme.spacing.md,
-          paddingHorizontal: theme.spacing.sm,
-          backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.md,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.colors.border,
-        },
-        homePrimaryBtnText: {
-          fontFamily: theme.fontFamily.baiSemiBold,
-          fontSize: compact ? 11 : 13,
-          color: theme.colors.black,
-        },
-        homePrimaryBtnTextSecondary: {
-          fontFamily: theme.fontFamily.baiSemiBold,
-          fontSize: compact ? 11 : 13,
-          color: theme.colors.accent,
-        },
-        competitionsCard: {
-          backgroundColor: theme.colors.background,
-          borderRadius: theme.radius.md,
-          padding: compact ? theme.spacing.sm : theme.spacing.md,
-          marginBottom: theme.spacing.sm,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.colors.border,
-          overflow: 'hidden',
-        },
-        compInfoInnerCard: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: theme.spacing.xs,
-          paddingVertical: theme.spacing.sm,
-          paddingHorizontal: theme.spacing.xs,
-          marginBottom: theme.spacing.sm,
-        },
-        compCardHeader: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 15,
-          fontWeight: '600',
-          color: theme.colors.text,
-          marginBottom: theme.spacing.md,
-        },
-        compCardHeaderCentered: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          fontWeight: '600',
-          color: theme.colors.text,
-          textAlign: 'center',
-        },
-        compCardMeetingName: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 15,
-          fontWeight: '600',
-          color: theme.colors.text,
-          marginBottom: 4,
-        },
-        compCardMeetingNameCentered: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          fontWeight: '700',
-          color: theme.colors.text,
-          textAlign: 'center',
-          marginBottom: 0,
-        },
-        compCardMetaRow: {
-          flexDirection: 'row',
-          gap: theme.spacing.lg,
-          marginBottom: theme.spacing.md,
-        },
-        compCardMetaRowCentered: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: theme.spacing.xs,
-        },
-        compCardMeta: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
-          color: theme.colors.textMuted,
-        },
-        compStatusPill: {
-          paddingHorizontal: theme.spacing.sm,
-          paddingVertical: 2,
-          borderRadius: theme.radius.sm,
-        },
-        compStatusPillLive: { backgroundColor: theme.colors.accentMuted },
-        compStatusPillUpcoming: { backgroundColor: 'rgba(249, 115, 22, 0.2)' },
-        compStatusPillComplete: { backgroundColor: 'rgba(239, 68, 68, 0.15)' },
-        compStatusPillText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 10,
-          fontWeight: '600',
-          textTransform: 'uppercase',
-          letterSpacing: 0.3,
-        },
-        compStatusPillTextLive: { color: theme.colors.accent },
-        compStatusPillTextUpcoming: { color: '#ea580c' },
-        compStatusPillTextComplete: { color: theme.colors.error },
-        statsTitle: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 11 : 12,
-          fontWeight: '600',
-          color: theme.colors.textMuted,
-          marginTop: compact ? 2 : theme.spacing.sm,
-          marginBottom: theme.spacing.sm,
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-        },
-        compSection: { marginBottom: theme.spacing.md },
-        compMeetingNameAbove: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 13 : 16,
-          fontWeight: '700',
-          color: theme.colors.text,
-          marginBottom: compact ? 2 : 4,
-        },
-        compMetaAbove: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 11 : 12,
-          color: theme.colors.textMuted,
-        },
-        compTabsRow: {
-          flexDirection: 'row',
-          width: '100%',
-        },
-        compTab: {
+        tabs: { flex: 1, flexDirection: 'row', backgroundColor: theme.colors.surface },
+        tab: {
           flex: 1,
           paddingVertical: 11,
+          paddingHorizontal: 2,
           alignItems: 'center',
           borderBottomWidth: 2,
           borderBottomColor: 'transparent',
         },
-        compTabActive: {
-          borderBottomColor: theme.colors.accent,
-        },
-        compTabText: {
+        tabActive: { borderBottomColor: theme.colors.accent },
+        tabCollapsedActive: { borderBottomColor: 'transparent' },
+        tabText: {
           fontFamily: theme.fontFamily.baiMedium,
-          fontSize: compact ? 12 : 13,
+          fontSize: isNarrowWeb ? 11 : 12,
           color: theme.colors.textMuted,
-        },
-        compTabTextActive: {
-          color: theme.colors.accent,
-        },
-        homeCompHint: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 10 : 11,
-          color: theme.colors.textMuted,
-          marginBottom: theme.spacing.xs,
-          lineHeight: compact ? 14 : 15,
-        },
-        compDropdownTrigger: {
-          flexDirection: 'row',
-          alignItems: 'center',
-          backgroundColor: theme.colors.background,
-          borderRadius: theme.radius.md,
-          paddingVertical: compact ? theme.spacing.sm : theme.spacing.md,
-          paddingHorizontal: theme.spacing.md,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.colors.border,
-          marginBottom: theme.spacing.sm,
-          gap: theme.spacing.sm,
-        },
-        compDropdownTextBlock: {
-          flex: 1,
-          minWidth: 0,
-        },
-        compDropdownChevron: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 11 : 12,
-          color: theme.colors.textMuted,
-          paddingLeft: theme.spacing.xs,
-        },
-        dropdownOverlay: {
-          flex: 1,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          justifyContent: 'center',
-          alignItems: 'center',
-          padding: theme.spacing.lg,
-        },
-        dropdownContent: {
-          backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.md,
-          padding: theme.spacing.sm,
-          width: '100%',
-          maxWidth: 360,
-          maxHeight: 400,
-        },
-        dropdownOption: {
-          paddingVertical: theme.spacing.sm,
-          paddingHorizontal: theme.spacing.md,
-          borderRadius: theme.radius.sm,
-        },
-        dropdownOptionActive: {
-          backgroundColor: theme.colors.accentMuted,
-        },
-        dropdownOptionText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 13 : 15,
-          fontWeight: '600',
-          color: theme.colors.text,
-        },
-        dropdownOptionTextActive: {
-          color: theme.colors.accent,
-        },
-        dropdownOptionMeta: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 11 : 12,
-          color: theme.colors.textMuted,
-          marginTop: 4,
-        },
-        statusCard: {
-          backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.sm,
-          paddingVertical: theme.spacing.md,
-          paddingHorizontal: theme.spacing.md,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          alignItems: 'center',
-          justifyContent: 'center',
-          marginBottom: theme.spacing.sm,
-        },
-        statusCardText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          fontWeight: '600',
-          color: theme.colors.text,
-        },
-        statusCardTextUpcoming: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          fontWeight: '600',
-          color: '#f97316',
-        },
-        statusCardTextLive: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          fontWeight: '600',
-          color: theme.colors.accent,
-        },
-        statusCardTextComplete: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 16,
-          fontWeight: '600',
-          color: theme.colors.error,
-        },
-        cardsSection: {
-          marginTop: theme.spacing.sm,
-        },
-        threeBoxRow: {
-          flexDirection: 'row',
-          gap: theme.spacing.sm,
-        },
-        statsGrid: {
-          gap: theme.spacing.xs,
-        },
-        statsRow: {
-          flexDirection: 'row',
-          gap: theme.spacing.xs,
-        },
-        statCardHalf: {
-          flex: 1,
-        },
-        statCard: {
-          backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.md,
-          padding: compact ? theme.spacing.xs : theme.spacing.sm,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.colors.border,
-          alignItems: 'center',
-        },
-        statCardLabel: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 10 : 11,
-          color: theme.colors.textSecondary,
-          marginTop: 4,
           textAlign: 'center',
         },
-        statCardValue: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 16 : 20,
-          fontWeight: '700',
-          color: theme.colors.accent,
-        },
-        statCardFull: {
-          width: '100%',
-        },
-        quickLinksRow: {
-          flexDirection: 'row',
-          gap: theme.spacing.sm,
-          marginTop: theme.spacing.sm,
-          marginBottom: theme.spacing.lg,
-        },
-        quickLinkBtn: {
-          flex: 1,
-          flexDirection: 'row',
+        tabTextActive: { color: theme.colors.accent },
+        homePanelCollapseBtn: {
+          paddingHorizontal: 10,
           alignItems: 'center',
           justifyContent: 'center',
-          gap: theme.spacing.xs,
-          paddingVertical: compact ? theme.spacing.xs : theme.spacing.sm,
+          borderLeftWidth: StyleSheet.hairlineWidth,
+          borderLeftColor: theme.colors.border,
+        },
+        panelBody: {
           paddingHorizontal: theme.spacing.md,
+          paddingTop: theme.spacing.md,
+          paddingBottom: theme.spacing.md,
+          gap: theme.spacing.lg,
+        },
+        sectionLabel: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          letterSpacing: 1.1,
+          textTransform: 'uppercase',
+          color: theme.colors.textMuted,
+          marginBottom: 8,
+        },
+        joinRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+        input: {
+          flex: 1,
+          fontFamily: theme.fontFamily.input,
+          fontSize: 14,
+          color: theme.colors.text,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.sm,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          letterSpacing: 1.5,
+          textTransform: 'uppercase',
           backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.md,
-          borderWidth: 1,
+        },
+        joinBtn: {
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.sm,
+          paddingVertical: 9,
+          paddingHorizontal: 14,
+          minWidth: 72,
+          alignItems: 'center',
+        },
+        joinBtnText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.black,
+        },
+        joinHint: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          marginTop: 8,
+          lineHeight: 16,
+        },
+        list: {
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderBottomWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
         },
-        quickLinkBtnText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 11 : 13,
-          fontWeight: '600',
-          color: theme.colors.accent,
-        },
-        muted: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: compact ? 11 : 13,
-          color: theme.colors.textMuted,
-        },
-        cardRow: {
+        row: {
           flexDirection: 'row',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
+          alignItems: 'center',
+          gap: theme.spacing.md,
+          paddingVertical: 14,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
         },
-        cardLeft: { flex: 1, minWidth: 0 },
-        cardRight: { alignItems: 'flex-end', marginLeft: theme.spacing.sm },
-        cardTitle: {
-          fontFamily: theme.fontFamily.regular,
+        rowLast: { borderBottomWidth: 0 },
+        rowCopy: { flex: 1, minWidth: 0, gap: 3 },
+        rowTitleRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+        },
+        rowTitle: {
+          fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: 15,
-          fontWeight: '600',
           color: theme.colors.text,
         },
-        cardMeta: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
-          color: theme.colors.textMuted,
-          marginTop: 2,
-        },
-        cardStatus: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
-          color: theme.colors.accent,
-          marginTop: 2,
-        },
-        cardStatusClosed: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 11,
-          color: '#b91c1c',
-          marginTop: 2,
-          fontStyle: 'italic',
-        },
-        timeBlock: { alignItems: 'flex-end' },
-        timeLabel: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 10,
-          color: theme.colors.textMuted,
-        },
-        timeValue: {
-          fontFamily: theme.fontFamily.regular,
+        rowMeta: {
+          fontFamily: theme.fontFamily.baiLight,
           fontSize: 12,
-          fontWeight: '600',
-          color: theme.colors.accent,
-          marginTop: 2,
+          color: theme.colors.textMuted,
         },
-        lockInBtn: {
-          backgroundColor: theme.colors.accent,
-          paddingVertical: theme.spacing.xs,
-          paddingHorizontal: theme.spacing.sm,
+        rowPickHint: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.accent,
+        },
+        manageChip: {
+          paddingVertical: 2,
+          paddingHorizontal: 6,
           borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.accent,
         },
-        lockInBtnDisabled: { opacity: 0.7 },
-        lockInBtnText: {
-          fontFamily: theme.fontFamily.regular,
-          fontSize: 12,
-          color: theme.colors.black,
-          fontWeight: '600',
+        manageChipText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 10,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: theme.colors.accent,
         },
-      });
-    },
-    [theme, isWeb, isNarrowWeb, isWideWeb, insets.top]
+        badge: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+        },
+        empty: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+          lineHeight: 18,
+        },
+        emptyBlock: { gap: 10 },
+        emptyAction: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          alignSelf: 'flex-start',
+        },
+        emptyActionText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.accent,
+        },
+        tableWrap: { minHeight: 120 },
+      }),
+    [theme, insets.top, insets.bottom, isNarrowWeb, isWideWeb]
   );
 
-  const homeHeader = (
-    <View style={styles.header}>
-      {Platform.OS !== 'web' ? (
-        <TouchableOpacity
+  const raceSlideStyle = { transform: [{ translateX: raceSlideX }] };
+
+  const renderNextRace = () => {
+    if (upcomingRaces.length === 0 && participations.length === 0) return null;
+    const dayNum = activeRace
+      ? dayNumberByKey.get(`${activeRace.competitionId}:${activeRace.raceDate}`)
+      : null;
+    const inPlay =
+      activeRace &&
+      new Date(activeRace.firstRaceUtc).getTime() <= nowMs &&
+      new Date(activeRace.lastRaceUtc).getTime() > nowMs;
+
+    return (
+      <View style={styles.spotlightWrap}>
+        <View style={styles.spotlight}>
+          <View style={styles.spotlightHead}>
+            <Text style={styles.spotlightTitle}>
+              {dayNum != null ? `Next race · Day ${dayNum}` : 'Next race'}
+            </Text>
+            <Text style={styles.spotlightMeta} numberOfLines={1}>
+              {upcomingRaces.length ? `${raceIndex + 1}/${upcomingRaces.length}` : 'No races'}
+            </Text>
+          </View>
+
+          {activeRace ? (
+            <Pressable
+              style={styles.cardTap}
+              onLayout={(e) => {
+                const w = e.nativeEvent.layout.width;
+                if (w > 0 && Math.abs(w - raceCardWidth) > 1) setRaceCardWidth(w);
+              }}
+              onPress={() => {
+                if (upcomingRaces.length > 1) {
+                  goToRace(raceIndex + 1, { direction: 'left' });
+                } else {
+                  router.push('/(app)/selections' as any);
+                }
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Next race"
+            >
+              <Animated.View style={[styles.cardSlide, raceSlideStyle]}>
+                <View style={styles.cardRow}>
+                  <View style={styles.cardSide}>
+                    <Text style={styles.cardCourse} numberOfLines={2}>
+                      {activeRace.course}
+                    </Text>
+                    <Text style={styles.cardComp} numberOfLines={1}>
+                      {activeRace.competitionName}
+                    </Text>
+                  </View>
+                  <View style={styles.cardMid}>
+                    {inPlay ? (
+                      <>
+                        <Text style={styles.cardVs}>Live</Text>
+                        <Text style={styles.cardHint}>In play</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.cardVs}>starts</Text>
+                        <Text style={styles.cardTime}>
+                          {new Date(activeRace.firstRaceUtc).toLocaleString(undefined, {
+                            weekday: 'short',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </Text>
+                      </>
+                    )}
+                  </View>
+                  <View style={styles.cardSide}>
+                    <Text style={styles.cardRaceName} numberOfLines={2}>
+                      {activeRace.firstRaceName ?? 'Racecard'}
+                    </Text>
+                    <Text style={styles.cardComp}>
+                      {activeRace.firstRaceRunnerCount
+                        ? `${activeRace.firstRaceRunnerCount} runners`
+                        : activeRace.hasAllPicks
+                          ? 'Picks in'
+                          : `${activeRace.pendingCount} to pick`}
+                    </Text>
+                  </View>
+                </View>
+              </Animated.View>
+            </Pressable>
+          ) : (
+            <Text style={styles.empty}>No upcoming race days yet.</Text>
+          )}
+
+          {upcomingRaces.length > 1 ? (
+            <View style={styles.dots}>
+              {upcomingRaces.map((d, i) => (
+                <Pressable
+                  key={`${d.competitionId}:${d.raceDayId}`}
+                  onPress={() => goToRace(i)}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Show race day ${i + 1}`}
+                >
+                  <View style={[styles.dot, i === raceIndex && styles.dotActive]} />
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </View>
+      </View>
+    );
+  };
+
+  return (
+    <View style={styles.wrapper}>
+      <View style={styles.header}>
+        <Pressable
           style={styles.headerMenu}
           onPress={openSidebar}
           hitSlop={8}
@@ -777,262 +770,230 @@ export default function HomeScreen() {
           accessibilityLabel="Open menu"
         >
           <Ionicons name="menu" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-      ) : null}
-      <View style={styles.headerTitleBlock}>
-        <Text style={styles.headerTitle}>Top Tipster Racing</Text>
-        <Text style={styles.headerSub}>
-          {displayName ? `Hello ${displayName}` : 'Racing festivals'}
-        </Text>
+        </Pressable>
+        <View style={styles.titleBlock}>
+          <Text style={styles.title}>Top Tipster Racing</Text>
+          <Text style={styles.sub}>Racing festivals</Text>
+        </View>
+        <Pressable
+          style={styles.headerRefresh}
+          onPress={onRefresh}
+          disabled={refreshing}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh"
+        >
+          {refreshing ? (
+            <ActivityIndicator size="small" color={theme.colors.accent} />
+          ) : (
+            <Ionicons name="refresh" size={22} color={theme.colors.text} />
+          )}
+        </Pressable>
       </View>
-      <TouchableOpacity
-        style={styles.headerRefresh}
-        onPress={onRefresh}
-        disabled={refreshing}
-        hitSlop={8}
-        accessibilityRole="button"
-        accessibilityLabel="Refresh"
-      >
-        {refreshing ? (
-          <ActivityIndicator size="small" color={theme.colors.accent} />
-        ) : (
-          <Ionicons name="refresh" size={22} color={theme.colors.text} />
-        )}
-      </TouchableOpacity>
-    </View>
-  );
 
-  const homeScroll = (
-    <ScrollView
-        ref={scrollRef}
-        style={[styles.container, isWideWeb && styles.webHomeScroll]}
-        contentContainerStyle={[styles.content, { paddingBottom: theme.spacing.lg }]}
-        showsVerticalScrollIndicator={false}
+      {renderNextRace()}
+
+      <ScrollView
+        style={styles.mainScroll}
+        contentContainerStyle={styles.mainScrollContent}
+        keyboardShouldPersistTaps="handled"
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.colors.accent}
+            colors={[theme.colors.accent]}
+          />
         }
       >
-        {!hasJoinedAny && (
-          <View style={styles.heroCard}>
-            <Text style={styles.heroEyebrow}>Get started</Text>
-            <Text style={styles.heroTitle}>Join a competition</Text>
-            <Text style={styles.heroBody}>
-              Enter an access code to join a private league, then make your daily picks and climb the leaderboard.
-            </Text>
-            <TouchableOpacity
-              style={styles.heroCta}
-              onPress={() => router.push('/(app)/competitions?join=1')}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.heroCtaText}>Enter competition</Text>
-              <Ionicons name="arrow-forward" size={18} color={theme.colors.black} />
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {hasJoinedAny && (
-          <>
-            <View style={styles.homePrimaryRow}>
-              <TouchableOpacity
-                style={styles.homePrimaryBtn}
-                onPress={() => router.push('/(app)/selections')}
-                activeOpacity={0.85}
-              >
-                <Ionicons name="list-outline" size={20} color={theme.colors.black} />
-                <Text style={styles.homePrimaryBtnText}>My selections</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.homePrimaryBtnSecondary}
-                onPress={() => router.push('/(app)/competitions')}
-                activeOpacity={0.85}
-              >
-                <Ionicons name="trophy-outline" size={20} color={theme.colors.accent} />
-                <Text style={styles.homePrimaryBtnTextSecondary}>Competitions</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.homePanel}>
-              <View style={styles.homePanelTabsRow}>
-                <View style={styles.compTabsRow}>
-                  {(['upcoming', 'live', 'complete'] as const).map((tab) => {
-                    const isActive = compTab === tab;
-                    const label = tab === 'upcoming' ? 'Upcoming' : tab === 'live' ? 'Live' : 'Complete';
-                    return (
-                      <TouchableOpacity
-                        key={tab}
-                        style={[styles.compTab, isActive && styles.compTabActive]}
-                        onPress={() => setCompTab(tab)}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={[styles.compTabText, isActive && styles.compTabTextActive]}>{label}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-              <View style={styles.panelBody}>
-            <Text style={styles.homeCompHint}>
-              Browse by festival phase. Make picks in My selections when racecards are published.
-            </Text>
-
-            {compListFiltered.length === 0 ? (
-              <Text style={[styles.muted, { marginBottom: theme.spacing.md }]}>No competitions in this category.</Text>
-            ) : null}
-
-            {compListFiltered.length > 0 && effectiveCompId ? (() => {
-              const selectedRow = compListFiltered.find((x) => x.id === effectiveCompId) ?? compListFiltered[0];
-              const summarySel = summaryByComp?.byComp[effectiveCompId];
-              const displayName = summarySel?.name ?? selectedRow.name;
-              const multi = compListFiltered.length > 1;
-              const metaLine = (compId: string) => {
-                const days = compDaysByCompId[compId] ?? 1;
-                const range = compDateRangeByCompId[compId];
-                return `${days} day event${range ? ` · ${range.start} – ${range.end}` : ''}`;
-              };
-              const StatBox = ({ label, value }: { label: string; value: React.ReactNode }) => (
-                <View style={[styles.statCard, styles.statCardHalf]}>
-                  <Text style={styles.statCardValue}>{value}</Text>
-                  <Text style={styles.statCardLabel}>{label}</Text>
-                </View>
-              );
-              const renderStatsBody = (c: { id: string; name: string }) => {
-                const summary = summaryByComp?.byComp[c.id];
-                const isComplete = compStatusByCompId[c.id] === 'complete';
-                const position = compPositionByCompId[c.id] ?? null;
-                const secondLabel = isComplete ? 'Final position' : 'Daily points';
-                const secondValue = isComplete
-                  ? (position != null ? `${position}${position === 1 ? 'st' : position === 2 ? 'nd' : position === 3 ? 'rd' : 'th'}` : '—')
-                  : (summary?.dailyPoints ?? 0);
+        <View style={styles.homePanel}>
+          <View style={styles.homePanelTabsRow}>
+            <View style={styles.tabs}>
+              {(
+                [
+                  { key: 'competitions' as const, label: 'My competitions' },
+                  { key: 'join' as const, label: 'Join' },
+                  { key: 'table' as const, label: 'Table' },
+                ] as const
+              ).map((t) => {
+                const active = tab === t.key;
                 return (
-                  <View style={styles.competitionsCard}>
-                    <Text style={styles.statsTitle}>Your stats</Text>
-                    <View style={styles.statsGrid}>
-                      <View style={styles.statsRow}>
-                        <StatBox label="Points" value={summary?.totalPoints ?? 0} />
-                        <StatBox label={secondLabel} value={typeof secondValue === 'number' ? secondValue : secondValue} />
-                      </View>
-                      <View style={styles.statsRow}>
-                        <StatBox
-                          label="Top pick"
-                          value={summary?.highestSpWin != null ? decimalToFractional(summary.highestSpWin) : '—'}
-                        />
-                        <StatBox label="Participants" value={participantCountByCompId[c.id] ?? 0} />
-                      </View>
-                    </View>
-                  </View>
-                );
-              };
-              return (
-                <View>
-                  <TouchableOpacity
-                    style={styles.compDropdownTrigger}
-                    onPress={() => multi && setCompDropdownOpen(true)}
-                    activeOpacity={multi ? 0.75 : 1}
-                    disabled={!multi}
+                  <Pressable
+                    key={t.key}
+                    style={[
+                      styles.tab,
+                      active && styles.tabActive,
+                      active && !homePanelExpanded && styles.tabCollapsedActive,
+                    ]}
+                    onPress={() => {
+                      setTab(t.key);
+                      if (!homePanelExpanded) setHomePanelExpanded(true);
+                    }}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
                   >
-                    <View style={styles.compDropdownTextBlock}>
-                      <Text style={styles.compMeetingNameAbove} numberOfLines={2}>
-                        {displayName}
-                      </Text>
-                      <Text style={styles.compMetaAbove}>{metaLine(effectiveCompId)}</Text>
-                    </View>
-                    {multi ? <Text style={styles.compDropdownChevron}>▼</Text> : null}
-                  </TouchableOpacity>
+                    <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Pressable
+              style={styles.homePanelCollapseBtn}
+              onPress={() => setHomePanelExpanded((v) => !v)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: homePanelExpanded }}
+              accessibilityLabel={
+                homePanelExpanded ? 'Collapse competitions panel' : 'Expand competitions panel'
+              }
+              hitSlop={6}
+            >
+              <Ionicons
+                name={homePanelExpanded ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color={theme.colors.textMuted}
+              />
+            </Pressable>
+          </View>
 
-                  {multi ? (
-                    <Modal
-                      visible={compDropdownOpen}
-                      transparent
-                      animationType="fade"
-                      onRequestClose={() => setCompDropdownOpen(false)}
-                    >
-                      <Pressable style={styles.dropdownOverlay} onPress={() => setCompDropdownOpen(false)}>
-                        <Pressable style={styles.dropdownContent} onPress={(e) => e.stopPropagation()}>
-                          {compListFiltered.map((opt) => {
-                            const s = summaryByComp?.byComp[opt.id];
-                            const label = s?.name ?? opt.name;
-                            return (
-                              <TouchableOpacity
-                                key={opt.id}
-                                style={[styles.dropdownOption, opt.id === effectiveCompId && styles.dropdownOptionActive]}
-                                onPress={() => {
-                                  setSelectedCompId(opt.id);
-                                  setCompDropdownOpen(false);
-                                }}
-                              >
-                                <Text
-                                  style={[styles.dropdownOptionText, opt.id === effectiveCompId && styles.dropdownOptionTextActive]}
-                                  numberOfLines={2}
-                                >
-                                  {label}
-                                </Text>
-                                <Text style={styles.dropdownOptionMeta}>{metaLine(opt.id)}</Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </Pressable>
-                      </Pressable>
-                    </Modal>
+          {homePanelExpanded ? (
+            <View style={styles.panelBody}>
+              {tab === 'competitions' ? (
+                <>
+                  {pending.length > 0 ? (
+                    <View>
+                      <Text style={styles.sectionLabel}>Pending approval</Text>
+                      <View style={styles.list}>
+                        {pending.map((p, i) => (
+                          <View
+                            key={p.competition_id}
+                            style={[styles.row, i === pending.length - 1 && styles.rowLast]}
+                          >
+                            <View style={styles.rowCopy}>
+                              <Text style={styles.rowTitle}>{p.name}</Text>
+                              <Text style={styles.rowMeta}>Waiting for admin</Text>
+                            </View>
+                            <Text style={styles.badge}>Pending</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
                   ) : null}
 
-                  {renderStatsBody(selectedRow)}
+                  <View>
+                    <Text style={styles.sectionLabel}>Your leagues</Text>
+                    {comps.length === 0 ? (
+                      <View style={styles.emptyBlock}>
+                        <Text style={styles.empty}>
+                          No competitions yet. Got a competition code? Enter it on the Join tab to
+                          get started.
+                        </Text>
+                        <Pressable
+                          style={styles.emptyAction}
+                          onPress={() => setTab('join')}
+                          accessibilityRole="button"
+                          accessibilityLabel="Enter competition code"
+                        >
+                          <Text style={styles.emptyActionText}>Enter competition code</Text>
+                          <Ionicons name="arrow-forward" size={14} color={theme.colors.accent} />
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <View style={styles.list}>
+                        {comps.map((c, i) => (
+                          <Pressable
+                            key={c.id}
+                            style={[styles.row, i === comps.length - 1 && styles.rowLast]}
+                            onPress={() =>
+                              router.push({
+                                pathname: '/(app)/competition/[competitionId]',
+                                params: { competitionId: c.id },
+                              } as any)
+                            }
+                          >
+                            <View style={styles.rowCopy}>
+                              <View style={styles.rowTitleRow}>
+                                <Text style={styles.rowTitle}>{c.name}</Text>
+                                {c.isCreator ? (
+                                  <View style={styles.manageChip}>
+                                    <Text style={styles.manageChipText}>Admin</Text>
+                                  </View>
+                                ) : null}
+                              </View>
+                              <Text style={styles.rowMeta}>
+                                {c.range
+                                  ? `${c.status} · ${c.range.start} – ${c.range.end}`
+                                  : c.status}
+                              </Text>
+                              {c.pickHint ? (
+                                <Text
+                                  style={
+                                    c.pickHint === 'Pick available'
+                                      ? styles.rowPickHint
+                                      : styles.rowMeta
+                                  }
+                                >
+                                  {c.pickHint}
+                                </Text>
+                              ) : null}
+                            </View>
+                            <Ionicons
+                              name="chevron-forward"
+                              size={16}
+                              color={theme.colors.textMuted}
+                            />
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
+                  </View>
+                </>
+              ) : null}
+
+              {tab === 'join' ? (
+                <View>
+                  <Text style={styles.sectionLabel}>Competition code</Text>
+                  <View style={styles.joinRow}>
+                    <TextInput
+                      style={styles.input}
+                      value={joinCode}
+                      onChangeText={setJoinCode}
+                      placeholder="CODE"
+                      placeholderTextColor={theme.colors.textMuted}
+                      autoCapitalize="characters"
+                      maxLength={12}
+                      autoCorrect={false}
+                    />
+                    <Pressable style={styles.joinBtn} onPress={() => void onJoin()} disabled={joining}>
+                      {joining ? (
+                        <ActivityIndicator color={theme.colors.black} size="small" />
+                      ) : (
+                        <Text style={styles.joinBtnText}>Join</Text>
+                      )}
+                    </Pressable>
+                  </View>
+                  <Text style={styles.joinHint}>
+                    Ask the competition organiser for the access code, then enter it here. You’ll
+                    appear in My competitions once they approve you.
+                  </Text>
                 </View>
-              );
-            })() : null}
-              </View>
+              ) : null}
+
+              {tab === 'table' ? (
+                <View style={styles.tableWrap}>
+                  {tableCompId ? (
+                    <HomeLeaderboardPanel
+                      competitionId={tableCompId}
+                      competitionName={tableCompName}
+                    />
+                  ) : (
+                    <Text style={styles.empty}>Join a competition to see the table.</Text>
+                  )}
+                </View>
+              ) : null}
             </View>
-
-            {/* Quick links: hidden on web (leaderboard is in sidebar; selections+results below) */}
-            {(!isWeb || isNarrowWeb) && (
-            <View style={styles.quickLinksRow}>
-              <TouchableOpacity
-                style={styles.quickLinkBtn}
-                onPress={() => router.push({ pathname: '/(app)/leaderboard', params: effectiveCompId ? { competitionId: effectiveCompId } : {} })}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="podium-outline" size={18} color={theme.colors.accent} />
-                <Text style={styles.quickLinkBtnText}>Leaderboard</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.quickLinkBtn}
-                onPress={() => router.push('/(app)/results')}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="trophy-outline" size={18} color={theme.colors.accent} />
-                <Text style={styles.quickLinkBtnText}>Results</Text>
-              </TouchableOpacity>
-            </View>
-            )}
-
-            {/* Web: selections by day + results with points breakdown */}
-            {isWeb && hasJoinedAny && effectiveCompId && (
-              <HomeSelectionsAndResults competitionId={effectiveCompId} />
-            )}
-
-          </>
-        )}
-    </ScrollView>
-  );
-
-  const mainContent = isWideWeb ? <View style={styles.webHomeScrollOuter}>{homeScroll}</View> : homeScroll;
-
-  if (Platform.OS === 'web' && hasJoinedAny && effectiveCompId && !isNarrowWeb) {
-    const compName = summaryByComp?.byComp[effectiveCompId]?.name ?? compListFiltered.find((c) => c.id === effectiveCompId)?.name ?? 'Competition';
-    return (
-      <View style={styles.wrapper}>
-        {homeHeader}
-        <View style={[styles.wrapper, { flexDirection: 'row', gap: 24, paddingRight: 24, alignItems: 'flex-start' }]}>
-          <View style={{ flex: 1, minWidth: 0, alignItems: 'center' }}>{mainContent}</View>
-          <HomeLeaderboardPanel competitionId={effectiveCompId} competitionName={compName} />
+          ) : null}
         </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.wrapper}>
-      {homeHeader}
-      {mainContent}
+      </ScrollView>
     </View>
   );
 }
