@@ -345,10 +345,7 @@ export default function HomeScreen() {
       StyleSheet.create({
         wrapper: { flex: 1, backgroundColor: theme.colors.background },
         header: {
-          paddingTop:
-            Platform.OS === 'web'
-              ? Math.max(theme.spacing.md, insets.top + 6)
-              : insets.top + theme.spacing.sm,
+          paddingTop: Platform.OS === 'web' ? theme.spacing.sm : insets.top + theme.spacing.sm,
           paddingHorizontal: theme.spacing.lg,
           paddingBottom: theme.spacing.sm,
           flexDirection: 'row',
