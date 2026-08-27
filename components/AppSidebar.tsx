@@ -159,29 +159,11 @@ export function AppSidebar() {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.menuButton}
-                  onPress={() => goTo('/(app)/competitions')}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="people-outline" size={22} color={theme.colors.accent} />
-                  <Text style={styles.menuButtonText}>Competitions</Text>
-                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.menuButton}
                   onPress={() => goTo('/(app)/rules')}
                   activeOpacity={0.7}
                 >
                   <Ionicons name="document-text-outline" size={22} color={theme.colors.accent} />
                   <Text style={styles.menuButtonText}>Rules</Text>
-                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.menuButton}
-                  onPress={() => goTo('/(app)/points')}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="ribbon-outline" size={22} color={theme.colors.accent} />
-                  <Text style={styles.menuButtonText}>Points system</Text>
                   <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
                 </TouchableOpacity>
               </>

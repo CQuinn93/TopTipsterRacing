@@ -23,24 +23,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { AdminScreenLayout, useAdminAccent } from '@/components/AdminScreenLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { getProfileRole, isOwnerRole } from '@/lib/adminSession';
-
-const IRISH_COURSES = [
-  'Ballinrobe', 'Bellewstown', 'Clonmel', 'Cork', 'The Curragh', 'Down Royal', 'Downpatrick', 'Dundalk',
-  'Fairyhouse', 'Galway', 'Gowran Park', 'Kilbeggan', 'Killarney', 'Laytown', 'Leopardstown', 'Limerick',
-  'Listowel', 'Naas', 'Navan', 'Punchestown', 'Roscommon', 'Sligo', 'Thurles', 'Tipperary', 'Tramore', 'Wexford',
-].sort((a, b) => a.localeCompare(b));
-
-const ENGLAND_COURSES = [
-  'Aintree', 'Ascot', 'Bath', 'Beverley', 'Brighton', 'Carlisle', 'Cartmel', 'Catterick Bridge', 'Chelmsford City',
-  'Cheltenham', 'Chester', 'Doncaster', 'Epsom Downs', 'Exeter', 'Fakenham', 'Fontwell Park', 'Goodwood',
-  'Great Yarmouth', 'Haydock Park', 'Hereford', 'Hexham', 'Huntingdon', 'Kempton Park', 'Leicester',
-  'Lingfield Park', 'Ludlow', 'Market Rasen', 'Newbury', 'Newcastle', 'Newmarket', 'Newton Abbot', 'Nottingham',
-  'Plumpton', 'Pontefract', 'Redcar', 'Ripon', 'Salisbury', 'Sandown Park', 'Sedgefield', 'Southwell',
-  'Stratford-on-Avon', 'Taunton', 'Thirsk', 'Uttoxeter', 'Warwick', 'Wetherby', 'Wincanton', 'Windsor',
-  'Wolverhampton', 'Worcester', 'York',
-].sort((a, b) => a.localeCompare(b));
-
-const COURSES = [...IRISH_COURSES, ...ENGLAND_COURSES];
+import { IRISH_COURSES, ENGLAND_COURSES, RACING_COURSES as COURSES } from '@/lib/racingCourses';
 
 /** RN Web's `Alert.alert` often does not show; use `window.alert` so admin actions give visible feedback. */
 function adminAlert(title: string, message?: string) {

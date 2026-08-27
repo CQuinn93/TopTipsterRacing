@@ -12,6 +12,8 @@ import {
   TextInput,
   Alert,
   Animated,
+  Modal,
+  FlatList,
 } from 'react-native';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { router } from 'expo-router';
@@ -30,6 +32,11 @@ import { getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
 import { racingCreateCompetition } from '@/lib/racingAdminApi';
 import { getProfileRole, isStaffRole } from '@/lib/adminSession';
+import {
+  coursesForRegion,
+  festivalEndDateFromStart,
+  type RacingCourseRegion,
+} from '@/lib/racingCourses';
 import { RacingPointsPanel } from '@/components/RacingPointsPanel';
 
 const RACE_CYCLE_MS = 6500;
@@ -68,10 +75,14 @@ export default function HomeScreen() {
   const [isStaff, setIsStaff] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [createName, setCreateName] = useState('');
+  const [createCourse, setCreateCourse] = useState('');
   const [createStartDate, setCreateStartDate] = useState('');
-  const [createEndDate, setCreateEndDate] = useState('');
+  const [createDays, setCreateDays] = useState(4);
   const [createAccessCode, setCreateAccessCode] = useState('');
   const [creating, setCreating] = useState(false);
+  const [coursePickerOpen, setCoursePickerOpen] = useState(false);
+  const [courseSearch, setCourseSearch] = useState('');
+  const [courseRegion, setCourseRegion] = useState<RacingCourseRegion>('all');
   const [raceIndex, setRaceIndex] = useState(0);
   const [raceCardWidth, setRaceCardWidth] = useState(0);
   const raceSlideX = useRef(new Animated.Value(0)).current;
@@ -176,7 +187,6 @@ export default function HomeScreen() {
           setCompStatusByCompId({});
           setCompDateRangeByCompId({});
           setCreatorByCompId({});
-          setTab((prev) => (prev === 'competitions' ? 'join' : prev));
           return;
         }
 
@@ -362,22 +372,38 @@ export default function HomeScreen() {
     }
   };
 
+  const filteredCourses = useMemo(() => {
+    const base = coursesForRegion(courseRegion);
+    const q = courseSearch.trim().toLowerCase();
+    if (!q) return base;
+    return base.filter((c) => c.toLowerCase().includes(q));
+  }, [courseRegion, courseSearch]);
+
+  const createEndPreview =
+    /^\d{4}-\d{2}-\d{2}$/.test(createStartDate.trim()) && createDays >= 1
+      ? festivalEndDateFromStart(createStartDate.trim(), createDays)
+      : null;
+
   const onCreateCompetition = async () => {
     const name = createName.trim();
     if (!name) {
       Alert.alert('Error', 'Please enter a competition name.');
       return;
     }
+    if (!createCourse.trim()) {
+      Alert.alert('Error', 'Please select a course.');
+      return;
+    }
     const start = createStartDate.trim();
-    const end = createEndDate.trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
-      Alert.alert('Error', 'Enter start and end dates as YYYY-MM-DD.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) {
+      Alert.alert('Error', 'Enter a start date as YYYY-MM-DD.');
       return;
     }
-    if (end < start) {
-      Alert.alert('Error', 'End date must be on or after the start date.');
+    if (createDays < 1 || createDays > 14) {
+      Alert.alert('Error', 'Festival length must be between 1 and 14 days.');
       return;
     }
+    const end = festivalEndDateFromStart(start, createDays);
     const code = createAccessCode.trim().toUpperCase().slice(0, 6) || null;
     setCreating(true);
     try {
@@ -386,6 +412,7 @@ export default function HomeScreen() {
         festivalStartDate: start,
         festivalEndDate: end,
         accessCode: code,
+        courses: [createCourse.trim()],
       });
       if (!result.success) {
         Alert.alert('Error', result.error ?? 'Could not create competition');
@@ -393,11 +420,14 @@ export default function HomeScreen() {
       }
       Alert.alert(
         'Created',
-        code ? `Competition created. Access code: ${code}` : 'Competition created.'
+        code
+          ? `Competition created at ${createCourse}. Access code: ${code}`
+          : `Competition created at ${createCourse}.`
       );
       setCreateName('');
+      setCreateCourse('');
       setCreateStartDate('');
-      setCreateEndDate('');
+      setCreateDays(4);
       setCreateAccessCode('');
       setShowCreate(false);
       setTab('competitions');
@@ -481,17 +511,24 @@ export default function HomeScreen() {
           flexShrink: 1,
           textAlign: 'right',
         },
-        cardTap: { paddingVertical: 6, overflow: 'hidden' },
+        cardTap: { paddingVertical: 6, overflow: 'hidden', minHeight: 88, justifyContent: 'center' },
         cardSlide: { width: '100%' },
         cardRow: {
           flexDirection: 'row',
           alignItems: 'center',
           gap: 12,
+          minHeight: 76,
+        },
+        cardEmptyBody: {
+          minHeight: 76,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingVertical: 8,
         },
         cardSide: { flex: 1, alignItems: 'center', gap: 6, minWidth: 0 },
         cardCourse: {
           fontFamily: theme.fontFamily.baiSemiBold,
-          fontSize: 15,
+          fontSize: 13,
           color: theme.colors.text,
           textAlign: 'center',
         },
@@ -501,7 +538,7 @@ export default function HomeScreen() {
           color: theme.colors.textMuted,
           textAlign: 'center',
         },
-        cardMid: { alignItems: 'center', minWidth: 72, gap: 4 },
+        cardMid: { alignItems: 'center', minWidth: 64, gap: 4 },
         cardVs: {
           fontFamily: theme.fontFamily.baiLight,
           fontSize: 12,
@@ -748,6 +785,151 @@ export default function HomeScreen() {
           fontSize: 13,
           color: theme.colors.black,
         },
+        createSelect: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.sm,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+          backgroundColor: theme.colors.surface,
+        },
+        createSelectText: {
+          flex: 1,
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 14,
+          color: theme.colors.text,
+        },
+        createSelectPlaceholder: {
+          color: theme.colors.textMuted,
+        },
+        createDaysRow: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 8,
+        },
+        createDayChip: {
+          minWidth: 40,
+          paddingVertical: 8,
+          paddingHorizontal: 12,
+          borderRadius: theme.radius.sm,
+          backgroundColor: theme.colors.surface,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          alignItems: 'center',
+        },
+        createDayChipActive: {
+          backgroundColor: theme.colors.accentMuted,
+          borderColor: theme.colors.accent,
+        },
+        createDayChipText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 13,
+          color: theme.colors.textSecondary,
+        },
+        createDayChipTextActive: {
+          color: theme.colors.accent,
+        },
+        modalOverlay: {
+          flex: 1,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          justifyContent: 'center',
+          padding: theme.spacing.lg,
+        },
+        modalContent: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.lg,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          maxHeight: '80%',
+          overflow: 'hidden',
+        },
+        modalHeader: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingHorizontal: theme.spacing.md,
+          paddingVertical: theme.spacing.sm,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+        },
+        modalTitle: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 16,
+          color: theme.colors.text,
+        },
+        modalDone: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 14,
+          color: theme.colors.accent,
+        },
+        courseSearchInput: {
+          fontFamily: theme.fontFamily.input,
+          fontSize: 14,
+          color: theme.colors.text,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.sm,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          marginHorizontal: theme.spacing.md,
+          marginTop: theme.spacing.sm,
+          backgroundColor: theme.colors.background,
+        },
+        courseFilterRow: {
+          flexDirection: 'row',
+          gap: 8,
+          paddingHorizontal: theme.spacing.md,
+          paddingVertical: theme.spacing.sm,
+        },
+        courseFilterChip: {
+          paddingVertical: 6,
+          paddingHorizontal: 12,
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.background,
+        },
+        courseFilterChipActive: {
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+        },
+        courseFilterChipText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        courseFilterChipTextActive: {
+          color: theme.colors.accent,
+        },
+        courseList: { maxHeight: 320 },
+        courseItem: {
+          paddingVertical: 12,
+          paddingHorizontal: theme.spacing.md,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+        },
+        courseItemActive: {
+          backgroundColor: theme.colors.accentMuted,
+        },
+        courseItemText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 14,
+          color: theme.colors.text,
+        },
+        courseItemTextActive: {
+          color: theme.colors.accent,
+        },
+        courseListEmpty: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+          padding: theme.spacing.md,
+          textAlign: 'center',
+        },
         badge: {
           fontFamily: theme.fontFamily.baiMedium,
           fontSize: 11,
@@ -899,7 +1081,9 @@ export default function HomeScreen() {
               </Animated.View>
             </Pressable>
           ) : (
-            <Text style={styles.empty}>No active races right now.</Text>
+            <View style={styles.cardEmptyBody}>
+              <Text style={styles.empty}>No active races right now.</Text>
+            </View>
           )}
 
           {upcomingRaces.length > 1 ? (
@@ -1075,7 +1259,7 @@ export default function HomeScreen() {
                         </Pressable>
                         {showCreate ? (
                           <View style={styles.createPanel}>
-                            <Text style={styles.createFieldLabel}>Competition name</Text>
+                            <Text style={styles.createFieldLabel}>Name</Text>
                             <TextInput
                               style={styles.createInput}
                               value={createName}
@@ -1085,7 +1269,31 @@ export default function HomeScreen() {
                               autoCorrect={false}
                               editable={!creating}
                             />
-                            <Text style={styles.createFieldLabel}>Start date</Text>
+
+                            <Text style={styles.createFieldLabel}>Course</Text>
+                            <Pressable
+                              style={styles.createSelect}
+                              onPress={() => {
+                                setCourseSearch('');
+                                setCoursePickerOpen(true);
+                              }}
+                              disabled={creating}
+                              accessibilityRole="button"
+                              accessibilityLabel="Select course"
+                            >
+                              <Text
+                                style={[
+                                  styles.createSelectText,
+                                  !createCourse && styles.createSelectPlaceholder,
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {createCourse || 'Select racecourse'}
+                              </Text>
+                              <Ionicons name="chevron-down" size={16} color={theme.colors.textMuted} />
+                            </Pressable>
+
+                            <Text style={styles.createFieldLabel}>Festival start</Text>
                             {Platform.OS === 'web' ? (
                               // @ts-expect-error web date input
                               <input
@@ -1117,39 +1325,41 @@ export default function HomeScreen() {
                                 editable={!creating}
                               />
                             )}
-                            <Text style={styles.createFieldLabel}>End date</Text>
-                            {Platform.OS === 'web' ? (
-                              // @ts-expect-error web date input
-                              <input
-                                type="date"
-                                value={createEndDate}
-                                onChange={(e: { target: { value: string } }) =>
-                                  setCreateEndDate(e.target.value)
-                                }
-                                disabled={creating}
-                                min={createStartDate || undefined}
-                                style={{
-                                  fontFamily: theme.fontFamily.input,
-                                  fontSize: 14,
-                                  color: theme.colors.text,
-                                  backgroundColor: theme.colors.surface,
-                                  border: `1px solid ${theme.colors.border}`,
-                                  borderRadius: 6,
-                                  padding: 10,
-                                  width: '100%',
-                                }}
-                              />
+
+                            <Text style={styles.createFieldLabel}>Festival length</Text>
+                            <View style={styles.createDaysRow}>
+                              {[1, 2, 3, 4, 5, 6, 7].map((n) => {
+                                const active = createDays === n;
+                                return (
+                                  <Pressable
+                                    key={n}
+                                    style={[styles.createDayChip, active && styles.createDayChipActive]}
+                                    onPress={() => setCreateDays(n)}
+                                    disabled={creating}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.createDayChipText,
+                                        active && styles.createDayChipTextActive,
+                                      ]}
+                                    >
+                                      {n}d
+                                    </Text>
+                                  </Pressable>
+                                );
+                              })}
+                            </View>
+                            {createEndPreview ? (
+                              <Text style={styles.createHint}>
+                                Runs {createStartDate} – {createEndPreview} ({createDays} day
+                                {createDays === 1 ? '' : 's'}).
+                              </Text>
                             ) : (
-                              <TextInput
-                                style={styles.createInput}
-                                value={createEndDate}
-                                onChangeText={setCreateEndDate}
-                                placeholder="YYYY-MM-DD"
-                                placeholderTextColor={theme.colors.textMuted}
-                                autoCapitalize="none"
-                                editable={!creating}
-                              />
+                              <Text style={styles.createHint}>
+                                Pick a start date and how many days the festival lasts.
+                              </Text>
                             )}
+
                             <Text style={styles.createFieldLabel}>Access code (optional)</Text>
                             <TextInput
                               style={styles.createInput}
@@ -1161,10 +1371,7 @@ export default function HomeScreen() {
                               autoCapitalize="characters"
                               editable={!creating}
                             />
-                            <Text style={styles.createHint}>
-                              Festival dates set the competition window. Share the access code so
-                              others can request to join.
-                            </Text>
+
                             <Pressable
                               style={styles.createSubmit}
                               onPress={() => void onCreateCompetition()}
@@ -1176,6 +1383,99 @@ export default function HomeScreen() {
                                 <Text style={styles.createSubmitText}>Create</Text>
                               )}
                             </Pressable>
+
+                            <Modal
+                              visible={coursePickerOpen}
+                              transparent
+                              animationType="fade"
+                              onRequestClose={() => setCoursePickerOpen(false)}
+                            >
+                              <Pressable
+                                style={styles.modalOverlay}
+                                onPress={() => setCoursePickerOpen(false)}
+                              >
+                                <Pressable
+                                  style={styles.modalContent}
+                                  onPress={(e) => e.stopPropagation()}
+                                >
+                                  <View style={styles.modalHeader}>
+                                    <Text style={styles.modalTitle}>Select course</Text>
+                                    <Pressable onPress={() => setCoursePickerOpen(false)}>
+                                      <Text style={styles.modalDone}>Done</Text>
+                                    </Pressable>
+                                  </View>
+                                  <TextInput
+                                    style={styles.courseSearchInput}
+                                    placeholder="Search courses..."
+                                    placeholderTextColor={theme.colors.textMuted}
+                                    value={courseSearch}
+                                    onChangeText={setCourseSearch}
+                                    autoCapitalize="none"
+                                    autoCorrect={false}
+                                  />
+                                  <View style={styles.courseFilterRow}>
+                                    {(
+                                      [
+                                        { key: 'all' as const, label: 'All' },
+                                        { key: 'ireland' as const, label: 'Ireland' },
+                                        { key: 'england' as const, label: 'Britain' },
+                                      ] as const
+                                    ).map((f) => {
+                                      const active = courseRegion === f.key;
+                                      return (
+                                        <Pressable
+                                          key={f.key}
+                                          style={[
+                                            styles.courseFilterChip,
+                                            active && styles.courseFilterChipActive,
+                                          ]}
+                                          onPress={() => setCourseRegion(f.key)}
+                                        >
+                                          <Text
+                                            style={[
+                                              styles.courseFilterChipText,
+                                              active && styles.courseFilterChipTextActive,
+                                            ]}
+                                          >
+                                            {f.label}
+                                          </Text>
+                                        </Pressable>
+                                      );
+                                    })}
+                                  </View>
+                                  <FlatList
+                                    data={filteredCourses}
+                                    keyExtractor={(item) => item}
+                                    style={styles.courseList}
+                                    keyboardShouldPersistTaps="handled"
+                                    ListEmptyComponent={
+                                      <Text style={styles.courseListEmpty}>No courses match</Text>
+                                    }
+                                    renderItem={({ item }) => (
+                                      <Pressable
+                                        style={[
+                                          styles.courseItem,
+                                          item === createCourse && styles.courseItemActive,
+                                        ]}
+                                        onPress={() => {
+                                          setCreateCourse(item);
+                                          setCoursePickerOpen(false);
+                                        }}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.courseItemText,
+                                            item === createCourse && styles.courseItemTextActive,
+                                          ]}
+                                        >
+                                          {item}
+                                        </Text>
+                                      </Pressable>
+                                    )}
+                                  />
+                                </Pressable>
+                              </Pressable>
+                            </Modal>
                           </View>
                         ) : null}
                       </>
