@@ -37,6 +37,46 @@ import {
 } from '@/lib/f2t/sessionCache';
 
 type TabKey = 'progress' | 'picker' | 'leaderboard' | 'admin';
+type PositionFilter = 'ALL' | 'GK' | 'DEF' | 'MID' | 'FWD';
+type SortKey = 'name' | 'goals' | 'assists' | 'form' | 'xg';
+
+const POSITION_FILTERS: PositionFilter[] = ['ALL', 'GK', 'DEF', 'MID', 'FWD'];
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'name', label: 'Name' },
+  { key: 'goals', label: 'Goals' },
+  { key: 'assists', label: 'Assists' },
+  { key: 'form', label: 'Form' },
+  { key: 'xg', label: 'xG' },
+];
+
+function numStat(stats: Record<string, unknown> | undefined, ...keys: string[]): number | null {
+  if (!stats) return null;
+  for (const k of keys) {
+    const v = stats[k];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string' && v.trim() !== '') {
+      const n = Number(v);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return null;
+}
+
+function playerStatValue(p: F2tSelectablePlayer, key: SortKey): number {
+  const stats = p.picker_stats;
+  switch (key) {
+    case 'goals':
+      return numStat(stats, 'season_goals', 'goals_scored') ?? -1;
+    case 'assists':
+      return numStat(stats, 'season_assists', 'assists') ?? -1;
+    case 'form':
+      return numStat(stats, 'form') ?? -1;
+    case 'xg':
+      return numStat(stats, 'expected_goals') ?? -1;
+    default:
+      return 0;
+  }
+}
 
 export default function F2tCompetitionScreen() {
   const theme = useTheme();
@@ -76,6 +116,9 @@ export default function F2tCompetitionScreen() {
   const [players, setPlayers] = useState<F2tSelectablePlayer[]>([]);
   const [playersLoading, setPlayersLoading] = useState(false);
   const [playerSearch, setPlayerSearch] = useState('');
+  const [positionFilter, setPositionFilter] = useState<PositionFilter>('ALL');
+  const [teamFilterId, setTeamFilterId] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>('goals');
   const [pickedIds, setPickedIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [subMode, setSubMode] = useState(false);
@@ -154,23 +197,64 @@ export default function F2tCompetitionScreen() {
     if (pickerOpen) void loadPlayers();
   }, [pickerOpen, loadPlayers]);
 
+  const teamOptions = useMemo(() => {
+    const byId = new Map<
+      string,
+      { id: string; name: string; short_name: string; slug: string }
+    >();
+    for (const p of players) {
+      if (!byId.has(p.team_id)) {
+        byId.set(p.team_id, {
+          id: p.team_id,
+          name: p.team_name,
+          short_name: p.team_short_name,
+          slug: p.team_slug,
+        });
+      }
+    }
+    return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [players]);
+
   const filteredPlayers = useMemo(() => {
     const q = playerSearch.trim().toLowerCase();
-    if (!q) return players;
-    return players.filter(
-      (p) =>
+    let list = players.filter((p) => {
+      if (positionFilter !== 'ALL' && (p.position ?? '').toUpperCase() !== positionFilter) {
+        return false;
+      }
+      if (teamFilterId && p.team_id !== teamFilterId) return false;
+      if (!q) return true;
+      return (
         p.display_name.toLowerCase().includes(q) ||
+        (p.full_name ?? '').toLowerCase().includes(q) ||
         p.team_name.toLowerCase().includes(q) ||
-        p.team_short_name.toLowerCase().includes(q)
-    );
-  }, [players, playerSearch]);
+        p.team_short_name.toLowerCase().includes(q) ||
+        (p.position ?? '').toLowerCase().includes(q)
+      );
+    });
+    list = [...list].sort((a, b) => {
+      if (sortKey === 'name') {
+        return a.display_name.localeCompare(b.display_name, undefined, { sensitivity: 'base' });
+      }
+      const diff = playerStatValue(b, sortKey) - playerStatValue(a, sortKey);
+      if (diff !== 0) return diff;
+      return a.display_name.localeCompare(b.display_name, undefined, { sensitivity: 'base' });
+    });
+    return list;
+  }, [players, playerSearch, positionFilter, teamFilterId, sortKey]);
+
+  const resetPickerFilters = () => {
+    setPlayerSearch('');
+    setPositionFilter('ALL');
+    setTeamFilterId(null);
+    setSortKey('goals');
+  };
 
   const openPicker = () => {
     const existing = selections.map((s) => s.player_id);
     setPickedIds(existing);
     setSubMode(false);
     setSubOutId(null);
-    setPlayerSearch('');
+    resetPickerFilters();
     setPickerOpen(true);
   };
 
@@ -178,7 +262,7 @@ export default function F2tCompetitionScreen() {
     setSubMode(true);
     setSubOutId(outId);
     setPickedIds([]);
-    setPlayerSearch('');
+    resetPickerFilters();
     setPickerOpen(true);
   };
 
@@ -409,26 +493,96 @@ export default function F2tCompetitionScreen() {
           color: theme.colors.text,
           backgroundColor: theme.colors.surface,
         },
+        filterScroll: {
+          marginBottom: 6,
+        },
+        filterRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingHorizontal: theme.spacing.lg,
+          paddingBottom: 4,
+        },
+        filterChip: {
+          paddingVertical: 6,
+          paddingHorizontal: 11,
+          borderRadius: theme.radius.sm,
+          backgroundColor: theme.colors.surface,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+        },
+        filterChipActive: {
+          backgroundColor: theme.colors.accentMuted,
+          borderColor: theme.colors.accent,
+        },
+        filterChipText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.textSecondary,
+        },
+        filterChipTextActive: {
+          color: theme.colors.accent,
+        },
+        teamChip: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          paddingVertical: 5,
+          paddingHorizontal: 10,
+          borderRadius: theme.radius.sm,
+          backgroundColor: theme.colors.surface,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+        },
+        teamChipActive: {
+          backgroundColor: theme.colors.accentMuted,
+          borderColor: theme.colors.accent,
+        },
         playerRow: {
           flexDirection: 'row',
           alignItems: 'center',
           gap: theme.spacing.sm,
-          paddingVertical: 10,
+          paddingVertical: 11,
           paddingHorizontal: theme.spacing.lg,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: theme.colors.border,
         },
         playerRowSelected: { backgroundColor: theme.colors.accentMuted },
+        playerNameRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          marginBottom: 2,
+        },
         playerName: {
-          flex: 1,
+          flexShrink: 1,
           fontFamily: theme.fontFamily.baiMedium,
           fontSize: 14,
           color: theme.colors.text,
+        },
+        positionBadge: {
+          paddingHorizontal: 6,
+          paddingVertical: 2,
+          borderRadius: 4,
+          backgroundColor: theme.colors.surface,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+        },
+        positionBadgeText: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 10,
+          letterSpacing: 0.4,
+          color: theme.colors.textSecondary,
         },
         playerMeta: {
           fontFamily: theme.fontFamily.baiLight,
           fontSize: 11,
           color: theme.colors.textMuted,
+        },
+        emptyFilter: {
+          paddingVertical: 28,
+          paddingHorizontal: theme.spacing.lg,
+          alignItems: 'center',
         },
         pickerFooter: {
           padding: theme.spacing.lg,
@@ -626,43 +780,156 @@ export default function F2tCompetitionScreen() {
               placeholder="Search players or teams"
               placeholderTextColor={theme.colors.textMuted}
             />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.filterScroll}
+              contentContainerStyle={styles.filterRow}
+            >
+              {POSITION_FILTERS.map((pos) => {
+                const active = positionFilter === pos;
+                return (
+                  <Pressable
+                    key={pos}
+                    style={[styles.filterChip, active && styles.filterChipActive]}
+                    onPress={() => setPositionFilter(pos)}
+                  >
+                    <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                      {pos === 'ALL' ? 'All positions' : pos}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.filterScroll}
+              contentContainerStyle={styles.filterRow}
+            >
+              <Pressable
+                style={[styles.teamChip, !teamFilterId && styles.teamChipActive]}
+                onPress={() => setTeamFilterId(null)}
+              >
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    !teamFilterId && styles.filterChipTextActive,
+                  ]}
+                >
+                  All teams
+                </Text>
+              </Pressable>
+              {teamOptions.map((t) => {
+                const active = teamFilterId === t.id;
+                return (
+                  <Pressable
+                    key={t.id}
+                    style={[styles.teamChip, active && styles.teamChipActive]}
+                    onPress={() => setTeamFilterId(t.id)}
+                  >
+                    <TeamColourChip
+                      shortName={t.short_name}
+                      name={t.name}
+                      slug={t.slug}
+                      size={18}
+                    />
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        active && styles.filterChipTextActive,
+                      ]}
+                    >
+                      {t.short_name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.filterScroll}
+              contentContainerStyle={styles.filterRow}
+            >
+              {SORT_OPTIONS.map((opt) => {
+                const active = sortKey === opt.key;
+                return (
+                  <Pressable
+                    key={opt.key}
+                    style={[styles.filterChip, active && styles.filterChipActive]}
+                    onPress={() => setSortKey(opt.key)}
+                  >
+                    <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>
+                      Sort: {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
             {playersLoading ? (
               <ActivityIndicator style={{ marginVertical: 24 }} color={theme.colors.accent} />
             ) : (
-              <ScrollView style={{ maxHeight: 420 }}>
-                {filteredPlayers.map((p) => {
-                  const selected = pickedIds.includes(p.id);
-                  const stats = p.picker_stats as Record<string, unknown>;
-                  const goals = stats?.season_goals ?? stats?.goals_scored;
-                  const news = typeof stats?.news === 'string' ? stats.news : '';
-                  return (
-                    <Pressable
-                      key={p.id}
-                      style={[styles.playerRow, selected && styles.playerRowSelected]}
-                      onPress={() => togglePick(p.id)}
-                    >
-                      <TeamColourChip
-                        shortName={p.team_short_name}
-                        name={p.team_name}
-                        slug={p.team_slug}
-                        size={28}
-                      />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.playerName}>{p.display_name}</Text>
-                        <Text style={styles.playerMeta}>
-                          {p.team_short_name}
-                          {goals != null ? ` · ${goals} goals` : ''}
-                        </Text>
-                        {news ? (
-                          <Text style={styles.playerMeta} numberOfLines={1}>{news}</Text>
+              <ScrollView style={{ maxHeight: 360 }}>
+                {filteredPlayers.length === 0 ? (
+                  <View style={styles.emptyFilter}>
+                    <Text style={styles.subtitle}>No players match these filters.</Text>
+                  </View>
+                ) : (
+                  filteredPlayers.map((p) => {
+                    const selected = pickedIds.includes(p.id);
+                    const stats = p.picker_stats as Record<string, unknown>;
+                    const goals = numStat(stats, 'season_goals', 'goals_scored');
+                    const assists = numStat(stats, 'season_assists', 'assists');
+                    const form = numStat(stats, 'form');
+                    const xg = numStat(stats, 'expected_goals');
+                    const news = typeof stats?.news === 'string' ? stats.news.trim() : '';
+                    const metaParts = [
+                      p.team_short_name,
+                      goals != null ? `${goals} G` : null,
+                      assists != null ? `${assists} A` : null,
+                      form != null ? `Form ${form}` : null,
+                      xg != null ? `xG ${xg.toFixed(1)}` : null,
+                    ].filter(Boolean);
+                    return (
+                      <Pressable
+                        key={p.id}
+                        style={[styles.playerRow, selected && styles.playerRowSelected]}
+                        onPress={() => togglePick(p.id)}
+                      >
+                        <TeamColourChip
+                          shortName={p.team_short_name}
+                          name={p.team_name}
+                          slug={p.team_slug}
+                          size={36}
+                        />
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <View style={styles.playerNameRow}>
+                            <Text style={styles.playerName} numberOfLines={1}>
+                              {p.display_name}
+                            </Text>
+                            {p.position ? (
+                              <View style={styles.positionBadge}>
+                                <Text style={styles.positionBadgeText}>{p.position}</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                          <Text style={styles.playerMeta} numberOfLines={1}>
+                            {metaParts.join(' · ')}
+                          </Text>
+                          {news ? (
+                            <Text style={styles.playerMeta} numberOfLines={1}>
+                              {news}
+                            </Text>
+                          ) : null}
+                        </View>
+                        {selected ? (
+                          <Ionicons name="checkmark-circle" size={22} color={theme.colors.accent} />
                         ) : null}
-                      </View>
-                      {selected ? (
-                        <Ionicons name="checkmark-circle" size={22} color={theme.colors.accent} />
-                      ) : null}
-                    </Pressable>
-                  );
-                })}
+                      </Pressable>
+                    );
+                  })
+                )}
               </ScrollView>
             )}
             <View style={styles.pickerFooter}>
