@@ -234,3 +234,29 @@ GitHub sometimes returns 404 when the URL uses the workflow **filename**. Use th
 - **Workflow enabled:** Repo → **Actions** → select the workflow → ensure it is not disabled.
 - **Default branch:** The workflow file must exist on the default branch (e.g. `main`). The request body must use that branch: `{"ref":"main"}` (or `master`).
 - **Body:** Must be valid JSON, e.g. `{"ref":"main"}` with no extra spaces or characters.
+
+---
+
+## 4. First2Twenty (F2T) cron jobs
+
+F2T goal sync is **chained inside the existing LMS football workflow** (`sync-lms-football.yml`) — no new cron jobs needed for goals if LMS jobs already run.
+
+Add **two** new jobs for player roster and daily picker stats:
+
+### Job: FPL daily picker stats
+
+- **Title:** `Sync FPL daily picker stats`
+- **Workflow:** `sync-football-fpl-daily.yml` (workflow_dispatch)
+- **Schedule (Europe/Dublin):** `0 6 * * *` (06:00 daily)
+- **Request body:** `{"ref":"BRANCH"}`
+
+### Job: Big Balls player roster
+
+- **Title:** `Sync Big Balls player roster`
+- **Workflow:** `sync-football-players-bbs.yml` (workflow_dispatch)
+- **Schedule (Europe/Dublin):** `0 6 * * 1` (Monday 06:00)
+- **Request body:** `{"ref":"BRANCH"}`
+
+**GitHub Secrets required:** `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `BIG_BALLS_API` (plus existing `Football_API` for LMS).
+
+Owner can also trigger a manual player sync from the Owner console (edge function `sync-football-players-bbs`).

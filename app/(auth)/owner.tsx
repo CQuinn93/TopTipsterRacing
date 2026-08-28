@@ -36,8 +36,21 @@ import {
   type LmsFixture,
   type LmsGameweek,
 } from '@/lib/lms/api';
+import {
+  ownerListFootballPlayers,
+  ownerSetFootballPlayerFlagged,
+  ownerSyncFootballPlayersBbs,
+} from '@/lib/f2t/api';
+import {
+  DEFAULT_HUB_GAME_MODES,
+  HUB_GAME_MODE_LABELS,
+  getHubGameModes,
+  ownerSetHubGameModes,
+  type HubGameModeKey,
+  type HubGameModes,
+} from '@/lib/hubGameModes';
 
-type TabKey = 'users' | 'competitions' | 'exclusions';
+type TabKey = 'users' | 'competitions' | 'exclusions' | 'f2t_players' | 'game_modes';
 
 const LMS_SEASON = '2026/27';
 
@@ -148,6 +161,16 @@ export default function OwnerScreen() {
   const [busyFixtureId, setBusyFixtureId] = useState<string | null>(null);
   const [reasonById, setReasonById] = useState<Record<string, string>>({});
 
+  const [f2tPlayers, setF2tPlayers] = useState<Array<Record<string, unknown>>>([]);
+  const [f2tPlayersLoading, setF2tPlayersLoading] = useState(false);
+  const [f2tPlayerSearch, setF2tPlayerSearch] = useState('');
+  const [f2tSyncBusy, setF2tSyncBusy] = useState(false);
+  const [f2tBusyPlayerId, setF2tBusyPlayerId] = useState<string | null>(null);
+
+  const [hubModes, setHubModes] = useState<HubGameModes>(DEFAULT_HUB_GAME_MODES);
+  const [hubModesLoading, setHubModesLoading] = useState(false);
+  const [hubModesSaving, setHubModesSaving] = useState(false);
+
   useEffect(() => {
     if (!userId) {
       setAllowed(false);
@@ -225,12 +248,108 @@ export default function OwnerScreen() {
     }, [allowed, load])
   );
 
+  const loadF2tPlayers = useCallback(async (search?: string) => {
+    setF2tPlayersLoading(true);
+    try {
+      const list = await ownerListFootballPlayers(undefined, search?.trim() || undefined);
+      setF2tPlayers(list);
+    } catch (e) {
+      notify('Error', e instanceof Error ? e.message : 'Failed to load players');
+      setF2tPlayers([]);
+    } finally {
+      setF2tPlayersLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  const loadHubModes = useCallback(async () => {
+    setHubModesLoading(true);
+    try {
+      const modes = await getHubGameModes();
+      setHubModes(modes);
+    } catch (e) {
+      notify('Error', e instanceof Error ? e.message : 'Failed to load game modes');
+      setHubModes(DEFAULT_HUB_GAME_MODES);
+    } finally {
+      setHubModesLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (allowed !== true || tab !== 'f2t_players') return;
+    void loadF2tPlayers(f2tPlayerSearch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowed, tab, loadF2tPlayers]);
+
+  useEffect(() => {
+    if (allowed !== true || tab !== 'game_modes') return;
+    void loadHubModes();
+  }, [allowed, tab, loadHubModes]);
+
   useEffect(() => {
     if (allowed !== true || tab !== 'exclusions') return;
     void loadExclusions(selectedGwId);
     // Intentionally omit selectedGwId — chip presses call loadExclusions directly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowed, tab, loadExclusions]);
+
+  const syncF2tPlayers = async () => {
+    setF2tSyncBusy(true);
+    try {
+      const res = await ownerSyncFootballPlayersBbs();
+      if (!res.success) {
+        notify('Sync failed', res.error ?? 'Could not sync players');
+        return;
+      }
+      notify('Synced', `Updated ${res.upserted ?? 0} players from Big Balls API.`);
+      await loadF2tPlayers(f2tPlayerSearch);
+    } catch (e) {
+      notify('Error', e instanceof Error ? e.message : 'Sync failed');
+    } finally {
+      setF2tSyncBusy(false);
+    }
+  };
+
+  const togglePlayerFlag = async (playerId: string, flagged: boolean) => {
+    setF2tBusyPlayerId(playerId);
+    try {
+      const res = await ownerSetFootballPlayerFlagged(playerId, flagged);
+      if (!res.success) {
+        notify('Error', res.error ?? 'Could not update flag');
+        return;
+      }
+      setF2tPlayers((prev) =>
+        prev.map((p) =>
+          String(p.id) === playerId ? { ...p, owner_flagged: flagged } : p
+        )
+      );
+    } catch (e) {
+      notify('Error', e instanceof Error ? e.message : 'Could not update flag');
+    } finally {
+      setF2tBusyPlayerId(null);
+    }
+  };
+
+  const saveHubMode = async (key: HubGameModeKey, open: boolean) => {
+    const next = { ...hubModes, [key]: open };
+    setHubModes(next);
+    setHubModesSaving(true);
+    try {
+      const res = await ownerSetHubGameModes(next);
+      if (!res.success) {
+        notify('Error', res.error ?? 'Could not update game mode');
+        await loadHubModes();
+        return;
+      }
+      if (res.modes) setHubModes(res.modes);
+    } catch (e) {
+      notify('Error', e instanceof Error ? e.message : 'Could not update game mode');
+      await loadHubModes();
+    } finally {
+      setHubModesSaving(false);
+    }
+  };
 
   const setRole = async (user: OwnerUserRow, role: 'User' | 'Admin') => {
     if (user.role === role) return;
@@ -393,6 +512,10 @@ export default function OwnerScreen() {
     setRefreshing(true);
     if (tab === 'exclusions') {
       void loadExclusions(selectedGwId);
+    } else if (tab === 'f2t_players') {
+      void loadF2tPlayers(f2tPlayerSearch);
+    } else if (tab === 'game_modes') {
+      void loadHubModes();
     } else {
       void load();
     }
@@ -659,11 +782,15 @@ export default function OwnerScreen() {
       tabs={[
         { key: 'users', label: 'Users' },
         { key: 'competitions', label: 'Competitions' },
+        { key: 'game_modes', label: 'Game modes' },
+        { key: 'f2t_players', label: 'F2T players' },
         { key: 'exclusions', label: 'Exclusions' },
       ]}
       activeTab={tab}
       onTabChange={(key) => setTab(key as TabKey)}
-      loading={loading && tab !== 'exclusions'}
+      loading={
+        loading && tab !== 'exclusions' && tab !== 'f2t_players' && tab !== 'game_modes'
+      }
     >
       <ScrollView
         contentContainerStyle={styles.content}
@@ -810,6 +937,123 @@ export default function OwnerScreen() {
               <Text style={styles.empty}>No LMS competitions</Text>
             ) : (
               lmsComps.map(renderCompCard)
+            )}
+          </>
+        ) : tab === 'game_modes' ? (
+          <>
+            <Text style={styles.hint}>
+              Control which game modes appear open on the competition hub for regular users. You
+              always have access to every mode regardless of these toggles.
+            </Text>
+            {hubModesLoading ? (
+              <ActivityIndicator color={admin.accent} style={{ marginTop: theme.spacing.lg }} />
+            ) : (
+              (Object.keys(HUB_GAME_MODE_LABELS) as HubGameModeKey[]).map((key) => {
+                const open = hubModes[key];
+                const label = HUB_GAME_MODE_LABELS[key];
+                const note =
+                  key === 'f2t6'
+                    ? 'Not implemented yet — toggle stores preference for when the mode ships.'
+                    : null;
+                return (
+                  <View key={key} style={styles.card}>
+                    <View style={styles.rowTop}>
+                      <Text style={styles.name}>{label}</Text>
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>{open ? 'Open' : 'Closed'}</Text>
+                      </View>
+                    </View>
+                    {note ? <Text style={styles.meta}>{note}</Text> : null}
+                    <View style={styles.excludeRow}>
+                      <Text style={styles.excludeLabel}>
+                        {open ? 'Visible to users on hub' : 'Hidden from users (Owner can still enter)'}
+                      </Text>
+                      {hubModesSaving ? (
+                        <ActivityIndicator size="small" color={admin.accent} />
+                      ) : (
+                        <Switch
+                          value={open}
+                          onValueChange={(value) => void saveHubMode(key, value)}
+                          trackColor={{ false: theme.colors.border, true: admin.accent }}
+                          thumbColor={theme.colors.surface}
+                        />
+                      )}
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </>
+        ) : tab === 'f2t_players' ? (
+          <>
+            <Text style={styles.hint}>
+              First2Twenty player roster. Flag long-term absences — flagged players cannot be newly
+              picked and grant a free sub if unscored. FPL news is display-only in the picker.
+            </Text>
+            <Pressable
+              style={[styles.actionBtn, styles.actionBtnActive]}
+              disabled={f2tSyncBusy}
+              onPress={() => void syncF2tPlayers()}
+            >
+              {f2tSyncBusy ? (
+                <ActivityIndicator size="small" color={admin.accent} />
+              ) : (
+                <Text style={[styles.actionBtnText, styles.actionBtnTextActive]}>Sync player list</Text>
+              )}
+            </Pressable>
+            <TextInput
+              style={styles.reasonInput}
+              value={f2tPlayerSearch}
+              onChangeText={setF2tPlayerSearch}
+              placeholder="Search players"
+              placeholderTextColor={theme.colors.textMuted}
+              onSubmitEditing={() => void loadF2tPlayers(f2tPlayerSearch)}
+              onBlur={() => void loadF2tPlayers(f2tPlayerSearch)}
+            />
+            {f2tPlayersLoading ? (
+              <ActivityIndicator color={admin.accent} style={{ marginTop: theme.spacing.lg }} />
+            ) : f2tPlayers.length === 0 ? (
+              <Text style={styles.empty}>No players found — run Sync player list</Text>
+            ) : (
+              f2tPlayers.map((p) => {
+                const id = String(p.id ?? '');
+                const flagged = Boolean(p.owner_flagged);
+                const busy = f2tBusyPlayerId === id;
+                const stats = (p.picker_stats as Record<string, unknown>) ?? {};
+                const news = typeof stats.news === 'string' ? stats.news : '';
+                return (
+                  <View key={id} style={styles.card}>
+                    <View style={styles.rowTop}>
+                      <Text style={styles.name} numberOfLines={1}>
+                        {String(p.display_name ?? p.full_name ?? 'Player')}
+                      </Text>
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>
+                          {String(p.team_short_name ?? p.team_name ?? '—')}
+                        </Text>
+                      </View>
+                    </View>
+                    {news ? (
+                      <Text style={styles.meta} numberOfLines={2}>{news}</Text>
+                    ) : null}
+                    <View style={styles.excludeRow}>
+                      <Text style={styles.excludeLabel}>
+                        {flagged ? 'Owner flagged' : 'Available to pick'}
+                      </Text>
+                      {busy ? (
+                        <ActivityIndicator size="small" color={admin.accent} />
+                      ) : (
+                        <Switch
+                          value={flagged}
+                          onValueChange={(value) => void togglePlayerFlag(id, value)}
+                          trackColor={{ false: theme.colors.border, true: admin.accent }}
+                          thumbColor={theme.colors.surface}
+                        />
+                      )}
+                    </View>
+                  </View>
+                );
+              })
             )}
           </>
         ) : (

@@ -11,6 +11,7 @@ import { AppUnlockScreen } from '@/components/AppUnlockScreen';
 import { setLastRoute } from '@/lib/lastRoute';
 import { ForceRefreshProvider } from '@/contexts/ForceRefreshContext';
 import { AppLockProvider, useAppLock } from '@/contexts/AppLockContext';
+import { GameModeGate } from '@/lib/useGameModeGuard';
 
 function MenuHeaderButton() {
   const theme = useTheme();
@@ -65,16 +66,18 @@ function AppLayoutContent() {
   return (
     <NestedThemeProvider theme={racingTheme}>
       <ForceRefreshProvider>
-        <SidebarProvider initialVariant="racing">
-          {session && isLocked ? (
-            <AppUnlockScreen />
-          ) : (
-            <>
-              <AppStack />
-              <AppSidebar />
-            </>
-          )}
-        </SidebarProvider>
+        <GameModeGate mode="racing">
+          <SidebarProvider initialVariant="racing">
+            {session && isLocked ? (
+              <AppUnlockScreen />
+            ) : (
+              <>
+                <AppStack />
+                <AppSidebar />
+              </>
+            )}
+          </SidebarProvider>
+        </GameModeGate>
       </ForceRefreshProvider>
     </NestedThemeProvider>
   );

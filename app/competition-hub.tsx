@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
   Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -24,6 +24,12 @@ import { setLastRoute } from '@/lib/lastRoute';
 import { getAdminAccent } from '@/constants/adminUi';
 import { isStaffRole, isOwnerRole, type ProfileRole } from '@/lib/adminSession';
 import { isCurrentUserBanned } from '@/lib/ownerApi';
+import {
+  DEFAULT_HUB_GAME_MODES,
+  getHubGameModes,
+  type HubGameModeKey,
+  type HubGameModes,
+} from '@/lib/hubGameModes';
 
 const DESKTOP_BREAKPOINT = 900;
 const COMPACT_BREAKPOINT = 420;
@@ -47,6 +53,32 @@ type ModeTileProps = {
   item: ModeItem;
   accent: string;
 };
+
+function buildHubModeItem(
+  key: string,
+  title: string,
+  modeKey: HubGameModeKey,
+  modes: HubGameModes,
+  isOwner: boolean,
+  onPress: (() => void) | undefined
+): ModeItem {
+  if (!onPress) {
+    return { key, title, status: 'Coming soon', unavailable: true };
+  }
+  const openForUsers = modes[modeKey];
+  if (isOwner) {
+    return {
+      key,
+      title,
+      status: openForUsers ? 'Open' : 'Closed',
+      onPress,
+    };
+  }
+  if (!openForUsers) {
+    return { key, title, status: 'Coming soon', unavailable: true };
+  }
+  return { key, title, status: 'Open', onPress };
+}
 
 function ModeTile({ item, accent }: ModeTileProps) {
   const theme = useTheme();
@@ -171,6 +203,7 @@ export default function CompetitionHubScreen() {
   const [displayName, setDisplayName] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
+  const [hubModes, setHubModes] = useState<HubGameModes>(DEFAULT_HUB_GAME_MODES);
   const [signingOut, setSigningOut] = useState(false);
   const [signingOutAll, setSigningOutAll] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
@@ -203,6 +236,18 @@ export default function CompetitionHubScreen() {
       setTab(next);
     }
   }, [params.tab]);
+
+  const loadHubModes = () => {
+    void getHubGameModes()
+      .then(setHubModes)
+      .catch(() => setHubModes(DEFAULT_HUB_GAME_MODES));
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      loadHubModes();
+    }, [])
+  );
 
   useEffect(() => {
     Animated.parallel([
@@ -510,48 +555,43 @@ export default function CompetitionHubScreen() {
   const modes: ModeItem[] =
     tab === 'football'
       ? [
-          {
-            key: 'lms',
-            title: 'Last Man Standing',
-            status: 'Open',
-            onPress: () => {
+          buildHubModeItem(
+            'lms',
+            'Last Man Standing',
+            'lms',
+            hubModes,
+            isOwner,
+            () => {
               void setLastRoute('/(lms)');
-              // replace keeps the Home Screen PWA history shallow so iOS
-              // is less likely to show system back/forward chrome.
               router.replace('/(lms)' as any);
-            },
-          },
-          {
-            key: 'first2-twenty',
-            title: 'First2 Twenty',
-            status: 'Coming soon',
-            unavailable: true,
-          },
-          {
-            key: 'first2-6',
-            title: 'First2 6',
-            status: 'Coming soon',
-            unavailable: true,
-          },
+            }
+          ),
+          buildHubModeItem(
+            'first2-twenty',
+            'First2 Twenty',
+            'f2t',
+            hubModes,
+            isOwner,
+            () => {
+              void setLastRoute('/(f2t)');
+              router.replace('/(f2t)' as any);
+            }
+          ),
+          buildHubModeItem('first2-6', 'First2 6', 'f2t6', hubModes, isOwner, undefined),
         ]
       : tab === 'racing'
         ? [
-            isOwner
-              ? {
-                  key: 'top-tipster-racing',
-                  title: 'Top Tipster Racing',
-                  status: 'Open',
-                  onPress: () => {
-                    void setLastRoute('/(app)');
-                    router.replace('/(app)' as any);
-                  },
-                }
-              : {
-                  key: 'top-tipster-racing',
-                  title: 'Top Tipster Racing',
-                  status: 'Closed',
-                  unavailable: true,
-                },
+            buildHubModeItem(
+              'top-tipster-racing',
+              'Top Tipster Racing',
+              'racing',
+              hubModes,
+              isOwner,
+              () => {
+                void setLastRoute('/(app)');
+                router.replace('/(app)' as any);
+              }
+            ),
           ]
         : tab === 'admin'
           ? [

@@ -20,6 +20,9 @@ These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/hor
 | **sync-lms-football.ts** | Syncs Premier League **teams + fixtures/results** from [football-data.org](https://www.football-data.org/) into `lms_teams` / `lms_gameweeks` / `lms_fixtures`, then auto-settles finished gameweeks via `lms_settle_gameweek_internal`. Stores **live** scores when matches are in play; settlement still waits for `finished`. Uses 2 football-data API calls per run; only writes changed fixture rows and only processes live/past-deadline gameweeks. | Every 6 hours (GitHub Action); matchdays ~every 15 min via cron. |
 | **lms-auto-assign-missed-picks.ts** | Calls `lms_auto_assign_missed_picks` for every open gameweek past its deadline. Lightweight — no football API. | Manual via GitHub Action `lms-auto-assign-picks.yml`, or cron every 10–15 min on match days. |
 | **send-lms-deadline-reminders.ts** | Web Push to Home Screen subscribers who have not picked before an LMS deadline (includes predicted auto-assign team). See [docs/WEB_PUSH.md](../docs/WEB_PUSH.md). | Every 15 min via GitHub Action `lms-deadline-reminders.yml`. |
+| **sync-football-players-bbs.ts** | Syncs Premier League **player roster** from Big Balls API into `football_players` (linked to `lms_teams`). Owner can also trigger via edge function `sync-football-players-bbs`. | Weekly Monday 06:00 UTC (`sync-football-players-bbs.yml`). |
+| **sync-football-fpl-daily.ts** | Daily FPL `bootstrap-static` — updates `picker_stats` and news hints on `football_players`. Never sets `owner_flagged`. | Daily 06:00 UTC (`sync-football-fpl-daily.yml`). |
+| **sync-football-goals.ts** | FPL `event/{gw}/live` — upserts `football_player_gameweek_goals`, then calls `f2t_apply_gameweek_goals`. Chained after LMS football sync. | Same cadence as LMS sync (15 min matchday windows). |
 
 ## Database tables (migrations 010–011)
 
@@ -40,6 +43,7 @@ These scripts use [RapidAPI Horse Racing](https://rapidapi.com/ortegalex/api/hor
 - **SUPABASE_URL**, **SUPABASE_SERVICE_KEY** (or SUPABASE_SERVICE_ROLE_KEY)
 - **RAPIDAPI_KEY** (for pull-races and update-race-results)
 - **Football_API** – football-data.org token for **sync-lms-football.ts** (GitHub Secret name: `Football_API`)
+- **BIG_BALLS_API** – Big Balls Sports API key for **sync-football-players-bbs.ts** (GitHub Secret name: `BIG_BALLS_API`)
 - **RACE_FETCH_DELAY_MS** (optional) – delay in ms between each GET /race/{id} in pull-races. Default 6000 (6s = 10/min, fastest). Increase if you hit rate limits.
 - **COURSE_FILTER** – ignored; courses are taken from active competitions in the DB (one course per competition).
 - **RESEND_API_KEY** (optional) – if set with **PULL_RACES_NOTIFICATION_EMAIL**, pull-races will email a short report after each run (includes **API calls made**; success: courses and races added; skipped: already had data; errors: message). Same key can be used for update-race-results if **UPDATE_RESULTS_NOTIFICATION_EMAIL** is set. Sign up at [resend.com](https://resend.com), create an API key, and add to your env or GitHub Secrets. Emails are sent from `onboarding@resend.dev` (Resend’s test sender). With the test sender, the recipient must be the same email you used to sign up at resend.com; for other addresses, verify a domain in Resend and set the `from` address in the script.

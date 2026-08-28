@@ -146,6 +146,36 @@ export function AppSidebar() {
                   <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
                 </TouchableOpacity>
               </>
+            ) : variant === 'f2t' ? (
+              <>
+                <TouchableOpacity
+                  style={styles.menuButton}
+                  onPress={() => goTo('/(lms)?tab=table')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="stats-chart-outline" size={22} color={theme.colors.accent} />
+                  <Text style={styles.menuButtonText}>Table</Text>
+                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuButton}
+                  onPress={() => goTo('/(f2t)/rules')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="document-text-outline" size={22} color={theme.colors.accent} />
+                  <Text style={styles.menuButtonText}>Rules</Text>
+                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuButton}
+                  onPress={() => goTo('/(f2t)/how-it-works')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="help-circle-outline" size={22} color={theme.colors.accent} />
+                  <Text style={styles.menuButtonText}>How it works</Text>
+                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+                </TouchableOpacity>
+              </>
             ) : (
               <>
                 <TouchableOpacity

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 
-export type SportMenuVariant = 'racing' | 'lms';
+export type SportMenuVariant = 'racing' | 'lms' | 'f2t';
 
 type SidebarContextValue = {
   open: boolean;

@@ -1,0 +1,24 @@
+# Weekly Big Balls player roster → football_players
+name: Sync BBS players (F2T)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Sync Big Balls players
+        run: npx tsx scripts/sync-football-players-bbs.ts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          BIG_BALLS_API: ${{ secrets.BIG_BALLS_API }}

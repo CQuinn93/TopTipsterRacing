@@ -32,6 +32,7 @@ function RootLayoutContent() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(app)" />
         <Stack.Screen name="(lms)" />
+        <Stack.Screen name="(f2t)" />
       </Stack>
     </>
   );

@@ -26,3 +26,10 @@ jobs:
           LMS_SEASON: '2026/27'
           FOOTBALL_DATA_SEASON: '2026'
           LMS_AUTO_SETTLE: 'true'
+      - name: Sync F2T gameweek goals (FPL)
+        run: npx tsx scripts/sync-football-goals.ts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          LMS_SEASON: '2026/27'
+          F2T_SEASON: '2026/27'
