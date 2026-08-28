@@ -144,6 +144,9 @@ export async function f2tListSelectablePlayers(competitionId: string) {
   });
   if (error) throw error;
   const row = data as { success: boolean; players?: F2tSelectablePlayer[]; error?: string };
+  if (row && row.success === false) {
+    throw new Error(row.error ?? 'Could not load players');
+  }
   return row.players ?? [];
 }
 

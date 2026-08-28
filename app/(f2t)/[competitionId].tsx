@@ -51,6 +51,7 @@ export default function F2tCompetitionScreen() {
   const [name, setName] = useState('');
   const [status, setStatus] = useState('');
   const [startGw, setStartGw] = useState<number | null>(null);
+  const [deadlineAt, setDeadlineAt] = useState<string | null>(null);
   const [selections, setSelections] = useState<F2tSelectionRow[]>([]);
   const [scoredCount, setScoredCount] = useState(0);
   const [selectionCount, setSelectionCount] = useState(0);
@@ -93,13 +94,18 @@ export default function F2tCompetitionScreen() {
       setName(data.competition.name);
       setStatus(data.competition.status);
       setStartGw(data.competition.start_gameweek_number);
+      setDeadlineAt(data.competition.start_gameweek_deadline ?? null);
       setSelections(data.selections ?? []);
       setScoredCount(data.participant?.scored_count ?? 0);
       setSelectionCount(data.participant?.selection_count ?? 0);
-      setSelectionsLocked(
-        (data.participant?.selection_count ?? 0) >= 20 ||
-          data.competition.status !== 'active'
-      );
+      // Match submit RPC: active participant can pick while competition is open/active
+      // and before the start-GW deadline (count of 20 does not lock edits early).
+      const partActive = data.participant?.status === 'active';
+      const compDone = data.competition.status === 'completed';
+      const deadlinePassed = data.competition.start_gameweek_deadline
+        ? Date.now() >= new Date(data.competition.start_gameweek_deadline).getTime()
+        : false;
+      setSelectionsLocked(!partActive || compDone || deadlinePassed);
       setSubEligible(data.participant?.sub_eligible_regular ?? false);
       setRegularSubUsed(data.participant?.regular_sub_used ?? false);
       setLeaderboard(data.leaderboard ?? []);
@@ -440,8 +446,17 @@ export default function F2tCompetitionScreen() {
     [theme, insets]
   );
 
-  const canPick = !selectionsLocked && selectionCount < 20;
+  const canPick = !selectionsLocked;
   const canRegularSub = subEligible && !regularSubUsed;
+  const deadlineLabel = deadlineAt
+    ? new Date(deadlineAt).toLocaleString(undefined, {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null;
 
   return (
     <View style={styles.root}>
@@ -453,6 +468,7 @@ export default function F2tCompetitionScreen() {
           <Text style={styles.title} numberOfLines={1}>{name}</Text>
           <Text style={styles.subtitle}>
             GW{startGw ?? '—'} start · {status}
+            {deadlineLabel ? ` · picks until ${deadlineLabel}` : ''}
           </Text>
         </View>
         <Pressable onPress={openSidebar} hitSlop={12}>
@@ -523,9 +539,16 @@ export default function F2tCompetitionScreen() {
                 <Text style={styles.subtitle}>
                   {selectionCount >= 20
                     ? 'Your 20 players are locked in.'
-                    : 'Selections are not available for this league.'}
+                    : deadlineAt && Date.now() >= new Date(deadlineAt).getTime()
+                      ? 'Selections are closed for this league.'
+                      : 'Selections are not available for this league.'}
                 </Text>
               )}
+              {canPick && selectionCount > 0 && selectionCount < 20 ? (
+                <Text style={styles.subtitle}>
+                  {selectionCount}/20 selected — choose {20 - selectionCount} more to submit.
+                </Text>
+              ) : null}
               {selections
                 .filter((s) => !s.scored_at && (s.owner_flagged || canRegularSub))
                 .map((s) => (
