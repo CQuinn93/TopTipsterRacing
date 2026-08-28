@@ -1088,15 +1088,13 @@ export default function LmsCompetitionDashboard() {
     return Number.isFinite(firstKo) && firstKo <= Date.now();
   }, [pickGwFixtures]);
 
-  /** After settle / before the open GW goes live — alternate Standing layouts. */
+  /** After settle / before the open GW goes live — default Cards layout. */
   const standingBetweenWeeks = !currentGw || currentGw.status === 'upcoming';
 
-  // Wait until shell finishes — loadShell clears board state, and an early
-  // fetch (while currentGw was still null) would not re-run if we stayed
-  // "between weeks", leaving Standing empty until you leave and re-enter the tab.
+  // Standing board (used teams + pool) for Cards / Pools — available mid-week too.
   useEffect(() => {
     if (loading) return;
-    if (tab !== 'leaderboard' || !standingBetweenWeeks || !competitionId) return;
+    if (tab !== 'leaderboard' || !competitionId) return;
     if (standingBoardLoadedRef.current) return;
     let cancelled = false;
     setStandingBoardLoading(true);
@@ -1131,13 +1129,11 @@ export default function LmsCompetitionDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [tab, standingBetweenWeeks, competitionId, loading]);
+  }, [tab, competitionId, loading]);
 
   useEffect(() => {
     if (standingBetweenWeeks) {
       setStandingViewMode((prev) => (prev === 'list' ? 'cards' : prev));
-    } else {
-      setStandingViewMode('list');
     }
   }, [standingBetweenWeeks]);
 
@@ -1148,8 +1144,28 @@ export default function LmsCompetitionDashboard() {
       list.push(p);
       map.set(p.user_id, list);
     }
+    // During a live GW, fold in revealed current picks so cards match post-week layout.
+    if (picksRevealed && currentGw) {
+      for (const pick of gwPicks) {
+        if (!pick.team_id) continue;
+        const list = map.get(pick.user_id) ?? [];
+        if (list.some((x) => x.gameweek_id === currentGw.id)) {
+          map.set(pick.user_id, list);
+          continue;
+        }
+        list.push({
+          user_id: pick.user_id,
+          gameweek_id: currentGw.id,
+          gameweek_number: currentGw.number,
+          team_id: pick.team_id,
+          result: pick.result ?? '',
+          team: pick.team ?? undefined,
+        });
+        map.set(pick.user_id, list);
+      }
+    }
     return map;
-  }, [standingBoardPicks]);
+  }, [standingBoardPicks, picksRevealed, currentGw, gwPicks]);
 
   const standingBetweenPlayers = useMemo(() => {
     const q = standingSearch.trim().toLowerCase();
@@ -3424,9 +3440,11 @@ export default function LmsCompetitionDashboard() {
             {tab === 'leaderboard' ? (
               <>
                 <Text style={styles.sectionIntro}>
-                  {standingBetweenWeeks
-                    ? 'Between gameweeks — browse players as cards or pool grids to see used teams and what’s still available. List view keeps the classic standing.'
-                    : 'Still standing wins. During the gameweek, players are grouped under their pick. Finished fixtures show W / D / L beside the team; players whose pick won get a Through mark. Switch between A–Z and most picked. Tap a player for their used teams.'}
+                  {standingViewMode === 'cards' || standingViewMode === 'pools'
+                    ? 'Browse players as cards or pool grids to see used teams (with GW#) and what’s still available. List view shows the classic standing.'
+                    : standingBetweenWeeks
+                      ? 'Between gameweeks — browse players as cards or pool grids to see used teams and what’s still available. List view keeps the classic standing.'
+                      : 'Still standing wins. During the gameweek, List groups players under their pick. Finished fixtures show W / D / L beside the team; players whose pick won get a Through mark. Use Cards or Pools for the used-teams board. Switch between A–Z and most picked on List. Tap a player for their used teams.'}
                   {currentGw
                     ? picksRevealed
                       ? ` Showing GW${currentGw.number} picks.`
@@ -3459,39 +3477,37 @@ export default function LmsCompetitionDashboard() {
                     </Pressable>
                   ) : null}
                 </View>
-                {standingBetweenWeeks ? (
-                  <View style={styles.standingViewRow}>
-                    {(
-                      [
-                        { key: 'cards' as const, label: 'Cards', a11y: 'Player cards with used teams' },
-                        { key: 'pools' as const, label: 'Pools', a11y: 'Player pool grids' },
-                        { key: 'list' as const, label: 'List', a11y: 'Classic standing list' },
-                      ] as const
-                    ).map((opt) => {
-                      const active = standingViewMode === opt.key;
-                      return (
-                        <Pressable
-                          key={opt.key}
-                          style={[styles.standingSortChip, active && styles.standingSortChipActive]}
-                          onPress={() => setStandingViewMode(opt.key)}
-                          accessibilityRole="button"
-                          accessibilityState={{ selected: active }}
-                          accessibilityLabel={opt.a11y}
+                <View style={styles.standingViewRow}>
+                  {(
+                    [
+                      { key: 'cards' as const, label: 'Cards', a11y: 'Player cards with used teams' },
+                      { key: 'pools' as const, label: 'Pools', a11y: 'Player pool grids' },
+                      { key: 'list' as const, label: 'List', a11y: 'Classic standing list' },
+                    ] as const
+                  ).map((opt) => {
+                    const active = standingViewMode === opt.key;
+                    return (
+                      <Pressable
+                        key={opt.key}
+                        style={[styles.standingSortChip, active && styles.standingSortChipActive]}
+                        onPress={() => setStandingViewMode(opt.key)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
+                        accessibilityLabel={opt.a11y}
+                      >
+                        <Text
+                          style={[
+                            styles.standingSortChipText,
+                            active && styles.standingSortChipTextActive,
+                          ]}
                         >
-                          <Text
-                            style={[
-                              styles.standingSortChipText,
-                              active && styles.standingSortChipTextActive,
-                            ]}
-                          >
-                            {opt.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                ) : null}
-                {!standingBetweenWeeks && picksRevealed ? (
+                          {opt.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {standingViewMode === 'list' && !standingBetweenWeeks && picksRevealed ? (
                   <View style={styles.standingSortRow}>
                     {(
                       [
@@ -3524,8 +3540,7 @@ export default function LmsCompetitionDashboard() {
                 ) : null}
                 {leaderboard.length === 0 ? (
                   <Text style={styles.muted}>No players in this competition yet.</Text>
-                ) : standingBetweenWeeks &&
-                  (standingViewMode === 'cards' || standingViewMode === 'pools') ? (
+                ) : standingViewMode === 'cards' || standingViewMode === 'pools' ? (
                   standingBoardLoading && standingBoardPool.length === 0 ? (
                     <ActivityIndicator color={theme.colors.accent} style={{ marginTop: 16 }} />
                   ) : standingBetweenPlayers.length === 0 ? (

@@ -15,6 +15,9 @@ const FPL_STATUS_LABELS: Record<string, string> = {
   n: 'Not in squad',
 };
 
+/** Order used in owner alert summaries. */
+export const FPL_ALERT_STATUS_ORDER = ['i', 'd', 's', 'u', 'n'] as const;
+
 /** Yellow haze for unavailable (left club / not in PL pool). */
 export const FPL_UNAVAILABLE_CARD_HAZE = 'rgba(234, 179, 8, 0.16)';
 
@@ -27,6 +30,14 @@ const FPL_ALERT_BORDER_COLORS: Record<string, string> = {
   s: '#3b82f6',
 };
 
+const FPL_STATUS_ACCENT: Record<string, string> = {
+  i: '#ef4444',
+  d: '#f97316',
+  s: '#3b82f6',
+  u: '#eab308',
+  n: '#a855f7',
+};
+
 export function fplIsUnavailable(statusCode: string | null | undefined): boolean {
   return statusCode?.toLowerCase() === 'u';
 }
@@ -34,6 +45,11 @@ export function fplIsUnavailable(statusCode: string | null | undefined): boolean
 export function fplAlertBorderColor(statusCode: string | null | undefined): string | null {
   if (!statusCode || fplIsUnavailable(statusCode)) return null;
   return FPL_ALERT_BORDER_COLORS[statusCode.toLowerCase()] ?? null;
+}
+
+export function fplStatusAccentColor(statusCode: string | null | undefined): string {
+  if (!statusCode) return '#94a3b8';
+  return FPL_STATUS_ACCENT[statusCode.toLowerCase()] ?? '#94a3b8';
 }
 
 export function fplStatusLabel(code: string | null | undefined): string {
@@ -64,4 +80,48 @@ export function formatFplAvailability(stats: Record<string, unknown> | null | un
     news,
     chanceSummary: chanceParts.join(' · '),
   };
+}
+
+export type FplAlertStatusCount = {
+  code: string;
+  label: string;
+  count: number;
+  color: string;
+};
+
+export function summarizeFplAlertStatuses(
+  players: Array<{ picker_stats?: Record<string, unknown> | null }>
+): FplAlertStatusCount[] {
+  const counts = new Map<string, number>();
+  for (const p of players) {
+    const code = formatFplAvailability(p.picker_stats).statusCode.toLowerCase() || 'a';
+    const key = (FPL_ALERT_STATUS_ORDER as readonly string[]).includes(code)
+      ? code
+      : 'other';
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  const rows: FplAlertStatusCount[] = [];
+  for (const code of FPL_ALERT_STATUS_ORDER) {
+    const count = counts.get(code) ?? 0;
+    if (count === 0) continue;
+    rows.push({
+      code,
+      label: fplStatusLabel(code),
+      count,
+      color: fplStatusAccentColor(code),
+    });
+  }
+
+  const other = counts.get('other') ?? 0;
+  if (other > 0) {
+    rows.push({
+      code: 'other',
+      label: 'Other / news',
+      count: other,
+      color: '#94a3b8',
+    });
+  }
+
+  return rows;
 }

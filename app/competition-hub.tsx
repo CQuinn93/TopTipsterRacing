@@ -12,6 +12,7 @@ import {
   Alert,
   Linking,
   Switch,
+  TextInput,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -24,7 +25,12 @@ import { supabase, getSupabaseUrl } from '@/lib/supabase';
 import { setLastRoute } from '@/lib/lastRoute';
 import { getAdminAccent } from '@/constants/adminUi';
 import { isStaffRole, isOwnerRole, type ProfileRole } from '@/lib/adminSession';
-import { isCurrentUserBanned } from '@/lib/ownerApi';
+import {
+  isCurrentUserBanned,
+  ownerListUsers,
+  ownerSetUserBanned,
+  type OwnerUserRow,
+} from '@/lib/ownerApi';
 import {
   DEFAULT_HUB_GAME_MODES,
   getHubGameModes,
@@ -37,7 +43,15 @@ import {
   ownerListFootballPlayersFplAlerts,
   ownerSetFootballPlayerFlagged,
 } from '@/lib/f2t/api';
-import { FootballPlayerFlagCard } from '@/components/f2t/FootballPlayerFlagCard';
+import { F2tAlertsPanel } from '@/components/f2t/F2tAlertsPanel';
+import {
+  lmsAdminSetFixtureExcluded,
+  lmsGetCurrentGameweek,
+  lmsListFixturesForGameweek,
+  lmsListGameweeks,
+  type LmsFixture,
+  type LmsGameweek,
+} from '@/lib/lms/api';
 
 const DESKTOP_BREAKPOINT = 900;
 const COMPACT_BREAKPOINT = 420;
@@ -48,6 +62,19 @@ const PRIVACY_POLICY_URL =
   'https://doc-hosting.flycricket.io/top-tipster-racing-fantasy-sports-privacy-policy/98fbb3c4-4795-4774-bba7-c2ebb872eb92/privacy';
 
 type HubTab = 'football' | 'racing' | 'admin' | 'account';
+
+type AdminCategory = 'football' | 'racing' | 'users';
+type FootballAdminTab = 'f2t_alerts' | 'exclusions';
+
+const LMS_SEASON = '2026/27';
+const FOOTBALL_MODE_KEYS: HubGameModeKey[] = ['lms', 'f2t', 'f2t6'];
+const RACING_MODE_KEYS: HubGameModeKey[] = ['racing'];
+
+function fixtureLabel(f: LmsFixture): string {
+  const home = f.home_team?.short_name || f.home_team?.name || 'Home';
+  const away = f.away_team?.short_name || f.away_team?.name || 'Away';
+  return `${home} vs ${away}`;
+}
 
 type ModeItem = {
   key: string;
@@ -213,9 +240,20 @@ export default function CompetitionHubScreen() {
   const [isOwner, setIsOwner] = useState(false);
   const [hubModes, setHubModes] = useState<HubGameModes>(DEFAULT_HUB_GAME_MODES);
   const [hubModesSaving, setHubModesSaving] = useState(false);
+  const [adminCategory, setAdminCategory] = useState<AdminCategory>('football');
+  const [footballAdminTab, setFootballAdminTab] = useState<FootballAdminTab>('f2t_alerts');
   const [fplAlertPlayers, setFplAlertPlayers] = useState<Array<Record<string, unknown>>>([]);
   const [fplAlertsLoading, setFplAlertsLoading] = useState(false);
   const [fplBusyPlayerId, setFplBusyPlayerId] = useState<string | null>(null);
+  const [gameweeks, setGameweeks] = useState<LmsGameweek[]>([]);
+  const [selectedGwId, setSelectedGwId] = useState<string | null>(null);
+  const [fixtures, setFixtures] = useState<LmsFixture[]>([]);
+  const [reasonById, setReasonById] = useState<Record<string, string>>({});
+  const [exclusionsLoading, setExclusionsLoading] = useState(false);
+  const [busyFixtureId, setBusyFixtureId] = useState<string | null>(null);
+  const [ownerUsers, setOwnerUsers] = useState<OwnerUserRow[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signingOutAll, setSigningOutAll] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
@@ -269,6 +307,57 @@ export default function CompetitionHubScreen() {
     }
   }, [isOwner]);
 
+  const loadExclusions = useCallback(async (preferGwId?: string | null) => {
+    if (!isOwner) return;
+    setExclusionsLoading(true);
+    try {
+      const [gws, current] = await Promise.all([
+        lmsListGameweeks(LMS_SEASON),
+        lmsGetCurrentGameweek(LMS_SEASON),
+      ]);
+      setGameweeks(gws);
+      const gwId =
+        preferGwId && gws.some((g) => g.id === preferGwId)
+          ? preferGwId
+          : current?.id ??
+            gws.find((g) => g.status !== 'complete')?.id ??
+            gws[0]?.id ??
+            null;
+      setSelectedGwId(gwId);
+      if (!gwId) {
+        setFixtures([]);
+        setReasonById({});
+        return;
+      }
+      const list = await lmsListFixturesForGameweek(gwId);
+      setFixtures(list);
+      setReasonById(
+        Object.fromEntries(list.map((f) => [f.id, f.excluded_reason?.trim() || '']))
+      );
+    } catch (e) {
+      console.warn('[competition-hub] exclusions load failed', e);
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load fixtures');
+      setFixtures([]);
+    } finally {
+      setExclusionsLoading(false);
+    }
+  }, [isOwner]);
+
+  const loadOwnerUsers = useCallback(async () => {
+    if (!isOwner) return;
+    setUsersLoading(true);
+    try {
+      const list = await ownerListUsers();
+      setOwnerUsers(list);
+    } catch (e) {
+      console.warn('[competition-hub] users load failed', e);
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load users');
+      setOwnerUsers([]);
+    } finally {
+      setUsersLoading(false);
+    }
+  }, [isOwner]);
+
   const toggleFplPlayerFlag = async (playerId: string, flagged: boolean) => {
     setFplBusyPlayerId(playerId);
     try {
@@ -289,20 +378,98 @@ export default function CompetitionHubScreen() {
     }
   };
 
+  const setFixtureExcluded = async (f: LmsFixture, excluded: boolean) => {
+    setBusyFixtureId(f.id);
+    try {
+      const reason = reasonById[f.id]?.trim() || null;
+      const res = await lmsAdminSetFixtureExcluded(f.id, excluded, reason);
+      if (!res.success) {
+        Alert.alert('Error', res.error ?? 'Could not update fixture');
+        return;
+      }
+      setFixtures((prev) =>
+        prev.map((row) =>
+          row.id === f.id
+            ? {
+                ...row,
+                excluded_from_lms: excluded,
+                excluded_reason: excluded ? reason : null,
+              }
+            : row
+        )
+      );
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not update fixture');
+    } finally {
+      setBusyFixtureId(null);
+    }
+  };
+
+  const saveFixtureReason = async (f: LmsFixture, reason: string) => {
+    if (!f.excluded_from_lms) return;
+    setBusyFixtureId(f.id);
+    try {
+      const next = reason.trim() || null;
+      const res = await lmsAdminSetFixtureExcluded(f.id, true, next);
+      if (!res.success) {
+        Alert.alert('Error', res.error ?? 'Could not save reason');
+        return;
+      }
+      setFixtures((prev) =>
+        prev.map((row) =>
+          row.id === f.id ? { ...row, excluded_reason: next } : row
+        )
+      );
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not save reason');
+    } finally {
+      setBusyFixtureId(null);
+    }
+  };
+
+  const toggleUserBanned = async (user: OwnerUserRow, banned: boolean) => {
+    setBusyUserId(user.id);
+    try {
+      const res = await ownerSetUserBanned(user.id, banned);
+      if (!res.success) {
+        Alert.alert('Error', res.error ?? 'Could not update ban');
+        return;
+      }
+      setOwnerUsers((prev) =>
+        prev.map((row) =>
+          row.id === user.id
+            ? {
+                ...row,
+                banned_at: banned ? new Date().toISOString() : null,
+                banned_by: banned ? userId : null,
+              }
+            : row
+        )
+      );
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not update ban');
+    } finally {
+      setBusyUserId(null);
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       loadHubModes();
-      if (tab === 'admin' && isOwner) {
-        void loadFplAlerts();
-      }
-    }, [tab, isOwner, loadFplAlerts])
+    }, [])
   );
 
   useEffect(() => {
-    if (tab === 'admin' && isOwner) {
+    if (tab !== 'admin' || !isOwner) return;
+    if (adminCategory === 'football' && footballAdminTab === 'f2t_alerts') {
       void loadFplAlerts();
+    } else if (adminCategory === 'football' && footballAdminTab === 'exclusions') {
+      void loadExclusions(selectedGwId);
+    } else if (adminCategory === 'users') {
+      void loadOwnerUsers();
     }
-  }, [tab, isOwner, loadFplAlerts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, isOwner, adminCategory, footballAdminTab, loadFplAlerts, loadExclusions, loadOwnerUsers]);
 
   useEffect(() => {
     Animated.parallel([
@@ -367,32 +534,13 @@ export default function CompetitionHubScreen() {
     };
   }, [userId, signOut]);
 
-  const openLmsAdmin = () => {
-    // Day-to-day LMS admin lives in-mode; Owners use the owner console.
+  const openOwnerPanel = (ownerTab?: string) => {
     router.push({
       pathname: '/(auth)/owner',
-      params: { returnTo: '/competition-hub?tab=admin' },
-    } as any);
-  };
-
-  const openAdminPanel = () => {
-    router.push({
-      pathname: '/(auth)/owner',
-      params: { returnTo: '/competition-hub?tab=admin' },
-    } as any);
-  };
-
-  const openOwnerPanel = () => {
-    router.push({
-      pathname: '/(auth)/owner',
-      params: { returnTo: '/competition-hub?tab=admin' },
-    } as any);
-  };
-
-  const openOwnerGameModes = () => {
-    router.push({
-      pathname: '/(auth)/owner',
-      params: { returnTo: '/competition-hub?tab=admin', ownerTab: 'game_modes' },
+      params: {
+        returnTo: '/competition-hub?tab=admin',
+        ...(ownerTab ? { ownerTab } : {}),
+      },
     } as any);
   };
 
@@ -681,20 +829,7 @@ export default function CompetitionHubScreen() {
             ),
           ]
         : tab === 'admin'
-          ? [
-              {
-                key: 'owner-console',
-                title: 'Owner console',
-                status: 'Users · competitions · exclusions',
-                onPress: openOwnerPanel,
-              },
-              {
-                key: 'owner-game-modes',
-                title: 'Game modes (full panel)',
-                status: 'Open / close modes for all users',
-                onPress: openOwnerGameModes,
-              },
-            ]
+          ? []
           : [];
 
   const styles = useMemo(
@@ -901,6 +1036,138 @@ export default function CompetitionHubScreen() {
           fontFamily: theme.fontFamily.baiLight,
           fontSize: 11,
           color: theme.colors.textMuted,
+        },
+        adminCatRow: {
+          flexDirection: 'row',
+          gap: 8,
+          marginBottom: theme.spacing.md,
+          flexWrap: 'wrap',
+        },
+        adminCatChip: {
+          paddingHorizontal: 14,
+          paddingVertical: 8,
+          borderRadius: theme.radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+        },
+        adminCatChipActive: {
+          borderColor: adminAccent,
+          backgroundColor: adminPalette.accentMuted,
+        },
+        adminCatChipText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+        },
+        adminCatChipTextActive: {
+          color: adminAccent,
+        },
+        adminSubRow: {
+          flexDirection: 'row',
+          gap: 8,
+          marginBottom: theme.spacing.sm,
+        },
+        adminSubChip: {
+          paddingHorizontal: 12,
+          paddingVertical: 6,
+          borderRadius: theme.radius.sm,
+          borderBottomWidth: 2,
+          borderBottomColor: 'transparent',
+        },
+        adminSubChipActive: {
+          borderBottomColor: adminAccent,
+        },
+        adminSubChipText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          letterSpacing: 0.4,
+          textTransform: 'uppercase',
+        },
+        adminSubChipTextActive: {
+          color: adminAccent,
+        },
+        gwScroll: {
+          marginBottom: theme.spacing.sm,
+          flexGrow: 0,
+        },
+        gwChip: {
+          marginRight: 8,
+          paddingHorizontal: 12,
+          paddingVertical: 6,
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+        },
+        gwChipActive: {
+          borderColor: adminAccent,
+          backgroundColor: adminPalette.accentMuted,
+        },
+        gwChipText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        gwChipTextActive: {
+          color: adminAccent,
+        },
+        excludeCard: {
+          marginTop: theme.spacing.sm,
+          padding: theme.spacing.md,
+          borderRadius: theme.radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+          gap: 6,
+        },
+        excludeTitle: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 14,
+          color: theme.colors.text,
+        },
+        excludeMeta: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        excludeRow: {
+          marginTop: 4,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        },
+        excludeLabel: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 13,
+          color: theme.colors.text,
+        },
+        reasonInput: {
+          marginTop: 4,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          borderRadius: theme.radius.sm,
+          paddingHorizontal: 10,
+          paddingVertical: 8,
+          fontFamily: theme.fontFamily.bai,
+          fontSize: 13,
+          color: theme.colors.text,
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        userCard: {
+          marginTop: theme.spacing.sm,
+          padding: theme.spacing.md,
+          borderRadius: theme.radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+          gap: 6,
+        },
+        userName: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 14,
+          color: theme.colors.text,
         },
         accountCard: {
           width: '100%',
@@ -1154,77 +1421,331 @@ export default function CompetitionHubScreen() {
               ) : (
                 <>
                   {tab === 'admin' && isOwner ? (
-                    <View style={styles.gameModesCard}>
-                      <Text style={styles.panelLabel}>Game modes for users</Text>
-                      <Text style={styles.gameModesHint}>
-                        Toggle which modes appear open on the Football and Racing tabs. You always
-                        have access to every mode.
-                      </Text>
-                      {(Object.keys(HUB_GAME_MODE_LABELS) as HubGameModeKey[]).map((key) => {
-                        const open = hubModes[key];
-                        return (
-                          <View key={key} style={styles.gameModeRow}>
-                            <View style={{ flex: 1 }}>
-                              <Text style={styles.gameModeLabel}>{HUB_GAME_MODE_LABELS[key]}</Text>
-                              <Text style={styles.gameModeStatus}>
-                                {open ? 'Open to users' : 'Hidden from users'}
-                              </Text>
-                            </View>
-                            {hubModesSaving ? (
-                              <ActivityIndicator size="small" color={adminAccent} />
-                            ) : (
-                              <Switch
-                                value={open}
-                                onValueChange={(value) => void saveHubMode(key, value)}
-                                trackColor={{
-                                  false: theme.colors.border,
-                                  true: adminAccent,
-                                }}
-                                thumbColor={theme.colors.surface}
-                              />
-                            )}
-                          </View>
-                        );
-                      })}
-                    </View>
-                  ) : null}
-                  {tab === 'admin' && isOwner ? (
-                    <View style={styles.gameModesCard}>
-                      <Text style={styles.panelLabel}>First2Twenty · FPL alerts</Text>
-                      <Text style={styles.gameModesHint}>
-                        Players with injury, doubt, suspension, or availability news from the daily
-                        FPL sync. Exclude anyone who should not be pickable.
-                      </Text>
-                      {fplAlertsLoading ? (
-                        <ActivityIndicator size="small" color={adminAccent} style={{ marginTop: 8 }} />
-                      ) : fplAlertPlayers.length === 0 ? (
-                        <Text style={styles.gameModesHint}>No current FPL alerts.</Text>
-                      ) : (
-                        fplAlertPlayers.map((p) => {
-                          const id = String(p.id ?? '');
+                    <>
+                      <View style={styles.adminCatRow}>
+                        {(
+                          [
+                            { key: 'football' as const, label: 'Football' },
+                            { key: 'racing' as const, label: 'Racing' },
+                            { key: 'users' as const, label: 'Users' },
+                          ] as const
+                        ).map((cat) => {
+                          const active = adminCategory === cat.key;
                           return (
-                            <FootballPlayerFlagCard
-                              key={id}
-                              player={p}
-                              accent={adminAccent}
-                              busy={fplBusyPlayerId === id}
-                              onToggleFlag={(playerId, flagged) =>
-                                void toggleFplPlayerFlag(playerId, flagged)
-                              }
-                            />
+                            <Pressable
+                              key={cat.key}
+                              style={[styles.adminCatChip, active && styles.adminCatChipActive]}
+                              onPress={() => setAdminCategory(cat.key)}
+                              accessibilityRole="button"
+                              accessibilityState={{ selected: active }}
+                            >
+                              <Text
+                                style={[
+                                  styles.adminCatChipText,
+                                  active && styles.adminCatChipTextActive,
+                                ]}
+                              >
+                                {cat.label}
+                              </Text>
+                            </Pressable>
                           );
-                        })
-                      )}
-                    </View>
-                  ) : null}
-                  <Text style={styles.panelLabel}>
-                    {tab === 'admin' ? 'Owner tools' : 'Select a mode'}
-                  </Text>
-                  <View style={styles.modeGrid}>
-                    {modes.map((item) => (
-                      <ModeTile key={item.key} item={item} accent={activeAccent} />
-                    ))}
-                  </View>
+                        })}
+                      </View>
+
+                      {adminCategory !== 'users' ? (
+                        <View style={styles.gameModesCard}>
+                          <Text style={styles.panelLabel}>Game modes for users</Text>
+                          <Text style={styles.gameModesHint}>
+                            Toggle which {adminCategory === 'football' ? 'football' : 'racing'}{' '}
+                            modes appear open. You always have access to every mode.
+                          </Text>
+                          {(adminCategory === 'football'
+                            ? FOOTBALL_MODE_KEYS
+                            : RACING_MODE_KEYS
+                          ).map((key) => {
+                            const open = hubModes[key];
+                            return (
+                              <View key={key} style={styles.gameModeRow}>
+                                <View style={{ flex: 1 }}>
+                                  <Text style={styles.gameModeLabel}>
+                                    {HUB_GAME_MODE_LABELS[key]}
+                                  </Text>
+                                  <Text style={styles.gameModeStatus}>
+                                    {open ? 'Open to users' : 'Hidden from users'}
+                                  </Text>
+                                </View>
+                                {hubModesSaving ? (
+                                  <ActivityIndicator size="small" color={adminAccent} />
+                                ) : (
+                                  <Switch
+                                    value={open}
+                                    onValueChange={(value) => void saveHubMode(key, value)}
+                                    trackColor={{
+                                      false: theme.colors.border,
+                                      true: adminAccent,
+                                    }}
+                                    thumbColor={theme.colors.surface}
+                                  />
+                                )}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      ) : null}
+
+                      {adminCategory === 'football' ? (
+                        <>
+                          <View style={styles.adminSubRow}>
+                            {(
+                              [
+                                { key: 'f2t_alerts' as const, label: 'F2T alerts' },
+                                { key: 'exclusions' as const, label: 'Exclusions' },
+                              ] as const
+                            ).map((sub) => {
+                              const active = footballAdminTab === sub.key;
+                              return (
+                                <Pressable
+                                  key={sub.key}
+                                  style={[
+                                    styles.adminSubChip,
+                                    active && styles.adminSubChipActive,
+                                  ]}
+                                  onPress={() => setFootballAdminTab(sub.key)}
+                                  accessibilityRole="button"
+                                  accessibilityState={{ selected: active }}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.adminSubChipText,
+                                      active && styles.adminSubChipTextActive,
+                                    ]}
+                                  >
+                                    {sub.label}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+
+                          {footballAdminTab === 'f2t_alerts' ? (
+                            <View style={styles.gameModesCard}>
+                              <F2tAlertsPanel
+                                players={fplAlertPlayers}
+                                loading={fplAlertsLoading}
+                                accent={adminAccent}
+                                busyPlayerId={fplBusyPlayerId}
+                                onToggleFlag={(playerId, flagged) =>
+                                  void toggleFplPlayerFlag(playerId, flagged)
+                                }
+                              />
+                            </View>
+                          ) : (
+                            <View style={styles.gameModesCard}>
+                              <Text style={styles.panelLabel}>LMS fixture exclusions</Text>
+                              <Text style={styles.gameModesHint}>
+                                Excluded fixtures cannot be picked in any Last Man Standing league.
+                              </Text>
+                              <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                style={styles.gwScroll}
+                              >
+                                {gameweeks.map((g) => {
+                                  const active = selectedGwId === g.id;
+                                  return (
+                                    <Pressable
+                                      key={g.id}
+                                      style={[styles.gwChip, active && styles.gwChipActive]}
+                                      onPress={() => {
+                                        setSelectedGwId(g.id);
+                                        void loadExclusions(g.id);
+                                      }}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.gwChipText,
+                                          active && styles.gwChipTextActive,
+                                        ]}
+                                      >
+                                        GW{g.number}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </ScrollView>
+                              {exclusionsLoading ? (
+                                <ActivityIndicator
+                                  size="small"
+                                  color={adminAccent}
+                                  style={{ marginTop: 8 }}
+                                />
+                              ) : fixtures.length === 0 ? (
+                                <Text style={styles.gameModesHint}>
+                                  No fixtures for this gameweek.
+                                </Text>
+                              ) : (
+                                fixtures.map((f) => {
+                                  const excluded = !!f.excluded_from_lms;
+                                  const busy = busyFixtureId === f.id;
+                                  return (
+                                    <View key={f.id} style={styles.excludeCard}>
+                                      <Text style={styles.excludeTitle} numberOfLines={2}>
+                                        {fixtureLabel(f)}
+                                      </Text>
+                                      <Text style={styles.excludeMeta}>
+                                        {f.kickoff_at
+                                          ? new Date(f.kickoff_at).toLocaleString(undefined, {
+                                              weekday: 'short',
+                                              day: 'numeric',
+                                              month: 'short',
+                                              hour: '2-digit',
+                                              minute: '2-digit',
+                                            })
+                                          : 'Kickoff TBD'}
+                                        {f.status ? ` · ${f.status}` : ''}
+                                      </Text>
+                                      <View style={styles.excludeRow}>
+                                        <Text style={styles.excludeLabel}>
+                                          {excluded ? 'Excluded from LMS' : 'Available to pick'}
+                                        </Text>
+                                        {busy ? (
+                                          <ActivityIndicator size="small" color={adminAccent} />
+                                        ) : (
+                                          <Switch
+                                            value={excluded}
+                                            onValueChange={(value) =>
+                                              void setFixtureExcluded(f, value)
+                                            }
+                                            trackColor={{
+                                              false: theme.colors.border,
+                                              true: adminAccent,
+                                            }}
+                                            thumbColor={theme.colors.surface}
+                                          />
+                                        )}
+                                      </View>
+                                      <TextInput
+                                        style={styles.reasonInput}
+                                        value={reasonById[f.id] ?? ''}
+                                        onChangeText={(text) =>
+                                          setReasonById((prev) => ({
+                                            ...prev,
+                                            [f.id]: text,
+                                          }))
+                                        }
+                                        placeholder="Optional exclusion reason"
+                                        placeholderTextColor={theme.colors.textMuted}
+                                        editable={!busy}
+                                        onBlur={() => {
+                                          if (!excluded) return;
+                                          const next = reasonById[f.id]?.trim() || '';
+                                          const prev = f.excluded_reason?.trim() || '';
+                                          if (next !== prev) {
+                                            void saveFixtureReason(f, reasonById[f.id] ?? '');
+                                          }
+                                        }}
+                                      />
+                                    </View>
+                                  );
+                                })
+                              )}
+                            </View>
+                          )}
+                        </>
+                      ) : null}
+
+                      {adminCategory === 'racing' ? (
+                        <View style={styles.gameModesCard}>
+                          <Text style={styles.panelLabel}>Racing admin</Text>
+                          <Text style={styles.gameModesHint}>
+                            Racing day-to-day tools live in the racing app. Use the owner console
+                            for competitions and festivals.
+                          </Text>
+                          <Pressable
+                            style={[styles.adminCatChip, styles.adminCatChipActive]}
+                            onPress={() => openOwnerPanel('competitions')}
+                          >
+                            <Text style={[styles.adminCatChipText, styles.adminCatChipTextActive]}>
+                              Open competitions
+                            </Text>
+                          </Pressable>
+                        </View>
+                      ) : null}
+
+                      {adminCategory === 'users' ? (
+                        <View style={styles.gameModesCard}>
+                          <Text style={styles.panelLabel}>Users</Text>
+                          <Text style={styles.gameModesHint}>
+                            Ban or reinstate accounts here. Open the full owner console for roles,
+                            deletions, and competitions.
+                          </Text>
+                          <Pressable
+                            style={[styles.adminCatChip, { alignSelf: 'flex-start' }]}
+                            onPress={() => openOwnerPanel('users')}
+                          >
+                            <Text style={styles.adminCatChipText}>Full owner console</Text>
+                          </Pressable>
+                          {usersLoading ? (
+                            <ActivityIndicator
+                              size="small"
+                              color={adminAccent}
+                              style={{ marginTop: 8 }}
+                            />
+                          ) : ownerUsers.length === 0 ? (
+                            <Text style={styles.gameModesHint}>No users found.</Text>
+                          ) : (
+                            ownerUsers.map((u) => {
+                              const banned = !!u.banned_at;
+                              const busy = busyUserId === u.id;
+                              const isSelf = u.id === userId;
+                              return (
+                                <View key={u.id} style={styles.userCard}>
+                                  <Text style={styles.userName} numberOfLines={1}>
+                                    {u.username?.trim() || 'User'}
+                                  </Text>
+                                  <Text style={styles.excludeMeta}>
+                                    {u.role}
+                                    {u.email ? ` · ${u.email}` : ''}
+                                  </Text>
+                                  {!isSelf && u.role !== 'Owner' ? (
+                                    <View style={styles.excludeRow}>
+                                      <Text style={styles.excludeLabel}>
+                                        {banned ? 'Banned' : 'Active'}
+                                      </Text>
+                                      {busy ? (
+                                        <ActivityIndicator size="small" color={adminAccent} />
+                                      ) : (
+                                        <Switch
+                                          value={banned}
+                                          onValueChange={(value) =>
+                                            void toggleUserBanned(u, value)
+                                          }
+                                          trackColor={{
+                                            false: theme.colors.border,
+                                            true: adminAccent,
+                                          }}
+                                          thumbColor={theme.colors.surface}
+                                        />
+                                      )}
+                                    </View>
+                                  ) : null}
+                                </View>
+                              );
+                            })
+                          )}
+                        </View>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.panelLabel}>Select a mode</Text>
+                      <View style={styles.modeGrid}>
+                        {modes.map((item) => (
+                          <ModeTile key={item.key} item={item} accent={activeAccent} />
+                        ))}
+                      </View>
+                    </>
+                  )}
                 </>
               )}
             </View>

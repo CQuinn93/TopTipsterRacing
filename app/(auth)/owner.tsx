@@ -43,6 +43,7 @@ import {
   ownerSyncFootballPlayersBbs,
 } from '@/lib/f2t/api';
 import { FootballPlayerFlagCard } from '@/components/f2t/FootballPlayerFlagCard';
+import { F2tAlertsPanel } from '@/components/f2t/F2tAlertsPanel';
 import {
   DEFAULT_HUB_GAME_MODES,
   HUB_GAME_MODE_LABELS,
@@ -1015,9 +1016,9 @@ export default function OwnerScreen() {
         ) : tab === 'f2t_players' ? (
           <>
             <Text style={styles.hint}>
-              FPL injury and availability alerts only (run daily FPL sync for updates). Flag
-              long-term absences — excluded players cannot be newly picked and grant a free sub if
-              unscored. Search to find any player in the squad.
+              FPL injury and availability alerts (run daily FPL sync for updates). Flag long-term
+              absences — excluded players cannot be newly picked and grant a free sub if unscored.
+              Use “Search full squad” below to find any Premier League player.
             </Text>
             <Pressable
               style={[styles.actionBtn, styles.actionBtnActive]}
@@ -1030,37 +1031,47 @@ export default function OwnerScreen() {
                 <Text style={[styles.actionBtnText, styles.actionBtnTextActive]}>Sync player list</Text>
               )}
             </Pressable>
+
+            {!f2tPlayerSearch.trim() ? (
+              <F2tAlertsPanel
+                players={f2tPlayers}
+                loading={f2tPlayersLoading}
+                accent={admin.accent}
+                busyPlayerId={f2tBusyPlayerId}
+                onToggleFlag={(playerId, flagged) => void togglePlayerFlag(playerId, flagged)}
+              />
+            ) : null}
+
+            <Text style={[styles.meta, { marginTop: theme.spacing.md }]}>Search full squad</Text>
             <TextInput
               style={styles.reasonInput}
               value={f2tPlayerSearch}
               onChangeText={setF2tPlayerSearch}
-              placeholder="Search any player"
+              placeholder="Search any player by name"
               placeholderTextColor={theme.colors.textMuted}
               onSubmitEditing={() => void loadF2tPlayers(f2tPlayerSearch)}
               onBlur={() => void loadF2tPlayers(f2tPlayerSearch)}
             />
-            {f2tPlayersLoading ? (
-              <ActivityIndicator color={admin.accent} style={{ marginTop: theme.spacing.lg }} />
-            ) : f2tPlayers.length === 0 ? (
-              <Text style={styles.empty}>
-                {f2tPlayerSearch.trim()
-                  ? 'No players match your search'
-                  : 'No FPL alerts — run FPL daily sync or check back later'}
-              </Text>
-            ) : (
-              f2tPlayers.map((p) => {
-                const id = String(p.id ?? '');
-                return (
-                  <FootballPlayerFlagCard
-                    key={id}
-                    player={p}
-                    accent={admin.accent}
-                    busy={f2tBusyPlayerId === id}
-                    onToggleFlag={(playerId, flagged) => void togglePlayerFlag(playerId, flagged)}
-                  />
-                );
-              })
-            )}
+            {f2tPlayerSearch.trim() ? (
+              f2tPlayersLoading ? (
+                <ActivityIndicator color={admin.accent} style={{ marginTop: theme.spacing.lg }} />
+              ) : f2tPlayers.length === 0 ? (
+                <Text style={styles.empty}>No players match your search</Text>
+              ) : (
+                f2tPlayers.map((p) => {
+                  const id = String(p.id ?? '');
+                  return (
+                    <FootballPlayerFlagCard
+                      key={id}
+                      player={p}
+                      accent={admin.accent}
+                      busy={f2tBusyPlayerId === id}
+                      onToggleFlag={(playerId, flagged) => void togglePlayerFlag(playerId, flagged)}
+                    />
+                  );
+                })
+              )
+            ) : null}
           </>
         ) : (
           <>
