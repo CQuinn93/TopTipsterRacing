@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Switch,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -27,6 +28,8 @@ import { isCurrentUserBanned } from '@/lib/ownerApi';
 import {
   DEFAULT_HUB_GAME_MODES,
   getHubGameModes,
+  HUB_GAME_MODE_LABELS,
+  ownerSetHubGameModes,
   type HubGameModeKey,
   type HubGameModes,
 } from '@/lib/hubGameModes';
@@ -70,7 +73,7 @@ function buildHubModeItem(
     return {
       key,
       title,
-      status: openForUsers ? 'Open' : 'Closed',
+      status: openForUsers ? 'Open' : 'Owner access',
       onPress,
     };
   }
@@ -204,6 +207,7 @@ export default function CompetitionHubScreen() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [isOwner, setIsOwner] = useState(false);
   const [hubModes, setHubModes] = useState<HubGameModes>(DEFAULT_HUB_GAME_MODES);
+  const [hubModesSaving, setHubModesSaving] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signingOutAll, setSigningOutAll] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
@@ -332,6 +336,38 @@ export default function CompetitionHubScreen() {
       pathname: '/(auth)/owner',
       params: { returnTo: '/competition-hub?tab=admin' },
     } as any);
+  };
+
+  const openOwnerGameModes = () => {
+    router.push({
+      pathname: '/(auth)/owner',
+      params: { returnTo: '/competition-hub?tab=admin', ownerTab: 'game_modes' },
+    } as any);
+  };
+
+  const saveHubMode = async (key: HubGameModeKey, open: boolean) => {
+    const next = { ...hubModes, [key]: open };
+    setHubModes(next);
+    setHubModesSaving(true);
+    try {
+      const res = await ownerSetHubGameModes(next);
+      if (!res.success) {
+        Alert.alert('Error', res.error ?? 'Could not update game mode');
+        const fresh = await getHubGameModes();
+        setHubModes(fresh);
+        return;
+      }
+      if (res.modes) setHubModes(res.modes);
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not update game mode');
+      try {
+        setHubModes(await getHubGameModes());
+      } catch {
+        setHubModes(DEFAULT_HUB_GAME_MODES);
+      }
+    } finally {
+      setHubModesSaving(false);
+    }
   };
 
   const handleSignOut = () => {
@@ -601,6 +637,12 @@ export default function CompetitionHubScreen() {
                 status: 'Users · competitions · exclusions',
                 onPress: openOwnerPanel,
               },
+              {
+                key: 'owner-game-modes',
+                title: 'Game modes (full panel)',
+                status: 'Open / close modes for all users',
+                onPress: openOwnerGameModes,
+              },
             ]
           : [];
 
@@ -772,6 +814,42 @@ export default function CompetitionHubScreen() {
           flexDirection: 'row',
           flexWrap: 'wrap',
           gap: 10,
+        },
+        gameModesCard: {
+          width: '100%',
+          marginBottom: theme.spacing.md,
+          padding: theme.spacing.md,
+          borderRadius: theme.radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+          gap: theme.spacing.sm,
+        },
+        gameModesHint: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 13,
+          color: theme.colors.textSecondary,
+          lineHeight: 18,
+        },
+        gameModeRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: theme.spacing.sm,
+          paddingVertical: 8,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+        },
+        gameModeLabel: {
+          flex: 1,
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 14,
+          color: theme.colors.text,
+        },
+        gameModeStatus: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
         },
         accountCard: {
           width: '100%',
@@ -1024,8 +1102,43 @@ export default function CompetitionHubScreen() {
                 </View>
               ) : (
                 <>
+                  {tab === 'admin' && isOwner ? (
+                    <View style={styles.gameModesCard}>
+                      <Text style={styles.panelLabel}>Game modes for users</Text>
+                      <Text style={styles.gameModesHint}>
+                        Toggle which modes appear open on the Football and Racing tabs. You always
+                        have access to every mode.
+                      </Text>
+                      {(Object.keys(HUB_GAME_MODE_LABELS) as HubGameModeKey[]).map((key) => {
+                        const open = hubModes[key];
+                        return (
+                          <View key={key} style={styles.gameModeRow}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={styles.gameModeLabel}>{HUB_GAME_MODE_LABELS[key]}</Text>
+                              <Text style={styles.gameModeStatus}>
+                                {open ? 'Open to users' : 'Hidden from users'}
+                              </Text>
+                            </View>
+                            {hubModesSaving ? (
+                              <ActivityIndicator size="small" color={adminAccent} />
+                            ) : (
+                              <Switch
+                                value={open}
+                                onValueChange={(value) => void saveHubMode(key, value)}
+                                trackColor={{
+                                  false: theme.colors.border,
+                                  true: adminAccent,
+                                }}
+                                thumbColor={theme.colors.surface}
+                              />
+                            )}
+                          </View>
+                        );
+                      })}
+                    </View>
+                  ) : null}
                   <Text style={styles.panelLabel}>
-                    {tab === 'admin' ? 'Choose a sport' : 'Select a mode'}
+                    {tab === 'admin' ? 'Owner tools' : 'Select a mode'}
                   </Text>
                   <View style={styles.modeGrid}>
                     {modes.map((item) => (

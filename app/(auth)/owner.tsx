@@ -138,7 +138,7 @@ export default function OwnerScreen() {
   const theme = useTheme();
   const admin = useAdminAccent();
   const { userId } = useAuth();
-  const params = useLocalSearchParams<{ returnTo?: string }>();
+  const params = useLocalSearchParams<{ returnTo?: string; ownerTab?: string }>();
   const returnToRaw = String(params.returnTo ?? '/competition-hub?tab=admin').trim();
   const returnTo =
     returnToRaw === '/competition-hub' || returnToRaw.startsWith('/competition-hub')
@@ -147,6 +147,19 @@ export default function OwnerScreen() {
 
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [tab, setTab] = useState<TabKey>('users');
+
+  useEffect(() => {
+    const ownerTab = String(params.ownerTab ?? '').trim();
+    if (
+      ownerTab === 'game_modes' ||
+      ownerTab === 'f2t_players' ||
+      ownerTab === 'exclusions' ||
+      ownerTab === 'competitions' ||
+      ownerTab === 'users'
+    ) {
+      setTab(ownerTab as TabKey);
+    }
+  }, [params.ownerTab]);
   const [users, setUsers] = useState<OwnerUserRow[]>([]);
   const [comps, setComps] = useState<OwnerCompetitionRow[]>([]);
   const [loading, setLoading] = useState(true);
