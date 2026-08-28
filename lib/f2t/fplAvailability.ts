@@ -15,6 +15,27 @@ const FPL_STATUS_LABELS: Record<string, string> = {
   n: 'Not in squad',
 };
 
+/** Yellow haze for unavailable (left club / not in PL pool). */
+export const FPL_UNAVAILABLE_CARD_HAZE = 'rgba(234, 179, 8, 0.16)';
+
+export const FPL_UNAVAILABLE_STATUS_COLOR = '#eab308';
+
+/** Card outline colours for owner FPL alert review (not used for unavailable). */
+const FPL_ALERT_BORDER_COLORS: Record<string, string> = {
+  i: '#ef4444',
+  d: '#f97316',
+  s: '#3b82f6',
+};
+
+export function fplIsUnavailable(statusCode: string | null | undefined): boolean {
+  return statusCode?.toLowerCase() === 'u';
+}
+
+export function fplAlertBorderColor(statusCode: string | null | undefined): string | null {
+  if (!statusCode || fplIsUnavailable(statusCode)) return null;
+  return FPL_ALERT_BORDER_COLORS[statusCode.toLowerCase()] ?? null;
+}
+
 export function fplStatusLabel(code: string | null | undefined): string {
   if (!code) return 'Unknown';
   return FPL_STATUS_LABELS[code] ?? code.toUpperCase();

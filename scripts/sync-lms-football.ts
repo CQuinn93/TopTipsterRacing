@@ -55,8 +55,14 @@ type FdMatch = {
 
 type LmsFixtureStatus = 'scheduled' | 'live' | 'finished';
 
+function sameIsoTime(a: string | null, b: string): boolean {
+  if (!a) return false;
+  const ta = new Date(a).getTime();
+  const tb = new Date(b).getTime();
+  return Number.isFinite(ta) && Number.isFinite(tb) && ta === tb;
+}
+
 /**
- * Pick home/away goals from football-data score objects.
  * Finished → full-time only. Live → best current score available.
  */
 function pickMatchGoals(
@@ -197,10 +203,8 @@ async function main() {
     byName.set(t.name.trim().toLowerCase(), t);
   }
 
-  // Insert missing Premier League clubs only — season roster is fixed, so skip
-  // existing rows (avoids 20 redundant updates every sync). Still link external_id
-  // once if a club was matched by slug/name without it.
-  // (UI icons come from assets/Icons via TeamColourChip — not remote crest URLs)
+  // Insert missing Premier League clubs only — season roster is fixed.
+  // Bulk read above + in-memory match: no rewrite of name/slug when external_id already linked.
   let teamsInserted = 0;
   let teamsSkipped = 0;
   let teamsLinked = 0;
@@ -332,6 +336,9 @@ async function main() {
   }
 
   // Ensure GW1–GW38 rows exist; refresh starts_at / deadline_at / status when not yet complete
+  let gwsInserted = 0;
+  let gwsUpdated = 0;
+  let gwsUnchanged = 0;
   for (let n = 1; n <= 38; n++) {
     const mdMatches = byMatchday.get(n) ?? [];
     const kickoffs = mdMatches
@@ -347,30 +354,40 @@ async function main() {
 
     const existing = gwByNumber.get(n);
     if (existing) {
-      if (existing.status !== 'complete') {
-        const anyLive = mdMatches.some((m) => mapMatchStatus(m.status) === 'live');
-        const allFinished =
-          mdMatches.length > 0 && mdMatches.every((m) => mapMatchStatus(m.status) === 'finished');
-        const now = Date.now();
-        let status = existing.status;
-        // Don't mark complete here — settlement owns that transition
-        if (!allFinished) {
-          if (anyLive || new Date(startsAt).getTime() <= now) status = 'live';
-          else status = 'upcoming';
-        }
-        const { error } = await supabase
-          .from('lms_gameweeks')
-          .update({
-            starts_at: startsAt,
-            deadline_at: deadlineAt,
-            status,
-          })
-          .eq('id', existing.id);
-        if (error) throw error;
-        existing.status = status;
-        existing.starts_at = startsAt;
-        existing.deadline_at = deadlineAt;
+      if (existing.status === 'complete') {
+        gwsUnchanged += 1;
+        continue;
       }
+      const anyLive = mdMatches.some((m) => mapMatchStatus(m.status) === 'live');
+      const allFinished =
+        mdMatches.length > 0 && mdMatches.every((m) => mapMatchStatus(m.status) === 'finished');
+      const now = Date.now();
+      let status = existing.status;
+      if (!allFinished) {
+        if (anyLive || new Date(startsAt).getTime() <= now) status = 'live';
+        else status = 'upcoming';
+      }
+      if (
+        sameIsoTime(existing.starts_at, startsAt) &&
+        sameIsoTime(existing.deadline_at, deadlineAt) &&
+        existing.status === status
+      ) {
+        gwsUnchanged += 1;
+        continue;
+      }
+      const { error } = await supabase
+        .from('lms_gameweeks')
+        .update({
+          starts_at: startsAt,
+          deadline_at: deadlineAt,
+          status,
+        })
+        .eq('id', existing.id);
+      if (error) throw error;
+      existing.status = status;
+      existing.starts_at = startsAt;
+      existing.deadline_at = deadlineAt;
+      gwsUpdated += 1;
     } else {
       // First sync of this gameweek → create the row
       const { data, error } = await supabase
@@ -392,8 +409,12 @@ async function main() {
         starts_at: (data.starts_at as string | null) ?? startsAt,
         deadline_at: (data.deadline_at as string | null) ?? deadlineAt,
       });
+      gwsInserted += 1;
     }
   }
+  console.log(
+    `[lms-sync] Gameweeks inserted: ${gwsInserted}; updated: ${gwsUpdated}; unchanged: ${gwsUnchanged}`
+  );
 
   // One read of existing fixtures → skip unchanged rows (biggest gateway saver)
   const { data: existingFixtures, error: existingFxErr } = await supabase
@@ -597,6 +618,9 @@ async function main() {
     teamsInserted,
     teamsLinked,
     teamsSkipped,
+    gwsInserted,
+    gwsUpdated,
+    gwsUnchanged,
     fixturesUpserted,
     fixturesUnchanged,
     fixturesSkipped,

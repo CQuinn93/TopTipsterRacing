@@ -2,7 +2,13 @@ import { useMemo } from 'react';
 import { View, Text, StyleSheet, Switch, ActivityIndicator } from 'react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
-import { formatFplAvailability } from '@/lib/f2t/fplAvailability';
+import {
+  formatFplAvailability,
+  fplAlertBorderColor,
+  fplIsUnavailable,
+  FPL_UNAVAILABLE_CARD_HAZE,
+  FPL_UNAVAILABLE_STATUS_COLOR,
+} from '@/lib/f2t/fplAvailability';
 
 export type FootballPlayerOwnerRow = {
   id?: string;
@@ -27,6 +33,11 @@ export function FootballPlayerFlagCard({ player, accent, busy, onToggleFlag }: P
   const id = String(player.id ?? '');
   const flagged = Boolean(player.owner_flagged);
   const availability = formatFplAvailability(player.picker_stats);
+  const unavailable = fplIsUnavailable(availability.statusCode);
+  const alertBorder = fplAlertBorderColor(availability.statusCode);
+  const statusColor = unavailable
+    ? FPL_UNAVAILABLE_STATUS_COLOR
+    : alertBorder ?? accent;
 
   const styles = useMemo(
     () =>
@@ -35,9 +46,9 @@ export function FootballPlayerFlagCard({ player, accent, busy, onToggleFlag }: P
           marginTop: theme.spacing.md,
           padding: theme.spacing.md,
           borderRadius: theme.radius.md,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.surface,
+          borderWidth: alertBorder ? 2 : 1,
+          borderColor: alertBorder ?? theme.colors.border,
+          backgroundColor: unavailable ? FPL_UNAVAILABLE_CARD_HAZE : theme.colors.surface,
         },
         rowTop: {
           flexDirection: 'row',
@@ -66,7 +77,7 @@ export function FootballPlayerFlagCard({ player, accent, busy, onToggleFlag }: P
           marginTop: 6,
           fontFamily: theme.fontFamily.baiMedium,
           fontSize: 12,
-          color: accent,
+          color: statusColor,
         },
         meta: {
           marginTop: 4,
@@ -87,7 +98,7 @@ export function FootballPlayerFlagCard({ player, accent, busy, onToggleFlag }: P
           color: theme.colors.text,
         },
       }),
-    [theme, accent]
+    [theme, accent, alertBorder, statusColor, unavailable]
   );
 
   return (
