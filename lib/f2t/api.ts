@@ -30,6 +30,7 @@ export type F2tSelectablePlayer = {
   id: string;
   display_name: string;
   full_name: string;
+  position: string | null;
   team_id: string;
   team_name: string;
   team_short_name: string;
@@ -234,6 +235,14 @@ export async function ownerListFootballPlayers(teamId?: string, search?: string)
   return row.players ?? [];
 }
 
+export async function ownerListFootballPlayersFplAlerts() {
+  const { data, error } = await db.rpc('owner_list_football_players_fpl_alerts');
+  if (error) throw error;
+  const row = data as { success: boolean; players?: Array<Record<string, unknown>>; error?: string };
+  if (!row.success) throw new Error(row.error ?? 'Could not load FPL alerts');
+  return row.players ?? [];
+}
+
 export async function ownerSetFootballPlayerFlagged(playerId: string, flagged: boolean) {
   const { data, error } = await db.rpc('owner_set_football_player_flagged', {
     p_player_id: playerId,
@@ -243,10 +252,25 @@ export async function ownerSetFootballPlayerFlagged(playerId: string, flagged: b
   return data as { success: boolean; error?: string };
 }
 
-export async function ownerSyncFootballPlayersBbs() {
+export type OwnerSyncFootballPlayersResult = {
+  success: boolean;
+  upserted?: number;
+  fetched?: number;
+  skipped_no_team?: number;
+  skipped_no_name?: number;
+  teams_mapped?: number;
+  bbs_teams_fetched?: number;
+  error?: string;
+  hint?: string;
+};
+
+export async function ownerSyncFootballPlayersBbs(): Promise<OwnerSyncFootballPlayersResult> {
   const { data, error } = await supabase.functions.invoke('sync-football-players-bbs', {
     body: {},
   });
+  if (data && typeof data === 'object' && 'success' in (data as object)) {
+    return data as OwnerSyncFootballPlayersResult;
+  }
   if (error) throw error;
-  return data as { success: boolean; upserted?: number; error?: string };
+  return { success: false, error: 'empty_response' };
 }

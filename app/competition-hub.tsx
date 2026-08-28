@@ -33,6 +33,11 @@ import {
   type HubGameModeKey,
   type HubGameModes,
 } from '@/lib/hubGameModes';
+import {
+  ownerListFootballPlayersFplAlerts,
+  ownerSetFootballPlayerFlagged,
+} from '@/lib/f2t/api';
+import { FootballPlayerFlagCard } from '@/components/f2t/FootballPlayerFlagCard';
 
 const DESKTOP_BREAKPOINT = 900;
 const COMPACT_BREAKPOINT = 420;
@@ -208,6 +213,9 @@ export default function CompetitionHubScreen() {
   const [isOwner, setIsOwner] = useState(false);
   const [hubModes, setHubModes] = useState<HubGameModes>(DEFAULT_HUB_GAME_MODES);
   const [hubModesSaving, setHubModesSaving] = useState(false);
+  const [fplAlertPlayers, setFplAlertPlayers] = useState<Array<Record<string, unknown>>>([]);
+  const [fplAlertsLoading, setFplAlertsLoading] = useState(false);
+  const [fplBusyPlayerId, setFplBusyPlayerId] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signingOutAll, setSigningOutAll] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
@@ -247,11 +255,54 @@ export default function CompetitionHubScreen() {
       .catch(() => setHubModes(DEFAULT_HUB_GAME_MODES));
   };
 
+  const loadFplAlerts = useCallback(async () => {
+    if (!isOwner) return;
+    setFplAlertsLoading(true);
+    try {
+      const list = await ownerListFootballPlayersFplAlerts();
+      setFplAlertPlayers(list);
+    } catch (e) {
+      console.warn('[competition-hub] FPL alerts load failed', e);
+      setFplAlertPlayers([]);
+    } finally {
+      setFplAlertsLoading(false);
+    }
+  }, [isOwner]);
+
+  const toggleFplPlayerFlag = async (playerId: string, flagged: boolean) => {
+    setFplBusyPlayerId(playerId);
+    try {
+      const res = await ownerSetFootballPlayerFlagged(playerId, flagged);
+      if (!res.success) {
+        Alert.alert('Error', res.error ?? 'Could not update player');
+        return;
+      }
+      setFplAlertPlayers((prev) =>
+        prev.map((p) =>
+          String(p.id) === playerId ? { ...p, owner_flagged: flagged } : p
+        )
+      );
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not update player');
+    } finally {
+      setFplBusyPlayerId(null);
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       loadHubModes();
-    }, [])
+      if (tab === 'admin' && isOwner) {
+        void loadFplAlerts();
+      }
+    }, [tab, isOwner, loadFplAlerts])
   );
+
+  useEffect(() => {
+    if (tab === 'admin' && isOwner) {
+      void loadFplAlerts();
+    }
+  }, [tab, isOwner, loadFplAlerts]);
 
   useEffect(() => {
     Animated.parallel([
@@ -1135,6 +1186,35 @@ export default function CompetitionHubScreen() {
                           </View>
                         );
                       })}
+                    </View>
+                  ) : null}
+                  {tab === 'admin' && isOwner ? (
+                    <View style={styles.gameModesCard}>
+                      <Text style={styles.panelLabel}>First2Twenty · FPL alerts</Text>
+                      <Text style={styles.gameModesHint}>
+                        Players with injury, doubt, suspension, or availability news from the daily
+                        FPL sync. Exclude anyone who should not be pickable.
+                      </Text>
+                      {fplAlertsLoading ? (
+                        <ActivityIndicator size="small" color={adminAccent} style={{ marginTop: 8 }} />
+                      ) : fplAlertPlayers.length === 0 ? (
+                        <Text style={styles.gameModesHint}>No current FPL alerts.</Text>
+                      ) : (
+                        fplAlertPlayers.map((p) => {
+                          const id = String(p.id ?? '');
+                          return (
+                            <FootballPlayerFlagCard
+                              key={id}
+                              player={p}
+                              accent={adminAccent}
+                              busy={fplBusyPlayerId === id}
+                              onToggleFlag={(playerId, flagged) =>
+                                void toggleFplPlayerFlag(playerId, flagged)
+                              }
+                            />
+                          );
+                        })
+                      )}
                     </View>
                   ) : null}
                   <Text style={styles.panelLabel}>

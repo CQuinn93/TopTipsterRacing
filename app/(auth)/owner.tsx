@@ -38,9 +38,11 @@ import {
 } from '@/lib/lms/api';
 import {
   ownerListFootballPlayers,
+  ownerListFootballPlayersFplAlerts,
   ownerSetFootballPlayerFlagged,
   ownerSyncFootballPlayersBbs,
 } from '@/lib/f2t/api';
+import { FootballPlayerFlagCard } from '@/components/f2t/FootballPlayerFlagCard';
 import {
   DEFAULT_HUB_GAME_MODES,
   HUB_GAME_MODE_LABELS,
@@ -264,7 +266,10 @@ export default function OwnerScreen() {
   const loadF2tPlayers = useCallback(async (search?: string) => {
     setF2tPlayersLoading(true);
     try {
-      const list = await ownerListFootballPlayers(undefined, search?.trim() || undefined);
+      const q = search?.trim();
+      const list = q
+        ? await ownerListFootballPlayers(undefined, q)
+        : await ownerListFootballPlayersFplAlerts();
       setF2tPlayers(list);
     } catch (e) {
       notify('Error', e instanceof Error ? e.message : 'Failed to load players');
@@ -312,10 +317,20 @@ export default function OwnerScreen() {
     try {
       const res = await ownerSyncFootballPlayersBbs();
       if (!res.success) {
-        notify('Sync failed', res.error ?? 'Could not sync players');
+        const hint = res.hint ? ` ${res.hint}` : '';
+        notify('Sync failed', `${res.error ?? 'Could not sync players'}${hint}`);
         return;
       }
-      notify('Synced', `Updated ${res.upserted ?? 0} players from Big Balls API.`);
+      const skipped =
+        (res.skipped_no_team ?? 0) + (res.skipped_no_name ?? 0);
+      const detail =
+        skipped > 0
+          ? ` (${skipped} skipped — ${res.skipped_no_team ?? 0} no team match)`
+          : '';
+      notify(
+        'Synced',
+        `Updated ${res.upserted ?? 0} of ${res.fetched ?? 0} players from Big Balls.${detail}`
+      );
       await loadF2tPlayers(f2tPlayerSearch);
     } catch (e) {
       notify('Error', e instanceof Error ? e.message : 'Sync failed');
@@ -1000,8 +1015,9 @@ export default function OwnerScreen() {
         ) : tab === 'f2t_players' ? (
           <>
             <Text style={styles.hint}>
-              First2Twenty player roster. Flag long-term absences — flagged players cannot be newly
-              picked and grant a free sub if unscored. FPL news is display-only in the picker.
+              FPL injury and availability alerts only (run daily FPL sync for updates). Flag
+              long-term absences — excluded players cannot be newly picked and grant a free sub if
+              unscored. Search to find any player in the squad.
             </Text>
             <Pressable
               style={[styles.actionBtn, styles.actionBtnActive]}
@@ -1018,7 +1034,7 @@ export default function OwnerScreen() {
               style={styles.reasonInput}
               value={f2tPlayerSearch}
               onChangeText={setF2tPlayerSearch}
-              placeholder="Search players"
+              placeholder="Search any player"
               placeholderTextColor={theme.colors.textMuted}
               onSubmitEditing={() => void loadF2tPlayers(f2tPlayerSearch)}
               onBlur={() => void loadF2tPlayers(f2tPlayerSearch)}
@@ -1026,45 +1042,22 @@ export default function OwnerScreen() {
             {f2tPlayersLoading ? (
               <ActivityIndicator color={admin.accent} style={{ marginTop: theme.spacing.lg }} />
             ) : f2tPlayers.length === 0 ? (
-              <Text style={styles.empty}>No players found — run Sync player list</Text>
+              <Text style={styles.empty}>
+                {f2tPlayerSearch.trim()
+                  ? 'No players match your search'
+                  : 'No FPL alerts — run FPL daily sync or check back later'}
+              </Text>
             ) : (
               f2tPlayers.map((p) => {
                 const id = String(p.id ?? '');
-                const flagged = Boolean(p.owner_flagged);
-                const busy = f2tBusyPlayerId === id;
-                const stats = (p.picker_stats as Record<string, unknown>) ?? {};
-                const news = typeof stats.news === 'string' ? stats.news : '';
                 return (
-                  <View key={id} style={styles.card}>
-                    <View style={styles.rowTop}>
-                      <Text style={styles.name} numberOfLines={1}>
-                        {String(p.display_name ?? p.full_name ?? 'Player')}
-                      </Text>
-                      <View style={styles.badge}>
-                        <Text style={styles.badgeText}>
-                          {String(p.team_short_name ?? p.team_name ?? '—')}
-                        </Text>
-                      </View>
-                    </View>
-                    {news ? (
-                      <Text style={styles.meta} numberOfLines={2}>{news}</Text>
-                    ) : null}
-                    <View style={styles.excludeRow}>
-                      <Text style={styles.excludeLabel}>
-                        {flagged ? 'Owner flagged' : 'Available to pick'}
-                      </Text>
-                      {busy ? (
-                        <ActivityIndicator size="small" color={admin.accent} />
-                      ) : (
-                        <Switch
-                          value={flagged}
-                          onValueChange={(value) => void togglePlayerFlag(id, value)}
-                          trackColor={{ false: theme.colors.border, true: admin.accent }}
-                          thumbColor={theme.colors.surface}
-                        />
-                      )}
-                    </View>
-                  </View>
+                  <FootballPlayerFlagCard
+                    key={id}
+                    player={p}
+                    accent={admin.accent}
+                    busy={f2tBusyPlayerId === id}
+                    onToggleFlag={(playerId, flagged) => void togglePlayerFlag(playerId, flagged)}
+                  />
                 );
               })
             )}

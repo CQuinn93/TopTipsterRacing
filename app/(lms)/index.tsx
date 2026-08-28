@@ -39,6 +39,7 @@ import {
   type LmsPickStatOutcome,
   type LmsTeam,
 } from '@/lib/lms/api';
+import { lmsSessionSetFixtures } from '@/lib/lms/sessionCache';
 import { getProfileRole, isStaffRole } from '@/lib/adminSession';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
 import { LeagueTablePanel } from '@/components/lms/LeagueTablePanel';
@@ -153,6 +154,9 @@ export default function LmsHomeScreen() {
       setPending(home.pending);
       setGw(home.nextUp.gameweek);
       setFixtures(home.nextUp.fixtures);
+      if (home.nextUp.gameweek?.id && home.nextUp.fixtures.length > 0) {
+        lmsSessionSetFixtures(home.nextUp.gameweek.id, home.nextUp.fixtures);
+      }
       setHomeInsights(insights?.success ? insights : null);
       fxIndexRef.current = 0;
       setFxIndex(0);

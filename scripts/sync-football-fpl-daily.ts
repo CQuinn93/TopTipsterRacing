@@ -5,6 +5,7 @@ import {
   fplGet,
   loadLmsTeams,
   matchLmsTeam,
+  normalizeFootballPosition,
 } from './football-sync/helpers';
 
 /**
@@ -25,8 +26,12 @@ type FplBootstrap = {
     second_name: string;
     team: number;
     team_code: number;
+    element_type: number;
     status: string;
     news: string;
+    chance_of_playing_this_round?: number | null;
+    chance_of_playing_next_round?: number | null;
+    news_added?: string | null;
     minutes: number;
     starts: number;
     goals_scored: number;
@@ -87,10 +92,14 @@ async function main() {
       points_per_game: el.points_per_game,
       news: el.news ?? '',
       fpl_status: el.status,
+      chance_of_playing_this_round: el.chance_of_playing_this_round ?? null,
+      chance_of_playing_next_round: el.chance_of_playing_next_round ?? null,
+      news_added: el.news_added ?? null,
     };
 
     const display = el.web_name?.trim() || `${el.first_name} ${el.second_name}`.trim();
     const fullName = `${el.first_name} ${el.second_name}`.trim();
+    const position = normalizeFootballPosition(null, el.element_type);
 
     const { data: existing } = await supabase
       .from('football_players')
@@ -105,8 +114,9 @@ async function main() {
           team_id: teamId,
           display_name: display,
           full_name: fullName,
+          position,
           is_active: !el.removed,
-          picker_stats,
+          picker_stats: pickerStats,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existing.id);
@@ -126,8 +136,9 @@ async function main() {
           .update({
             fpl_element_id: el.id,
             full_name: fullName,
+            position,
             is_active: !el.removed,
-            picker_stats,
+            picker_stats: pickerStats,
             updated_at: new Date().toISOString(),
           })
           .eq('id', byName.id);
@@ -139,8 +150,9 @@ async function main() {
           display_name: display,
           full_name: fullName,
           fpl_element_id: el.id,
+          position,
           is_active: !el.removed,
-          picker_stats,
+          picker_stats: pickerStats,
         });
         if (error) throw error;
         inserted += 1;

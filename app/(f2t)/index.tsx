@@ -11,12 +11,13 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { FootballNextUpSpotlight } from '@/components/lms/FootballNextUpSpotlight';
 import { LeagueTablePanel } from '@/components/lms/LeagueTablePanel';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import {
@@ -32,12 +33,14 @@ import { getProfileRole, isStaffRole } from '@/lib/adminSession';
 
 type HomeTab = 'competitions' | 'join' | 'table';
 const F2T_SEASON = '2026/27';
+const MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 
 export default function F2tHomeScreen() {
   const theme = useTheme();
   const { openSidebar } = useSidebar();
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
+  const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
 
   const [comps, setComps] = useState<F2tCompetitionHomeSummary[]>([]);
   const [pending, setPending] = useState<F2tPendingJoin[]>([]);
@@ -45,6 +48,8 @@ export default function F2tHomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<HomeTab>('competitions');
   const [tableRefreshKey, setTableRefreshKey] = useState(0);
+  const [spotlightRefreshKey, setSpotlightRefreshKey] = useState(0);
+  const [homePanelExpanded, setHomePanelExpanded] = useState(true);
   const [code, setCode] = useState('');
   const [joining, setJoining] = useState(false);
   const [isStaff, setIsStaff] = useState(false);
@@ -52,17 +57,48 @@ export default function F2tHomeScreen() {
   const [createName, setCreateName] = useState('');
   const [createEntry, setCreateEntry] = useState('');
   const [createGwId, setCreateGwId] = useState<string | null>(null);
-  const [gameweeks, setGameweeks] = useState<LmsGameweek[]>([]);
+  const [createGws, setCreateGws] = useState<LmsGameweek[]>([]);
   const [creating, setCreating] = useState(false);
 
   const homeLoadedRef = useRef(false);
+  const createGwsLoadedRef = useRef(false);
+  const lastManualRefreshAtRef = useRef<number | null>(null);
   const loadRef = useRef<() => Promise<void>>(async () => {});
 
+  useEffect(() => {
+    if (tabParam === 'table' || tabParam === 'join' || tabParam === 'competitions') {
+      setTab(tabParam);
+    }
+  }, [tabParam]);
+
   const load = useCallback(async () => {
+    if (!userId) return;
     try {
       const data = await f2tGetHome(F2T_SEASON);
       setComps(data.competitions ?? []);
       setPending(data.pending ?? []);
+      setTab((prev) => {
+        if (tabParam === 'table' || tabParam === 'join' || tabParam === 'competitions') {
+          return tabParam;
+        }
+        if (prev === 'join' || prev === 'table') return prev;
+        return (data.competitions?.length ?? 0) === 0 && (data.pending?.length ?? 0) === 0
+          ? 'join'
+          : 'competitions';
+      });
+
+      const role = await getProfileRole(userId);
+      const staff = isStaffRole(role);
+      setIsStaff(staff);
+
+      if (staff && !createGwsLoadedRef.current) {
+        const gws = await lmsListGameweeks(F2T_SEASON);
+        createGwsLoadedRef.current = true;
+        setCreateGws(gws);
+        const defaultGw =
+          gws.find((g) => g.status !== 'complete')?.id ?? gws[0]?.id ?? null;
+        setCreateGwId((prev) => prev ?? defaultGw);
+      }
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load');
       setComps([]);
@@ -71,23 +107,9 @@ export default function F2tHomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [userId, tabParam]);
 
   loadRef.current = load;
-
-  useEffect(() => {
-    if (!userId) return;
-    void getProfileRole(userId).then((role) => setIsStaff(isStaffRole(role)));
-  }, [userId]);
-
-  useEffect(() => {
-    if (!isStaff) return;
-    void lmsListGameweeks(F2T_SEASON).then((gws) => {
-      setGameweeks(gws);
-      const open = gws.find((g) => g.status !== 'complete');
-      setCreateGwId(open?.id ?? gws[0]?.id ?? null);
-    });
-  }, [isStaff]);
 
   useFocusEffect(
     useCallback(() => {
@@ -98,11 +120,21 @@ export default function F2tHomeScreen() {
     }, [userId])
   );
 
-  const onRefresh = () => {
+  const requestManualRefresh = useCallback(() => {
+    if (refreshing || loading) return;
+    const now = Date.now();
+    const last = lastManualRefreshAtRef.current;
+    if (last != null && now - last < MANUAL_REFRESH_COOLDOWN_MS) {
+      const waitSec = Math.ceil((MANUAL_REFRESH_COOLDOWN_MS - (now - last)) / 1000);
+      Alert.alert('Slow down', `You can refresh again in ${waitSec}s.`);
+      return;
+    }
+    lastManualRefreshAtRef.current = now;
     setRefreshing(true);
     if (tab === 'table') setTableRefreshKey((k) => k + 1);
+    setSpotlightRefreshKey((k) => k + 1);
     void load();
-  };
+  }, [refreshing, loading, tab, load]);
 
   const onJoin = async () => {
     if (!code.trim()) {
@@ -156,10 +188,7 @@ export default function F2tHomeScreen() {
       setCreateName('');
       setCreateEntry('');
       setShowCreate(false);
-      Alert.alert(
-        'Created',
-        `Join code: ${res.access_code ?? '—'}`
-      );
+      Alert.alert('Created', `Join code: ${res.access_code ?? '—'}`);
       await load();
       if (res.competition_id) router.push(`/(f2t)/${res.competition_id}` as any);
     } catch (e) {
@@ -169,170 +198,303 @@ export default function F2tHomeScreen() {
     }
   };
 
+  const statusLabel = (status: string) => {
+    if (status === 'active') return 'In play';
+    if (status === 'winner') return 'Winner';
+    if (status === 'completed') return 'Finished';
+    return status;
+  };
+
   const styles = useMemo(
     () =>
       StyleSheet.create({
         root: { flex: 1, backgroundColor: theme.colors.background },
         header: {
-          paddingTop: insets.top + theme.spacing.sm,
+          paddingTop:
+            Platform.OS === 'web'
+              ? Math.max(theme.spacing.md, insets.top + 6)
+              : insets.top + theme.spacing.sm,
           paddingHorizontal: theme.spacing.lg,
           paddingBottom: theme.spacing.sm,
           flexDirection: 'row',
           alignItems: 'center',
           gap: theme.spacing.md,
         },
+        back: { padding: 4 },
+        titleBlock: { flex: 1 },
+        headerRefresh: {
+          padding: 6,
+          minWidth: 36,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
         title: {
-          flex: 1,
           fontFamily: theme.fontFamily.baiBold,
-          fontSize: 22,
+          fontSize: 20,
           color: theme.colors.text,
         },
-        tabs: {
-          flexDirection: 'row',
-          paddingHorizontal: theme.spacing.lg,
-          gap: theme.spacing.sm,
-          marginBottom: theme.spacing.sm,
-        },
-        tab: {
-          paddingVertical: 8,
-          paddingHorizontal: 14,
-          borderRadius: theme.radius.md,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.colors.border,
-        },
-        tabActive: {
-          borderColor: theme.colors.accent,
-          backgroundColor: theme.colors.accentMuted,
-        },
-        tabText: {
-          fontFamily: theme.fontFamily.baiMedium,
+        sub: {
+          fontFamily: theme.fontFamily.baiLight,
           fontSize: 13,
-          color: theme.colors.textSecondary,
+          color: theme.colors.accent,
+          marginTop: 2,
         },
-        tabTextActive: { color: theme.colors.accent },
-        content: {
+        mainScroll: { flex: 1 },
+        mainScrollContent: {
           paddingHorizontal: theme.spacing.lg,
           paddingBottom: insets.bottom + theme.spacing.xl,
           gap: theme.spacing.md,
+          flexGrow: 1,
         },
-        sectionLabel: {
-          fontFamily: theme.fontFamily.baiBold,
-          fontSize: 14,
-          color: theme.colors.text,
-          marginBottom: theme.spacing.xs,
-        },
-        card: {
+        homePanel: {
           backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.md,
+          borderRadius: theme.radius.lg,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
-          padding: theme.spacing.md,
+          overflow: 'hidden',
+        },
+        homePanelTabsRow: {
           flexDirection: 'row',
+          alignItems: 'stretch',
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+        },
+        homePanelCollapseBtn: {
+          paddingHorizontal: 10,
           alignItems: 'center',
-          gap: theme.spacing.md,
+          justifyContent: 'center',
+          borderLeftWidth: StyleSheet.hairlineWidth,
+          borderLeftColor: theme.colors.border,
         },
-        cardBody: { flex: 1, gap: 4 },
-        cardTitle: {
-          fontFamily: theme.fontFamily.baiBold,
-          fontSize: 16,
-          color: theme.colors.text,
+        panelBody: {
+          paddingHorizontal: theme.spacing.md,
+          paddingTop: theme.spacing.md,
+          paddingBottom: theme.spacing.md,
+          gap: theme.spacing.lg,
         },
-        cardMeta: {
-          fontFamily: theme.fontFamily.baiLight,
-          fontSize: 13,
-          color: theme.colors.textMuted,
+        tabs: {
+          flex: 1,
+          flexDirection: 'row',
+          backgroundColor: theme.colors.surface,
         },
-        progress: {
+        tab: {
+          flex: 1,
+          paddingVertical: 11,
+          paddingHorizontal: 2,
+          alignItems: 'center',
+          borderBottomWidth: 2,
+          borderBottomColor: 'transparent',
+        },
+        tabActive: { borderBottomColor: theme.colors.accent },
+        tabCollapsedActive: { borderBottomColor: 'transparent' },
+        tabText: {
           fontFamily: theme.fontFamily.baiMedium,
-          fontSize: 13,
-          color: theme.colors.accent,
-        },
-        empty: {
-          fontFamily: theme.fontFamily.baiLight,
-          fontSize: 14,
+          fontSize: 12,
           color: theme.colors.textMuted,
-          lineHeight: 20,
+          textAlign: 'center',
+        },
+        tabTextActive: { color: theme.colors.accent },
+        sectionLabel: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          letterSpacing: 1.1,
+          textTransform: 'uppercase',
+          color: theme.colors.textMuted,
+          marginBottom: 8,
         },
         joinRow: {
           flexDirection: 'row',
-          gap: theme.spacing.sm,
           alignItems: 'center',
+          gap: 8,
         },
         input: {
           flex: 1,
+          fontFamily: theme.fontFamily.input,
+          fontSize: 14,
+          color: theme.colors.text,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
-          borderRadius: theme.radius.md,
-          paddingHorizontal: theme.spacing.md,
-          paddingVertical: Platform.OS === 'web' ? 10 : 12,
-          fontFamily: theme.fontFamily.baiMedium,
-          fontSize: 16,
-          color: theme.colors.text,
+          borderRadius: theme.radius.sm,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          letterSpacing: 1.5,
+          textTransform: 'uppercase',
           backgroundColor: theme.colors.surface,
         },
         joinBtn: {
           backgroundColor: theme.colors.accent,
-          borderRadius: theme.radius.md,
-          paddingHorizontal: theme.spacing.lg,
-          paddingVertical: 12,
-          minWidth: 80,
+          borderRadius: theme.radius.sm,
+          paddingVertical: 9,
+          paddingHorizontal: 14,
+          minWidth: 72,
           alignItems: 'center',
         },
         joinBtnText: {
-          fontFamily: theme.fontFamily.baiBold,
-          fontSize: 14,
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
           color: theme.colors.white,
         },
         joinHint: {
-          marginTop: theme.spacing.sm,
           fontFamily: theme.fontFamily.baiLight,
-          fontSize: 13,
+          fontSize: 12,
           color: theme.colors.textMuted,
-          lineHeight: 18,
+          marginTop: 8,
+          lineHeight: 16,
         },
-        createBtn: {
-          alignSelf: 'flex-start',
-          paddingVertical: 8,
-          paddingHorizontal: 12,
-          borderRadius: theme.radius.md,
-          borderWidth: 1,
+        list: {
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+        },
+        row: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.spacing.md,
+          paddingVertical: 14,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+        },
+        rowLast: { borderBottomWidth: 0 },
+        rowCopy: { flex: 1, minWidth: 0, gap: 3 },
+        rowTitle: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 15,
+          color: theme.colors.text,
+        },
+        rowTitleRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          flexWrap: 'wrap',
+        },
+        manageChip: {
+          paddingVertical: 2,
+          paddingHorizontal: 6,
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
         },
-        createBtnText: {
+        manageChipText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 10,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: theme.colors.accent,
+        },
+        rowMeta: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 12,
+          color: theme.colors.textSecondary,
+        },
+        rowProgress: {
           fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.accent,
+          marginTop: 2,
+        },
+        createToggle: {
+          alignSelf: 'flex-start',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          paddingVertical: 6,
+          marginBottom: 8,
+        },
+        createToggleText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
           fontSize: 13,
           color: theme.colors.accent,
         },
         createPanel: {
-          gap: theme.spacing.sm,
-          padding: theme.spacing.md,
           backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.md,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
+          padding: 12,
+          gap: 10,
+          marginBottom: 12,
         },
-        gwRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-        gwChip: {
-          paddingVertical: 6,
-          paddingHorizontal: 10,
+        createInput: {
+          fontFamily: theme.fontFamily.input,
+          fontSize: 14,
+          color: theme.colors.text,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
           borderRadius: theme.radius.sm,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          backgroundColor: theme.colors.background,
+        },
+        createFieldLabel: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          letterSpacing: 1,
+          textTransform: 'uppercase',
+          color: theme.colors.textMuted,
+        },
+        createGwScroll: { marginHorizontal: -4 },
+        createGwRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingHorizontal: 4,
+        },
+        createGwChip: {
+          paddingVertical: 7,
+          paddingHorizontal: 12,
+          borderRadius: theme.radius.sm,
+          backgroundColor: theme.colors.background,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
         },
-        gwChipActive: {
-          borderColor: theme.colors.accent,
+        createGwChipActive: {
           backgroundColor: theme.colors.accentMuted,
+          borderColor: theme.colors.accent,
         },
-        gwChipText: {
+        createGwChipText: {
           fontFamily: theme.fontFamily.baiMedium,
           fontSize: 12,
           color: theme.colors.textSecondary,
         },
-        pendingCard: {
-          backgroundColor: theme.colors.surfaceElevated,
-          borderRadius: theme.radius.md,
-          padding: theme.spacing.md,
-          gap: 4,
+        createGwChipTextActive: { color: theme.colors.accent },
+        createSubmit: {
+          backgroundColor: theme.colors.accent,
+          borderRadius: theme.radius.sm,
+          paddingVertical: 10,
+          alignItems: 'center',
+        },
+        createSubmitText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.white,
+        },
+        empty: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+          paddingVertical: 8,
+          lineHeight: 18,
+        },
+        emptyBlock: { gap: 10, paddingVertical: 4 },
+        emptyAction: {
+          alignSelf: 'flex-start',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+          paddingVertical: 6,
+        },
+        emptyActionText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.accent,
+        },
+        badge: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          color: theme.colors.statusAccent,
+          textTransform: 'uppercase',
         },
       }),
     [theme, insets]
@@ -341,163 +503,312 @@ export default function F2tHomeScreen() {
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Pressable onPress={openSidebar} hitSlop={12}>
-          <Ionicons name="menu" size={26} color={theme.colors.text} />
+        <Pressable
+          style={styles.back}
+          onPress={openSidebar}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Open menu"
+        >
+          <Ionicons name="menu" size={24} color={theme.colors.text} />
         </Pressable>
-        <Text style={styles.title}>First2 Twenty</Text>
-        <Pressable onPress={onRefresh} hitSlop={12}>
-          <Ionicons name="refresh" size={22} color={theme.colors.textMuted} />
+        <View style={styles.titleBlock}>
+          <Text style={styles.title}>First2Twenty</Text>
+          <Text style={styles.sub}>Premier League {F2T_SEASON}</Text>
+        </View>
+        <Pressable
+          style={styles.headerRefresh}
+          onPress={requestManualRefresh}
+          disabled={refreshing || loading}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh"
+        >
+          {refreshing ? (
+            <ActivityIndicator size="small" color={theme.colors.accent} />
+          ) : (
+            <Ionicons name="refresh" size={22} color={theme.colors.text} />
+          )}
         </Pressable>
-      </View>
-
-      <View style={styles.tabs}>
-        {(['competitions', 'join', 'table'] as HomeTab[]).map((key) => (
-          <Pressable
-            key={key}
-            style={[styles.tab, tab === key && styles.tabActive]}
-            onPress={() => setTab(key)}
-          >
-            <Text style={[styles.tabText, tab === key && styles.tabTextActive]}>
-              {key === 'competitions' ? 'My leagues' : key === 'join' ? 'Join' : 'Table'}
-            </Text>
-          </Pressable>
-        ))}
       </View>
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={theme.colors.accent} />
       ) : (
-        <ScrollView
-          contentContainerStyle={styles.content}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.accent} />
-          }
-        >
-          {tab === 'competitions' ? (
-            <>
-              {isStaff ? (
-                <View style={{ gap: theme.spacing.sm }}>
-                  {showCreate ? (
-                    <View style={styles.createPanel}>
-                      <Text style={styles.sectionLabel}>New competition</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={createName}
-                        onChangeText={setCreateName}
-                        placeholder="League name"
-                        placeholderTextColor={theme.colors.textMuted}
-                      />
-                      <TextInput
-                        style={styles.input}
-                        value={createEntry}
-                        onChangeText={setCreateEntry}
-                        placeholder="Entry fee (optional)"
-                        placeholderTextColor={theme.colors.textMuted}
-                      />
-                      <Text style={styles.cardMeta}>Starts on gameweek</Text>
-                      <View style={styles.gwRow}>
-                        {gameweeks.map((gw) => (
-                          <Pressable
-                            key={gw.id}
-                            style={[styles.gwChip, createGwId === gw.id && styles.gwChipActive]}
-                            onPress={() => setCreateGwId(gw.id)}
-                          >
-                            <Text style={styles.gwChipText}>GW{gw.number}</Text>
-                          </Pressable>
-                        ))}
-                      </View>
+        <>
+          <FootballNextUpSpotlight season={F2T_SEASON} refreshKey={spotlightRefreshKey} />
+
+          <ScrollView
+            style={styles.mainScroll}
+            contentContainerStyle={styles.mainScrollContent}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={requestManualRefresh}
+                tintColor={theme.colors.accent}
+                colors={[theme.colors.accent]}
+              />
+            }
+          >
+            <View style={styles.homePanel}>
+              <View style={styles.homePanelTabsRow}>
+                <View style={styles.tabs}>
+                  {(
+                    [
+                      { key: 'competitions' as const, label: 'My competitions' },
+                      { key: 'join' as const, label: 'Join' },
+                      { key: 'table' as const, label: 'Table' },
+                    ] as const
+                  ).map((t) => {
+                    const active = tab === t.key;
+                    return (
                       <Pressable
-                        style={styles.joinBtn}
-                        onPress={() => void onCreate()}
-                        disabled={creating}
+                        key={t.key}
+                        style={[
+                          styles.tab,
+                          active && styles.tabActive,
+                          active && !homePanelExpanded && styles.tabCollapsedActive,
+                        ]}
+                        onPress={() => {
+                          setTab(t.key);
+                          if (!homePanelExpanded) setHomePanelExpanded(true);
+                        }}
+                        accessibilityRole="tab"
+                        accessibilityState={{ selected: active }}
                       >
-                        {creating ? (
-                          <ActivityIndicator color={theme.colors.white} size="small" />
-                        ) : (
-                          <Text style={styles.joinBtnText}>Create</Text>
-                        )}
+                        <Text style={[styles.tabText, active && styles.tabTextActive]}>
+                          {t.label}
+                        </Text>
                       </Pressable>
-                    </View>
-                  ) : (
-                    <Pressable style={styles.createBtn} onPress={() => setShowCreate(true)}>
-                      <Text style={styles.createBtnText}>+ Create competition</Text>
-                    </Pressable>
-                  )}
+                    );
+                  })}
                 </View>
-              ) : null}
-
-              {pending.length > 0 ? (
-                <View style={{ gap: theme.spacing.sm }}>
-                  <Text style={styles.sectionLabel}>Pending approval</Text>
-                  {pending.map((p) => (
-                    <View key={p.competition_id} style={styles.pendingCard}>
-                      <Text style={styles.cardTitle}>{p.name}</Text>
-                      <Text style={styles.cardMeta}>Awaiting admin approval</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
-
-              <Text style={styles.sectionLabel}>My competitions</Text>
-              {comps.length === 0 ? (
-                <Text style={styles.empty}>
-                  No leagues yet. Use Join to enter a code from your organiser.
-                </Text>
-              ) : (
-                comps.map((c) => (
-                  <Pressable
-                    key={c.competition_id}
-                    style={styles.card}
-                    onPress={() => router.push(`/(f2t)/${c.competition_id}` as any)}
-                  >
-                    <View style={styles.cardBody}>
-                      <Text style={styles.cardTitle}>{c.name}</Text>
-                      <Text style={styles.cardMeta}>
-                        GW{c.start_gameweek_number} start · {c.participant_status}
-                      </Text>
-                      <Text style={styles.progress}>
-                        {c.scored_count}/20 scored · {c.selection_count} picked
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />
-                  </Pressable>
-                ))
-              )}
-            </>
-          ) : null}
-
-          {tab === 'join' ? (
-            <View>
-              <Text style={styles.sectionLabel}>Competition code</Text>
-              <View style={styles.joinRow}>
-                <TextInput
-                  style={styles.input}
-                  value={code}
-                  onChangeText={setCode}
-                  placeholder="CODE"
-                  placeholderTextColor={theme.colors.textMuted}
-                  autoCapitalize="characters"
-                  maxLength={6}
-                  autoCorrect={false}
-                />
-                <Pressable style={styles.joinBtn} onPress={() => void onJoin()} disabled={joining}>
-                  {joining ? (
-                    <ActivityIndicator color={theme.colors.white} size="small" />
-                  ) : (
-                    <Text style={styles.joinBtnText}>Join</Text>
-                  )}
+                <Pressable
+                  style={styles.homePanelCollapseBtn}
+                  onPress={() => setHomePanelExpanded((v) => !v)}
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: homePanelExpanded }}
+                  accessibilityLabel={
+                    homePanelExpanded ? 'Collapse competitions panel' : 'Expand competitions panel'
+                  }
+                  hitSlop={6}
+                >
+                  <Ionicons
+                    name={homePanelExpanded ? 'chevron-up' : 'chevron-down'}
+                    size={18}
+                    color={theme.colors.textMuted}
+                  />
                 </Pressable>
               </View>
-              <Text style={styles.joinHint}>
-                Enter the 6-character code from your organiser. You can pick players once approved.
-              </Text>
+
+              {homePanelExpanded ? (
+                <View style={styles.panelBody}>
+                  {tab === 'competitions' ? (
+                    <>
+                      {pending.length > 0 ? (
+                        <View>
+                          <Text style={styles.sectionLabel}>Pending approval</Text>
+                          <View style={styles.list}>
+                            {pending.map((p, i) => (
+                              <View
+                                key={p.competition_id}
+                                style={[styles.row, i === pending.length - 1 && styles.rowLast]}
+                              >
+                                <View style={styles.rowCopy}>
+                                  <Text style={styles.rowTitle}>{p.name}</Text>
+                                  <Text style={styles.rowMeta}>Waiting for admin</Text>
+                                </View>
+                                <Text style={styles.badge}>Pending</Text>
+                              </View>
+                            ))}
+                          </View>
+                        </View>
+                      ) : null}
+
+                      <View>
+                        <Text style={styles.sectionLabel}>Your leagues</Text>
+                        {isStaff ? (
+                          <>
+                            <Pressable
+                              style={styles.createToggle}
+                              onPress={() => setShowCreate((v) => !v)}
+                              accessibilityRole="button"
+                              accessibilityState={{ expanded: showCreate }}
+                              accessibilityLabel="Create competition"
+                            >
+                              <Ionicons
+                                name={showCreate ? 'chevron-up' : 'add-circle-outline'}
+                                size={18}
+                                color={theme.colors.accent}
+                              />
+                              <Text style={styles.createToggleText}>Create competition</Text>
+                            </Pressable>
+                            {showCreate ? (
+                              <View style={styles.createPanel}>
+                                <TextInput
+                                  style={styles.createInput}
+                                  value={createName}
+                                  onChangeText={setCreateName}
+                                  placeholder="e.g. Office First2Twenty"
+                                  placeholderTextColor={theme.colors.textMuted}
+                                  autoCorrect={false}
+                                />
+                                <Text style={styles.createFieldLabel}>Starting gameweek</Text>
+                                <ScrollView
+                                  horizontal
+                                  showsHorizontalScrollIndicator={false}
+                                  style={styles.createGwScroll}
+                                  contentContainerStyle={styles.createGwRow}
+                                  nestedScrollEnabled
+                                >
+                                  {createGws.slice(0, 20).map((g) => {
+                                    const active = createGwId === g.id;
+                                    return (
+                                      <Pressable
+                                        key={g.id}
+                                        style={[
+                                          styles.createGwChip,
+                                          active && styles.createGwChipActive,
+                                        ]}
+                                        onPress={() => setCreateGwId(g.id)}
+                                      >
+                                        <Text
+                                          style={[
+                                            styles.createGwChipText,
+                                            active && styles.createGwChipTextActive,
+                                          ]}
+                                        >
+                                          GW{g.number}
+                                        </Text>
+                                      </Pressable>
+                                    );
+                                  })}
+                                </ScrollView>
+                                <Text style={styles.createFieldLabel}>Entry fee (optional)</Text>
+                                <TextInput
+                                  style={styles.createInput}
+                                  value={createEntry}
+                                  onChangeText={setCreateEntry}
+                                  placeholder="e.g. £10 cash to organiser"
+                                  placeholderTextColor={theme.colors.textMuted}
+                                  autoCorrect={false}
+                                />
+                                <Pressable
+                                  style={styles.createSubmit}
+                                  onPress={() => void onCreate()}
+                                  disabled={creating}
+                                >
+                                  {creating ? (
+                                    <ActivityIndicator color={theme.colors.white} size="small" />
+                                  ) : (
+                                    <Text style={styles.createSubmitText}>Create</Text>
+                                  )}
+                                </Pressable>
+                              </View>
+                            ) : null}
+                          </>
+                        ) : null}
+
+                        {comps.length === 0 ? (
+                          <View style={styles.emptyBlock}>
+                            <Text style={styles.empty}>
+                              No competitions yet. Got a competition code? Enter it on the Join tab
+                              to get started.
+                            </Text>
+                            <Pressable
+                              style={styles.emptyAction}
+                              onPress={() => setTab('join')}
+                              accessibilityRole="button"
+                              accessibilityLabel="Enter competition code"
+                            >
+                              <Text style={styles.emptyActionText}>Enter competition code</Text>
+                              <Ionicons name="arrow-forward" size={14} color={theme.colors.accent} />
+                            </Pressable>
+                          </View>
+                        ) : (
+                          <View style={styles.list}>
+                            {comps.map((c, i) => (
+                              <Pressable
+                                key={c.competition_id}
+                                style={[styles.row, i === comps.length - 1 && styles.rowLast]}
+                                onPress={() => router.push(`/(f2t)/${c.competition_id}` as any)}
+                              >
+                                <View style={styles.rowCopy}>
+                                  <View style={styles.rowTitleRow}>
+                                    <Text style={styles.rowTitle}>{c.name}</Text>
+                                    {c.can_manage ? (
+                                      <View style={styles.manageChip}>
+                                        <Text style={styles.manageChipText}>Admin</Text>
+                                      </View>
+                                    ) : c.is_manager ? (
+                                      <View style={styles.manageChip}>
+                                        <Text style={styles.manageChipText}>Manager</Text>
+                                      </View>
+                                    ) : null}
+                                  </View>
+                                  <Text style={styles.rowMeta}>
+                                    GW{c.start_gameweek_number} start ·{' '}
+                                    {statusLabel(c.participant_status)}
+                                  </Text>
+                                  <Text style={styles.rowProgress}>
+                                    {c.scored_count}/20 scored · {c.selection_count} picked
+                                  </Text>
+                                </View>
+                                <Ionicons
+                                  name="chevron-forward"
+                                  size={16}
+                                  color={theme.colors.textMuted}
+                                />
+                              </Pressable>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    </>
+                  ) : null}
+
+                  {tab === 'join' ? (
+                    <View>
+                      <Text style={styles.sectionLabel}>Competition code</Text>
+                      <View style={styles.joinRow}>
+                        <TextInput
+                          style={styles.input}
+                          value={code}
+                          onChangeText={setCode}
+                          placeholder="CODE"
+                          placeholderTextColor={theme.colors.textMuted}
+                          autoCapitalize="characters"
+                          maxLength={6}
+                          autoCorrect={false}
+                        />
+                        <Pressable
+                          style={styles.joinBtn}
+                          onPress={() => void onJoin()}
+                          disabled={joining}
+                        >
+                          {joining ? (
+                            <ActivityIndicator color={theme.colors.white} size="small" />
+                          ) : (
+                            <Text style={styles.joinBtnText}>Join</Text>
+                          )}
+                        </Pressable>
+                      </View>
+                      <Text style={styles.joinHint}>
+                        Ask the competition organiser for the 6-character code, then enter it here.
+                        You’ll appear in My competitions once they approve you.
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {tab === 'table' ? <LeagueTablePanel refreshKey={tableRefreshKey} /> : null}
+                </View>
+              ) : null}
             </View>
-          ) : null}
 
-          {tab === 'table' ? <LeagueTablePanel refreshKey={tableRefreshKey} /> : null}
-
-          <LmsTrademarkDisclaimer />
-        </ScrollView>
+            <LmsTrademarkDisclaimer />
+          </ScrollView>
+        </>
       )}
     </View>
   );

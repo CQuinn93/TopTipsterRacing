@@ -1,11 +1,10 @@
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import {
-  bbsGet,
+  bbsListAll,
   loadLmsTeams,
   matchLmsTeam,
-  normalizeName,
-  slugify,
+  normalizeFootballPosition,
 } from './football-sync/helpers';
 
 /**
@@ -36,8 +35,10 @@ type BbsPlayer = {
   display_name?: string;
   first_name?: string;
   last_name?: string;
+  position?: string;
   team?: { id?: string; name?: string };
   team_id?: string;
+  team_name?: string;
 };
 
 async function main() {
@@ -57,10 +58,10 @@ async function main() {
   const lmsTeams = await loadLmsTeams(supabase);
 
   console.log('[bbs-players] Fetching teams…');
-  const teamsPayload = await bbsGet<{ data?: BbsTeam[] }>(
-    `/teams?sport=football&league=${BBS_LEAGUE}&limit=200`
+  const bbsTeams = await bbsListAll<BbsTeam>(
+    `/teams?sport=football&league=${BBS_LEAGUE}`,
+    BBS_KEY
   );
-  const bbsTeams = teamsPayload.data ?? [];
   const bbsTeamToLms = new Map<string, string>();
   for (const bt of bbsTeams) {
     const matched = matchLmsTeam(lmsTeams, bt.name, bt.short_name ?? bt.abbreviation);
@@ -69,18 +70,11 @@ async function main() {
   console.log(`[bbs-players] Mapped ${bbsTeamToLms.size}/${bbsTeams.length} BBS teams to lms_teams`);
 
   console.log('[bbs-players] Fetching players…');
-  const playersPayload = await bbsGet<{ data?: BbsPlayer[] }>(
-    `/players?sport=football&league=${BBS_LEAGUE}&limit=200`
+  const players = await bbsListAll<BbsPlayer>(
+    `/players?sport=football&league=${BBS_LEAGUE}`,
+    BBS_KEY
   );
-  let players = playersPayload.data ?? [];
-
-  // Paginate if meta indicates more (simple second page)
-  if (players.length >= 200) {
-    const page2 = await bbsGet<{ data?: BbsPlayer[] }>(
-      `/players?sport=football&league=${BBS_LEAGUE}&limit=200&page=2`
-    );
-    players = [...players, ...(page2.data ?? [])];
-  }
+  console.log(`[bbs-players] Fetched ${players.length} players from Big Balls`);
 
   let upserted = 0;
   let skipped = 0;
@@ -96,10 +90,15 @@ async function main() {
     }
 
     const fullName = [p.first_name, p.last_name].filter(Boolean).join(' ').trim() || display;
+    const position = normalizeFootballPosition(p.position);
     const bbsTeamId = p.team?.id ?? p.team_id;
     let teamId = bbsTeamId ? bbsTeamToLms.get(bbsTeamId) : undefined;
     if (!teamId && p.team?.name) {
       const m = matchLmsTeam(lmsTeams, p.team.name);
+      if (m) teamId = m.id;
+    }
+    if (!teamId && p.team_name) {
+      const m = matchLmsTeam(lmsTeams, p.team_name);
       if (m) teamId = m.id;
     }
     if (!teamId) {
@@ -120,13 +119,13 @@ async function main() {
           team_id: teamId,
           display_name: display,
           full_name: fullName,
+          position: position || null,
           is_active: true,
           updated_at: new Date().toISOString(),
         })
         .eq('id', existing.id);
       if (error) throw error;
     } else {
-      // Try link by name+team for FPL row without bbs id
       const { data: byName } = await supabase
         .from('football_players')
         .select('id')
@@ -140,6 +139,7 @@ async function main() {
           .update({
             bbs_player_id: bbsId,
             full_name: fullName,
+            position: position || null,
             is_active: true,
             updated_at: new Date().toISOString(),
           })
@@ -151,6 +151,7 @@ async function main() {
           display_name: display,
           full_name: fullName,
           bbs_player_id: bbsId,
+          position: position || null,
           is_active: true,
         });
         if (error) throw error;
@@ -159,7 +160,7 @@ async function main() {
     upserted += 1;
   }
 
-  console.log(`[bbs-players] Upserted: ${upserted}; skipped (no team): ${skipped}`);
+  console.log(`[bbs-players] Upserted: ${upserted}; skipped: ${skipped}`);
 }
 
 main().catch((e) => {
