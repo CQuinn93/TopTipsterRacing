@@ -59,6 +59,14 @@ function formatStat(value: number | null, decimals = 0): string {
   return decimals > 0 ? value.toFixed(decimals) : String(Math.round(value));
 }
 
+/** FPL form bands: low / mid / strong recent points. */
+function formTone(form: number | null): { fg: string; bg: string } | null {
+  if (form == null) return null;
+  if (form < 3) return { fg: '#ef4444', bg: 'rgba(239, 68, 68, 0.18)' };
+  if (form < 5) return { fg: '#f97316', bg: 'rgba(249, 115, 22, 0.18)' };
+  return { fg: '#15803d', bg: 'rgba(21, 128, 61, 0.2)' };
+}
+
 function playerStatValue(p: F2tSelectablePlayer, key: SortKey): number {
   const stats = p.picker_stats;
   switch (key) {
@@ -283,7 +291,8 @@ export function F2tPlayerPicker({
           flexDirection: 'row',
           alignItems: 'center',
           gap: theme.spacing.sm,
-          padding: theme.spacing.md,
+          paddingVertical: 10,
+          paddingHorizontal: theme.spacing.md,
           borderRadius: theme.radius.md,
           borderWidth: 1.5,
           borderColor: theme.colors.border,
@@ -296,7 +305,7 @@ export function F2tPlayerPicker({
         cardMain: {
           flex: 1,
           minWidth: 0,
-          gap: 4,
+          gap: 2,
         },
         nameRow: {
           flexDirection: 'row',
@@ -306,40 +315,48 @@ export function F2tPlayerPicker({
         name: {
           flexShrink: 1,
           fontFamily: theme.fontFamily.baiBold,
-          fontSize: 15,
+          fontSize: 14,
           color: theme.colors.text,
         },
         meta: {
           fontFamily: theme.fontFamily.baiLight,
-          fontSize: 12,
+          fontSize: 11,
           color: theme.colors.textMuted,
-        },
-        statsGrid: {
-          width: 108,
-          gap: 6,
         },
         statsRow: {
           flexDirection: 'row',
+          alignItems: 'center',
           gap: 6,
         },
         statCell: {
-          flex: 1,
+          minWidth: 36,
           alignItems: 'center',
-          paddingVertical: 4,
-          borderRadius: 6,
-          backgroundColor: theme.colors.background,
         },
         statValue: {
           fontFamily: theme.fontFamily.baiBold,
           fontSize: 13,
           color: theme.colors.text,
+          lineHeight: 16,
+        },
+        formBadge: {
+          minWidth: 36,
+          paddingHorizontal: 6,
+          paddingVertical: 2,
+          borderRadius: 6,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        formBadgeText: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 12,
+          lineHeight: 15,
         },
         statLabel: {
-          fontFamily: theme.fontFamily.baiLight,
+          fontFamily: theme.fontFamily.baiMedium,
           fontSize: 9,
-          letterSpacing: 0.3,
+          letterSpacing: 0.2,
           textTransform: 'uppercase',
-          color: theme.colors.textMuted,
+          color: theme.colors.accent,
           marginTop: 1,
         },
         checkSlot: {
@@ -587,26 +604,43 @@ export function F2tPlayerPicker({
                       {[p.position, p.team_short_name].filter(Boolean).join(' · ')}
                     </Text>
                   </View>
-                  <View style={styles.statsGrid}>
-                    <View style={styles.statsRow}>
-                      <View style={styles.statCell}>
-                        <Text style={styles.statValue}>{formatStat(goals)}</Text>
-                        <Text style={styles.statLabel}>Goals</Text>
-                      </View>
-                      <View style={styles.statCell}>
-                        <Text style={styles.statValue}>{formatStat(assists)}</Text>
-                        <Text style={styles.statLabel}>Assists</Text>
-                      </View>
+                  <View style={styles.statsRow}>
+                    <View style={styles.statCell}>
+                      <Text style={styles.statValue}>{formatStat(goals)}</Text>
+                      <Text style={styles.statLabel}>Goals</Text>
                     </View>
-                    <View style={styles.statsRow}>
-                      <View style={styles.statCell}>
-                        <Text style={styles.statValue}>{formatStat(form, 1)}</Text>
-                        <Text style={styles.statLabel}>Form</Text>
-                      </View>
-                      <View style={styles.statCell}>
-                        <Text style={styles.statValue}>{formatStat(xg, 1)}</Text>
-                        <Text style={styles.statLabel}>xG</Text>
-                      </View>
+                    <View style={styles.statCell}>
+                      <Text style={styles.statValue}>{formatStat(assists)}</Text>
+                      <Text style={styles.statLabel}>Assists</Text>
+                    </View>
+                    <View style={styles.statCell}>
+                      {(() => {
+                        const tone = formTone(form);
+                        return (
+                          <View
+                            style={[
+                              styles.formBadge,
+                              tone
+                                ? { backgroundColor: tone.bg }
+                                : { backgroundColor: theme.colors.background },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.formBadgeText,
+                                { color: tone?.fg ?? theme.colors.text },
+                              ]}
+                            >
+                              {formatStat(form, 1)}
+                            </Text>
+                          </View>
+                        );
+                      })()}
+                      <Text style={styles.statLabel}>Form</Text>
+                    </View>
+                    <View style={styles.statCell}>
+                      <Text style={styles.statValue}>{formatStat(xg, 1)}</Text>
+                      <Text style={styles.statLabel}>xG</Text>
                     </View>
                   </View>
                   <View style={styles.checkSlot}>
