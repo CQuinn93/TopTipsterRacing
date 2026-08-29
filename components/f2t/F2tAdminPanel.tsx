@@ -44,6 +44,8 @@ type Props = {
   canManage: boolean;
   isCompManager: boolean;
   entry: string | null;
+  /** Seed from f2t_get_competition so the code shows even if admin RPCs partially fail. */
+  initialJoinCode?: string | null;
   onEntrySaved?: (entry: string | null) => void;
 };
 
@@ -52,11 +54,14 @@ export function F2tAdminPanel({
   canManage,
   isCompManager,
   entry,
+  initialJoinCode = null,
   onEntrySaved,
 }: Props) {
   const theme = useTheme();
   const [adminSubTab, setAdminSubTab] = useState<AdminSubTab>('joins');
-  const [joinCode, setJoinCode] = useState<string | null>(null);
+  const [joinCode, setJoinCode] = useState<string | null>(
+    initialJoinCode?.trim() || null
+  );
   const [entryDraft, setEntryDraft] = useState(entry ?? '');
   const [entrySaving, setEntrySaving] = useState(false);
   const [pendingJoins, setPendingJoins] = useState<PendingJoin[]>([]);
@@ -78,6 +83,11 @@ export function F2tAdminPanel({
   }, [entry]);
 
   useEffect(() => {
+    const seeded = initialJoinCode?.trim() || null;
+    if (seeded) setJoinCode(seeded);
+  }, [initialJoinCode]);
+
+  useEffect(() => {
     if (!canManage && isCompManager && adminSubTab !== 'joins') {
       setAdminSubTab('joins');
     }
@@ -86,13 +96,21 @@ export function F2tAdminPanel({
   const loadAdmin = useCallback(async () => {
     setLoadingAdmin(true);
     try {
-      const [codes, pending, notifyPref, managers] = await Promise.all([
-        f2tGetCompetitionJoinCodes(competitionId),
+      // Load join code on its own so other admin RPC failures don't blank it.
+      try {
+        const codes = await f2tGetCompetitionJoinCodes(competitionId);
+        if (codes.success && codes.join_code) {
+          setJoinCode(codes.join_code);
+        }
+      } catch {
+        /* keep seeded / previous join code */
+      }
+
+      const [pending, notifyPref, managers] = await Promise.all([
         f2tListPendingForCompetition(competitionId),
         f2tGetJoinNotifyPref(competitionId),
         f2tListCompetitionManagers(competitionId),
       ]);
-      setJoinCode(codes.join_code);
       setPendingJoins(pending);
       setJoinNotifyEnabled(!!notifyPref.enabled);
       setManagerUserIds(new Set(managers.map((m) => m.user_id)));
@@ -502,7 +520,7 @@ export function F2tAdminPanel({
     [theme]
   );
 
-  if (loadingAdmin) {
+  if (loadingAdmin && !joinCode) {
     return <ActivityIndicator color={theme.colors.accent} style={{ marginTop: 12 }} />;
   }
 
@@ -581,6 +599,10 @@ export function F2tAdminPanel({
         </Pressable>
       </View>
 
+      {loadingAdmin ? (
+        <ActivityIndicator color={theme.colors.accent} style={{ marginTop: 8 }} />
+      ) : (
+        <>
       {canManage ? (
         <View style={styles.adminSubTabs}>
           {creatorSubTabs.map((t) => {
@@ -878,6 +900,8 @@ export function F2tAdminPanel({
           </Pressable>
         </>
       ) : null}
+        </>
+      )}
     </View>
   );
 }

@@ -752,6 +752,11 @@ export default function F2tHomeScreen() {
                                     GW{c.start_gameweek_number} start ·{' '}
                                     {statusLabel(c.participant_status)}
                                   </Text>
+                                  {c.join_code?.trim() ? (
+                                    <Text style={styles.rowProgress}>
+                                      Join code {c.join_code.trim()}
+                                    </Text>
+                                  ) : null}
                                   <Text style={styles.rowProgress}>
                                     {c.scored_count}/20 scored · {c.selection_count} picked
                                   </Text>

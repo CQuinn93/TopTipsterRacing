@@ -17,6 +17,8 @@ export type F2tCompetitionHomeSummary = {
   selections_locked: boolean;
   can_manage: boolean;
   is_manager: boolean;
+  /** Present for organisers / managers only. */
+  join_code?: string | null;
 };
 
 export type F2tPendingJoin = {
@@ -136,6 +138,8 @@ export async function f2tGetCompetition(competitionId: string) {
       start_gameweek_number: number;
       start_gameweek_deadline: string;
       join_open: boolean;
+      /** Present for organisers / managers only. */
+      join_code?: string | null;
     };
     participant?: {
       status: string;
@@ -289,9 +293,10 @@ export async function f2tGetCompetitionJoinCodes(competitionId: string) {
     join_code?: string | null;
     error?: string;
   };
+  const code = typeof row.join_code === 'string' ? row.join_code.trim() : null;
   return {
     success: !!row.success,
-    join_code: row.join_code ?? null,
+    join_code: code || null,
     error: row.error,
   };
 }

@@ -65,11 +65,20 @@ export default function F2tShareInviteScreen() {
         setForbidden(true);
         return;
       }
-      const codes = await f2tGetCompetitionJoinCodes(competitionId);
       setName(data.competition?.name ?? '');
       setEntry(data.competition?.entry ?? null);
       setStartGwNumber(data.competition?.start_gameweek_number ?? null);
-      setJoinCode(codes.join_code);
+      const fromComp =
+        typeof data.competition?.join_code === 'string'
+          ? data.competition.join_code.trim()
+          : null;
+      setJoinCode(fromComp || null);
+      try {
+        const codes = await f2tGetCompetitionJoinCodes(competitionId);
+        if (codes.join_code) setJoinCode(codes.join_code);
+      } catch {
+        /* keep join_code from competition payload */
+      }
     } catch {
       setForbidden(true);
     } finally {

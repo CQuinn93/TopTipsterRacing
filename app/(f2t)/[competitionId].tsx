@@ -66,6 +66,7 @@ export default function F2tCompetitionScreen() {
   const [canHandleJoins, setCanHandleJoins] = useState(false);
   const [isCompManager, setIsCompManager] = useState(false);
   const [entry, setEntry] = useState<string | null>(null);
+  const [joinCode, setJoinCode] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [players, setPlayers] = useState<F2tSelectablePlayer[]>([]);
   const [playersLoading, setPlayersLoading] = useState(false);
@@ -105,6 +106,11 @@ export default function F2tCompetitionScreen() {
       setCanHandleJoins(data.permissions?.can_handle_joins ?? false);
       setIsCompManager(data.permissions?.is_manager ?? false);
       setEntry(data.competition.entry ?? null);
+      const code =
+        typeof data.competition.join_code === 'string'
+          ? data.competition.join_code.trim()
+          : null;
+      setJoinCode(code || null);
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -428,6 +434,7 @@ export default function F2tCompetitionScreen() {
               canManage={canManage}
               isCompManager={isCompManager}
               entry={entry}
+              initialJoinCode={joinCode}
               onEntrySaved={setEntry}
             />
           ) : null}
