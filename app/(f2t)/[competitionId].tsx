@@ -49,8 +49,10 @@ export default function F2tCompetitionScreen() {
   const [deadlineAt, setDeadlineAt] = useState<string | null>(null);
   const [selections, setSelections] = useState<F2tSelectionRow[]>([]);
   const [scoredCount, setScoredCount] = useState(0);
+  const [unscoredCount, setUnscoredCount] = useState(0);
   const [selectionCount, setSelectionCount] = useState(0);
   const [selectionsLocked, setSelectionsLocked] = useState(false);
+  const [participantStatus, setParticipantStatus] = useState<string | null>(null);
   const [subEligible, setSubEligible] = useState(false);
   const [regularSubUsed, setRegularSubUsed] = useState(false);
   const [leaderboard, setLeaderboard] = useState<
@@ -90,7 +92,12 @@ export default function F2tCompetitionScreen() {
       setDeadlineAt(data.competition.start_gameweek_deadline ?? null);
       setSelections(data.selections ?? []);
       setScoredCount(data.participant?.scored_count ?? 0);
+      setUnscoredCount(
+        data.participant?.unscored_count ??
+          (data.selections ?? []).filter((s) => !s.scored_at).length
+      );
       setSelectionCount(data.participant?.selection_count ?? 0);
+      setParticipantStatus(data.participant?.status ?? null);
       // Match submit RPC: active participant can pick while competition is open/active
       // and before the start-GW deadline (count of 20 does not lock edits early).
       const partActive = data.participant?.status === 'active';
@@ -215,6 +222,86 @@ export default function F2tCompetitionScreen() {
     }
   };
 
+  const canPick = !selectionsLocked;
+  const canRegularSub = subEligible && !regularSubUsed;
+  const deadlinePassed = deadlineAt
+    ? Date.now() >= new Date(deadlineAt).getTime()
+    : false;
+  const competitionStarted = deadlinePassed || status === 'active' || status === 'completed';
+  const playersRemaining =
+    participantStatus != null ? Math.max(0, unscoredCount) : null;
+  const freeTransferPlayers = selections.filter((s) => s.owner_flagged && !s.scored_at);
+  const freeTransfersLeft = freeTransferPlayers.length;
+  const regularSubsLeft = regularSubUsed ? 0 : 1;
+  // Regular sub unlocks after 3 completed GWs from start GW inclusive → after GW (start+2).
+  const subOpensAfterGw = startGw != null ? startGw + 2 : null;
+
+  const statusLabel = (s: string | null) => {
+    if (!s) return 'Observing';
+    if (s === 'active') return 'Still standing';
+    if (s === 'winner') return 'Champion';
+    if (s === 'eliminated') return 'Eliminated';
+    return s;
+  };
+
+  const statusColor = (s: string | null) => {
+    if (s === 'active' || s === 'winner') return theme.colors.accent;
+    if (s === 'eliminated') return theme.colors.error;
+    return theme.colors.textMuted;
+  };
+
+  const bannerMeta = (() => {
+    if (status === 'completed') return 'Competition completed';
+    if (!deadlinePassed && deadlineAt) {
+      const label = new Date(deadlineAt).toLocaleString(undefined, {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      return startGw != null ? `Starts GW${startGw} · picks until ${label}` : `Picks until ${label}`;
+    }
+    if (startGw != null) return `Started GW${startGw}`;
+    return status || 'Competition';
+  })();
+
+  const onPressRegularSubCard = () => {
+    if (!canRegularSub) {
+      if (regularSubUsed) {
+        Alert.alert('Substitution', 'You have already used your regular substitution.');
+      } else if (subOpensAfterGw != null) {
+        Alert.alert(
+          'Substitution',
+          `Regular substitutions open after GW${subOpensAfterGw} is complete (and you must have more than 3 unscored players).`
+        );
+      }
+      return;
+    }
+    Alert.alert(
+      'Make substitution',
+      'Choose an unscored player on your squad below, then pick a replacement.'
+    );
+  };
+
+  const onPressFreeTransferCard = () => {
+    if (freeTransfersLeft <= 0) {
+      Alert.alert(
+        'Free transfers',
+        'Free transfers appear when a selected player is flagged injured or unavailable by the organiser.'
+      );
+      return;
+    }
+    if (freeTransferPlayers.length === 1) {
+      openSubPicker(freeTransferPlayers[0].player_id);
+      return;
+    }
+    Alert.alert(
+      'Free transfers',
+      'Tap Free substitute on a flagged player card below to choose a replacement.'
+    );
+  };
+
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -239,30 +326,68 @@ export default function F2tCompetitionScreen() {
           fontSize: 12,
           color: theme.colors.textMuted,
         },
-        tabs: {
-          flexDirection: 'row',
-          flexWrap: 'wrap',
+        survivalBanner: {
+          marginHorizontal: theme.spacing.lg,
+          marginBottom: theme.spacing.md,
+          paddingVertical: theme.spacing.md,
           paddingHorizontal: theme.spacing.lg,
-          gap: 8,
-          marginBottom: theme.spacing.sm,
-        },
-        tab: {
-          paddingVertical: 6,
-          paddingHorizontal: 12,
+          backgroundColor: theme.colors.surface,
           borderRadius: theme.radius.md,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: theme.spacing.md,
+        },
+        survivalLeft: { flex: 1, gap: 4 },
+        survivalStatus: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 16,
+        },
+        survivalMeta: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        survivalStat: { alignItems: 'flex-end' },
+        survivalStatValue: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 22,
+          color: theme.colors.text,
+        },
+        survivalStatLabel: {
+          fontFamily: theme.fontFamily.baiExtraLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          textTransform: 'uppercase',
+          letterSpacing: 0.8,
+        },
+        tabs: {
+          flexDirection: 'row',
+          marginHorizontal: theme.spacing.lg,
+          marginBottom: theme.spacing.md,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+        },
+        tab: {
+          flex: 1,
+          paddingVertical: 12,
+          alignItems: 'center',
+          borderBottomWidth: 2,
+          borderBottomColor: 'transparent',
         },
         tabActive: {
-          borderColor: theme.colors.accent,
-          backgroundColor: theme.colors.accentMuted,
+          borderBottomColor: theme.colors.accent,
         },
         tabText: {
-          fontFamily: theme.fontFamily.baiMedium,
-          fontSize: 12,
-          color: theme.colors.textSecondary,
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: canHandleJoins ? 12 : 13,
+          color: theme.colors.textMuted,
         },
-        tabTextActive: { color: theme.colors.accent },
+        tabTextActive: {
+          color: theme.colors.accent,
+        },
         content: {
           paddingHorizontal: theme.spacing.lg,
           paddingBottom: insets.bottom + theme.spacing.xl,
@@ -278,6 +403,68 @@ export default function F2tCompetitionScreen() {
           fontFamily: theme.fontFamily.baiBold,
           fontSize: 14,
           color: theme.colors.white,
+        },
+        lockedNote: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 13,
+          color: theme.colors.textMuted,
+          lineHeight: 18,
+        },
+        actionRow: {
+          flexDirection: 'row',
+          gap: theme.spacing.sm,
+        },
+        actionCard: {
+          flex: 1,
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          paddingVertical: theme.spacing.md,
+          paddingHorizontal: theme.spacing.md,
+          gap: 6,
+          minHeight: 112,
+        },
+        actionCardActive: {
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+        },
+        actionCardLocked: {
+          opacity: 0.48,
+        },
+        actionCardHeader: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        },
+        actionCardTitle: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 13,
+          color: theme.colors.text,
+          flex: 1,
+        },
+        actionCardValue: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 22,
+          color: theme.colors.text,
+        },
+        actionCardValueAccent: {
+          color: theme.colors.accent,
+        },
+        actionCardMeta: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          lineHeight: 15,
+        },
+        sectionLabel: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 11,
+          letterSpacing: 0.8,
+          textTransform: 'uppercase',
+          color: theme.colors.textMuted,
+          marginTop: theme.spacing.xs,
         },
         lbRow: {
           flexDirection: 'row',
@@ -305,20 +492,16 @@ export default function F2tCompetitionScreen() {
           color: theme.colors.accent,
         },
       }),
-    [theme, insets]
+    [theme, insets, canHandleJoins]
   );
 
-  const canPick = !selectionsLocked;
-  const canRegularSub = subEligible && !regularSubUsed;
-  const deadlineLabel = deadlineAt
-    ? new Date(deadlineAt).toLocaleString(undefined, {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-    : null;
+  const tabItems = (
+    [
+      { key: 'team' as const, label: 'Team' },
+      { key: 'leaderboard' as const, label: 'Standings' },
+      ...(canHandleJoins ? [{ key: 'admin' as const, label: 'Admin' }] : []),
+    ] as { key: TabKey; label: string }[]
+  );
 
   return (
     <View style={styles.root}>
@@ -328,34 +511,41 @@ export default function F2tCompetitionScreen() {
         </Pressable>
         <View style={styles.titleBlock}>
           <Text style={styles.title} numberOfLines={1}>{name}</Text>
-          <Text style={styles.subtitle}>
-            GW{startGw ?? '—'} start · {status}
-            {deadlineLabel ? ` · picks until ${deadlineLabel}` : ''}
-          </Text>
         </View>
         <Pressable onPress={openSidebar} hitSlop={12}>
           <Ionicons name="menu" size={24} color={theme.colors.text} />
         </Pressable>
       </View>
 
+      {!loading ? (
+        <View style={styles.survivalBanner}>
+          <View style={styles.survivalLeft}>
+            <Text style={[styles.survivalStatus, { color: statusColor(participantStatus) }]}>
+              {statusLabel(participantStatus)}
+            </Text>
+            <Text style={styles.survivalMeta}>{bannerMeta}</Text>
+          </View>
+          <View style={styles.survivalStat}>
+            <Text style={styles.survivalStatValue}>
+              {playersRemaining != null ? playersRemaining : '—'}
+            </Text>
+            <Text style={styles.survivalStatLabel}>Players remaining</Text>
+          </View>
+        </View>
+      ) : null}
+
       <View style={styles.tabs}>
-        {(['team', 'leaderboard', ...(canHandleJoins ? ['admin'] : [])] as TabKey[]).map(
-          (key) => (
-            <Pressable
-              key={key}
-              style={[styles.tab, tab === key && styles.tabActive]}
-              onPress={() => setTab(key)}
-            >
-              <Text style={[styles.tabText, tab === key && styles.tabTextActive]}>
-                {key === 'team'
-                  ? 'Team Management'
-                  : key === 'leaderboard'
-                    ? 'Standings'
-                    : 'Admin'}
-              </Text>
-            </Pressable>
-          )
-        )}
+        {tabItems.map((t) => (
+          <Pressable
+            key={t.key}
+            style={[styles.tab, tab === t.key && styles.tabActive]}
+            onPress={() => setTab(t.key)}
+          >
+            <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>
+              {t.label}
+            </Text>
+          </Pressable>
+        ))}
       </View>
 
       {loading ? (
@@ -383,12 +573,12 @@ export default function F2tCompetitionScreen() {
                   </Text>
                 </Pressable>
               ) : (
-                <Text style={styles.subtitle}>
+                <Text style={styles.lockedNote}>
                   {selectionCount >= 20
-                    ? deadlineAt && Date.now() >= new Date(deadlineAt).getTime()
-                      ? 'Selections locked — manage substitutions below when eligible.'
+                    ? competitionStarted
+                      ? 'Selections are locked. Use Substitution or Free Transfers below when available.'
                       : 'Your 20 players are locked in.'
-                    : deadlineAt && Date.now() >= new Date(deadlineAt).getTime()
+                    : competitionStarted
                       ? 'Selections are closed for this league.'
                       : 'Selections are not available for this league.'}
                 </Text>
@@ -398,17 +588,80 @@ export default function F2tCompetitionScreen() {
                   {selectionCount}/20 selected — choose {20 - selectionCount} more to submit.
                 </Text>
               ) : null}
-              {canRegularSub ? (
-                <Text style={styles.subtitle}>
-                  Regular substitution available (one unused player swap after 3 completed
-                  gameweeks).
-                </Text>
-              ) : null}
-              {selections.some((s) => s.owner_flagged && !s.scored_at) ? (
-                <Text style={styles.subtitle}>
-                  Flagged players can be replaced with a free substitution from their card.
-                </Text>
-              ) : null}
+
+              <View style={styles.actionRow}>
+                <Pressable
+                  style={[
+                    styles.actionCard,
+                    canRegularSub && styles.actionCardActive,
+                    !canRegularSub && styles.actionCardLocked,
+                  ]}
+                  onPress={onPressRegularSubCard}
+                >
+                  <View style={styles.actionCardHeader}>
+                    <Text style={styles.actionCardTitle}>Substitution</Text>
+                    <Ionicons
+                      name="swap-horizontal"
+                      size={18}
+                      color={canRegularSub ? theme.colors.accent : theme.colors.textMuted}
+                    />
+                  </View>
+                  <Text
+                    style={[
+                      styles.actionCardValue,
+                      canRegularSub && styles.actionCardValueAccent,
+                    ]}
+                  >
+                    {regularSubsLeft}
+                  </Text>
+                  <Text style={styles.actionCardMeta}>
+                    {regularSubUsed
+                      ? 'Used for this competition'
+                      : canRegularSub
+                        ? 'Available — pick a player below'
+                        : subOpensAfterGw != null
+                          ? `Opens after GW${subOpensAfterGw}`
+                          : 'Opens after 3 completed gameweeks'}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  style={[
+                    styles.actionCard,
+                    freeTransfersLeft > 0 && styles.actionCardActive,
+                    freeTransfersLeft <= 0 && styles.actionCardLocked,
+                  ]}
+                  onPress={onPressFreeTransferCard}
+                >
+                  <View style={styles.actionCardHeader}>
+                    <Text style={styles.actionCardTitle}>Free transfers</Text>
+                    <Ionicons
+                      name="medkit-outline"
+                      size={18}
+                      color={
+                        freeTransfersLeft > 0 ? theme.colors.accent : theme.colors.textMuted
+                      }
+                    />
+                  </View>
+                  <Text
+                    style={[
+                      styles.actionCardValue,
+                      freeTransfersLeft > 0 && styles.actionCardValueAccent,
+                    ]}
+                  >
+                    {freeTransfersLeft}
+                  </Text>
+                  <Text style={styles.actionCardMeta}>
+                    {freeTransfersLeft > 0
+                      ? freeTransfersLeft === 1
+                        ? '1 flagged player ready to replace'
+                        : `${freeTransfersLeft} flagged players ready to replace`
+                      : 'For injured / flagged players'}
+                  </Text>
+                </Pressable>
+              </View>
+
+              <Text style={styles.sectionLabel}>Your squad</Text>
               <PlayerProgressGrid
                 selections={selections}
                 scoredCount={scoredCount}
