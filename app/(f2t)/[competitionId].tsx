@@ -16,12 +16,10 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { PlayerProgressGrid } from '@/components/f2t/PlayerProgressGrid';
 import { F2tPlayerPicker } from '@/components/f2t/F2tPlayerPicker';
+import { F2tAdminPanel } from '@/components/f2t/F2tAdminPanel';
 import {
-  f2tApproveJoin,
   f2tGetCompetition,
-  f2tListPendingForCompetition,
   f2tListSelectablePlayers,
-  f2tRejectJoin,
   f2tSubmitSelections,
   f2tUseSubstitution,
   type F2tSelectablePlayer,
@@ -66,9 +64,8 @@ export default function F2tCompetitionScreen() {
   >([]);
   const [canManage, setCanManage] = useState(false);
   const [canHandleJoins, setCanHandleJoins] = useState(false);
-  const [pending, setPending] = useState<
-    Array<{ id: string; user_id: string; username: string | null; created_at: string }>
-  >([]);
+  const [isCompManager, setIsCompManager] = useState(false);
+  const [entry, setEntry] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [players, setPlayers] = useState<F2tSelectablePlayer[]>([]);
   const [playersLoading, setPlayersLoading] = useState(false);
@@ -76,7 +73,6 @@ export default function F2tCompetitionScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [subMode, setSubMode] = useState(false);
   const [subOutId, setSubOutId] = useState<string | null>(null);
-  const [busyRequestId, setBusyRequestId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!competitionId) return;
@@ -107,10 +103,8 @@ export default function F2tCompetitionScreen() {
       setLeaderboard(data.leaderboard ?? []);
       setCanManage(data.permissions?.can_manage ?? false);
       setCanHandleJoins(data.permissions?.can_handle_joins ?? false);
-      if (data.permissions?.can_handle_joins) {
-        const list = await f2tListPendingForCompetition(competitionId);
-        setPending(list);
-      } else setPending([]);
+      setIsCompManager(data.permissions?.is_manager ?? false);
+      setEntry(data.competition.entry ?? null);
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -212,24 +206,6 @@ export default function F2tCompetitionScreen() {
       Alert.alert('Error', e instanceof Error ? e.message : 'Save failed');
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleJoin = async (requestId: string, approve: boolean) => {
-    setBusyRequestId(requestId);
-    try {
-      const res = approve
-        ? await f2tApproveJoin(requestId)
-        : await f2tRejectJoin(requestId);
-      if (!res.success) {
-        Alert.alert('Error', res.error ?? 'Action failed');
-        return;
-      }
-      await load();
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Action failed');
-    } finally {
-      setBusyRequestId(null);
     }
   };
 
@@ -390,7 +366,7 @@ export default function F2tCompetitionScreen() {
       </View>
 
       <View style={styles.tabs}>
-        {(['progress', 'picker', 'leaderboard', ...(canManage ? ['admin'] : [])] as TabKey[]).map(
+        {(['progress', 'picker', 'leaderboard', ...(canHandleJoins ? ['admin'] : [])] as TabKey[]).map(
           (key) => (
             <Pressable
               key={key}
@@ -489,34 +465,13 @@ export default function F2tCompetitionScreen() {
           ) : null}
 
           {tab === 'admin' && canHandleJoins ? (
-            pending.length === 0 ? (
-              <Text style={styles.subtitle}>No pending join requests.</Text>
-            ) : (
-              pending.map((p) => (
-                <View key={p.id} style={styles.adminCard}>
-                  <Text style={styles.lbName}>{p.username?.trim() || p.user_id.slice(0, 8)}</Text>
-                  <Text style={styles.subtitle}>
-                    Requested {new Date(p.created_at).toLocaleString()}
-                  </Text>
-                  <View style={styles.adminActions}>
-                    <Pressable
-                      style={[styles.adminBtn, styles.adminBtnApprove]}
-                      disabled={busyRequestId === p.id}
-                      onPress={() => void handleJoin(p.id, true)}
-                    >
-                      <Text style={styles.tabTextActive}>Approve</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.adminBtn}
-                      disabled={busyRequestId === p.id}
-                      onPress={() => void handleJoin(p.id, false)}
-                    >
-                      <Text style={styles.tabText}>Reject</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              ))
-            )
+            <F2tAdminPanel
+              competitionId={competitionId}
+              canManage={canManage}
+              isCompManager={isCompManager}
+              entry={entry}
+              onEntrySaved={setEntry}
+            />
           ) : null}
         </ScrollView>
       )}

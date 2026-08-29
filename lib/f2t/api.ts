@@ -84,13 +84,27 @@ export async function f2tRequestJoin(accessCode: string) {
     p_access_code: accessCode,
   });
   if (error) throw error;
-  return data as {
+  const result = data as {
     success: boolean;
     error?: string;
     competition_name?: string;
     competition_id?: string;
     join_request_id?: string;
   };
+  if (result?.success && result.join_request_id) {
+    void supabase.functions
+      .invoke('notify-f2t-join-request', {
+        body: { join_request_id: result.join_request_id },
+      })
+      .then(({ data: fnData, error: fnErr }) => {
+        if (fnErr) console.warn('[f2t] notify-f2t-join-request', fnErr.message);
+        else console.log('[f2t] notify-f2t-join-request', fnData);
+      })
+      .catch((e) => {
+        console.warn('[f2t] notify-f2t-join-request failed', e);
+      });
+  }
+  return result;
 }
 
 export async function f2tGetCompetition(competitionId: string) {
@@ -203,7 +217,21 @@ export async function f2tApproveJoin(requestId: string) {
     p_request_id: requestId,
   });
   if (error) throw error;
-  return data as { success: boolean; error?: string };
+  const result = data as { success: boolean; error?: string };
+  if (result?.success) {
+    void supabase.functions
+      .invoke('notify-f2t-join-accepted', {
+        body: { join_request_id: requestId },
+      })
+      .then(({ data: fnData, error: fnErr }) => {
+        if (fnErr) console.warn('[f2t] notify-f2t-join-accepted', fnErr.message);
+        else console.log('[f2t] notify-f2t-join-accepted', fnData);
+      })
+      .catch((e) => {
+        console.warn('[f2t] notify-f2t-join-accepted failed', e);
+      });
+  }
+  return result;
 }
 
 export async function f2tRejectJoin(requestId: string) {
@@ -226,6 +254,202 @@ export async function f2tListPendingForCompetition(competitionId: string) {
     username: string | null;
     created_at: string;
   }>;
+}
+
+export async function f2tGetCompetitionJoinCodes(competitionId: string) {
+  const { data, error } = await db.rpc('f2t_get_competition_join_codes', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  const row = (data ?? {}) as {
+    success?: boolean;
+    join_code?: string | null;
+    error?: string;
+  };
+  return {
+    success: !!row.success,
+    join_code: row.join_code ?? null,
+    error: row.error,
+  };
+}
+
+export async function f2tSetCompetitionEntry(competitionId: string, entry: string) {
+  const { data, error } = await db.rpc('f2t_set_competition_entry', {
+    p_competition_id: competitionId,
+    p_entry: entry,
+  });
+  if (error) throw error;
+  return data as { success: boolean; entry?: string | null; error?: string };
+}
+
+export async function f2tGetJoinNotifyPref(competitionId: string) {
+  const { data, error } = await db.rpc('f2t_get_join_notify_pref', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  const row = (data ?? {}) as { success?: boolean; enabled?: boolean; error?: string };
+  return {
+    success: !!row.success,
+    enabled: !!row.enabled,
+    error: row.error,
+  };
+}
+
+export async function f2tSetJoinNotifyPref(competitionId: string, enabled: boolean) {
+  const { data, error } = await db.rpc('f2t_set_join_notify_pref', {
+    p_competition_id: competitionId,
+    p_enabled: enabled,
+  });
+  if (error) throw error;
+  const row = (data ?? {}) as { success?: boolean; enabled?: boolean; error?: string };
+  return {
+    success: !!row.success,
+    enabled: !!row.enabled,
+    error: row.error,
+  };
+}
+
+export type F2tAssignableManager = {
+  user_id: string;
+  username: string | null;
+  status: string;
+  is_creator: boolean;
+  is_manager: boolean;
+};
+
+export async function f2tListAssignableManagers(competitionId: string) {
+  const { data, error } = await db.rpc('f2t_list_assignable_managers', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as F2tAssignableManager[];
+}
+
+export async function f2tListCompetitionManagers(competitionId: string) {
+  const { data, error } = await db.rpc('f2t_list_competition_managers', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as Array<{
+    user_id: string;
+    username: string | null;
+    assigned_at: string;
+  }>;
+}
+
+export async function f2tSetCompetitionManager(
+  competitionId: string,
+  userId: string,
+  enabled: boolean
+) {
+  const { data, error } = await db.rpc('f2t_set_competition_manager', {
+    p_competition_id: competitionId,
+    p_user_id: userId,
+    p_enabled: enabled,
+  });
+  if (error) throw error;
+  const result = (data ?? { success: false }) as {
+    success: boolean;
+    enabled?: boolean;
+    error?: string;
+    max?: number;
+  };
+  if (result.success && enabled) {
+    void supabase.functions
+      .invoke('notify-f2t-manager-assigned', {
+        body: { competition_id: competitionId, user_id: userId },
+      })
+      .then(({ data: fnData, error: fnErr }) => {
+        if (fnErr) console.warn('[f2t] notify-f2t-manager-assigned', fnErr.message);
+        else console.log('[f2t] notify-f2t-manager-assigned', fnData);
+      })
+      .catch((e) => {
+        console.warn('[f2t] notify-f2t-manager-assigned failed', e);
+      });
+  }
+  return result;
+}
+
+export async function f2tAdminBroadcastPush(
+  competitionId: string,
+  title: string,
+  body: string
+): Promise<{
+  success: boolean;
+  error?: string;
+  sent?: number;
+  users_notified?: number;
+  participants?: number;
+  skipped?: string;
+}> {
+  const { data, error } = await supabase.functions.invoke('notify-f2t-competition-broadcast', {
+    body: {
+      competition_id: competitionId,
+      title,
+      body,
+    },
+  });
+  if (error) {
+    const ctx = (error as { context?: Response }).context;
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const errBody = (await ctx.json()) as { error?: string };
+        if (errBody?.error) return { success: false, error: errBody.error };
+      } catch {
+        /* fall through */
+      }
+    }
+    throw error;
+  }
+  const row = (data ?? {}) as {
+    ok?: boolean;
+    error?: string;
+    sent?: number;
+    users_notified?: number;
+    participants?: number;
+    skipped?: string;
+  };
+  if (!row.ok) return { success: false, error: row.error ?? 'send_failed' };
+  if (row.skipped === 'no_subscriptions' || row.skipped === 'no_participants') {
+    return {
+      success: false,
+      error: row.skipped,
+      sent: 0,
+      users_notified: 0,
+      participants: row.participants,
+      skipped: row.skipped,
+    };
+  }
+  return {
+    success: true,
+    sent: row.sent ?? 0,
+    users_notified: row.users_notified ?? 0,
+    participants: row.participants,
+    skipped: row.skipped,
+  };
+}
+
+export function f2tBroadcastErrorMessage(code?: string): string {
+  switch (code) {
+    case 'unauthorized':
+    case 'not_authenticated':
+    case 'forbidden':
+      return 'Only the competition creator or Owner can send notifications.';
+    case 'invalid_title':
+      return 'Enter a title up to 80 characters.';
+    case 'invalid_body':
+      return 'Enter a message up to 280 characters.';
+    case 'rate_limited':
+      return 'Please wait a few minutes before sending another notification.';
+    case 'daily_limit':
+      return 'Daily notification limit reached for this competition.';
+    case 'no_subscriptions':
+      return 'No players have push notifications enabled yet.';
+    case 'no_participants':
+      return 'There are no players in this competition yet.';
+    default:
+      return code ?? 'Could not send notification.';
+  }
 }
 
 export async function ownerListFootballPlayers(teamId?: string, search?: string) {
