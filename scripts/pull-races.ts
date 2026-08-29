@@ -536,8 +536,11 @@ async function main() {
   }
 
   const competitionRaceDaysToUpsert = activeCompetitions
-    .filter((c) => courseToRaceDayId.has(c.course))
-    .map((c) => ({ competition_id: c.competition_id, race_day_id: courseToRaceDayId.get(c.course)! }));
+    .filter((c) => courseToRaceDayId.has(displayRacingCourseName(c.course) || c.course))
+    .map((c) => ({
+      competition_id: c.competition_id,
+      race_day_id: courseToRaceDayId.get(displayRacingCourseName(c.course) || c.course)!,
+    }));
 
   if (competitionRaceDaysToUpsert.length > 0) {
     await supabase.from('competition_race_days').upsert(competitionRaceDaysToUpsert, { onConflict: 'competition_id,race_day_id' });
