@@ -202,6 +202,7 @@ export default function F2tHomeScreen() {
     if (status === 'active') return 'In play';
     if (status === 'winner') return 'Winner';
     if (status === 'completed') return 'Finished';
+    if (status === 'observer') return 'Admin access';
     return status;
   };
 

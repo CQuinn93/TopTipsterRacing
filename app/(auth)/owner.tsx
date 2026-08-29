@@ -37,6 +37,7 @@ import {
   type LmsGameweek,
 } from '@/lib/lms/api';
 import {
+  f2tAdminDeleteCompetition,
   ownerListFootballPlayers,
   ownerListFootballPlayersFplAlerts,
   ownerSetFootballPlayerFlagged,
@@ -464,7 +465,9 @@ export default function OwnerScreen() {
             const res =
               c.sport === 'lms'
                 ? await lmsAdminDeleteCompetition(c.id)
-                : await racingDeleteCompetition(c.id);
+                : c.sport === 'f2t'
+                  ? await f2tAdminDeleteCompetition(c.id)
+                  : await racingDeleteCompetition(c.id);
             if (!res.success) {
               notify('Error', res.error ?? 'Could not delete competition');
               return;
@@ -753,7 +756,20 @@ export default function OwnerScreen() {
 
   const racingComps = comps.filter((c) => c.sport === 'racing');
   const lmsComps = comps.filter((c) => c.sport === 'lms');
+  const f2tComps = comps.filter((c) => c.sport === 'f2t');
   const selectedGw = gameweeks.find((g) => g.id === selectedGwId) ?? null;
+
+  const openCompetition = (c: OwnerCompetitionRow) => {
+    if (c.sport === 'lms') {
+      router.push(`/(lms)/${c.id}` as any);
+      return;
+    }
+    if (c.sport === 'f2t') {
+      router.push(`/(f2t)/${c.id}` as any);
+      return;
+    }
+    router.push(`/(app)/competition/${c.id}` as any);
+  };
 
   const renderCompCard = (c: OwnerCompetitionRow) => {
     const key = `${c.sport}-${c.id}`;
@@ -777,15 +793,24 @@ export default function OwnerScreen() {
           </Text>
         ) : null}
         <Text style={styles.meta}>
-          {c.sport === 'lms'
-            ? `${c.active_count ?? 0} active / ${c.participant_count ?? 0} total${
-                c.season ? ` · ${c.season}` : ''
-              }`
-            : `${c.participant_count ?? 0} players${
+          {c.sport === 'racing'
+            ? `${c.participant_count ?? 0} players${
                 c.creator_username ? ` · created by ${c.creator_username}` : ''
+              }`
+            : `${c.active_count ?? 0} active / ${c.participant_count ?? 0} total${
+                c.season ? ` · ${c.season}` : ''
               }`}
         </Text>
         <View style={styles.actions}>
+          <Pressable
+            style={styles.actionBtn}
+            disabled={busy}
+            onPress={() => openCompetition(c)}
+            accessibilityRole="button"
+            accessibilityLabel={`Manage ${c.name}`}
+          >
+            <Text style={styles.actionBtnText}>Manage</Text>
+          </Pressable>
           <Pressable
             style={[styles.actionBtn, styles.actionBtnDanger]}
             disabled={busy}
@@ -941,8 +966,8 @@ export default function OwnerScreen() {
         ) : tab === 'competitions' ? (
           <>
             <Text style={styles.hint}>
-              Every competition across Racing and Football, with join codes. Delete removes the
-              competition permanently. Pull to refresh.
+              Every competition across Racing, LMS, and First2Twenty, with join codes. Manage opens
+              the competition admin. Delete removes the competition permanently. Pull to refresh.
             </Text>
 
             <Text style={[styles.meta, { textTransform: 'uppercase', letterSpacing: 0.8 }]}>
@@ -960,12 +985,26 @@ export default function OwnerScreen() {
                 { textTransform: 'uppercase', letterSpacing: 0.8, marginTop: theme.spacing.md },
               ]}
             >
-              Football / LMS ({lmsComps.length})
+              Last Man Standing ({lmsComps.length})
             </Text>
             {lmsComps.length === 0 ? (
               <Text style={styles.empty}>No LMS competitions</Text>
             ) : (
               lmsComps.map(renderCompCard)
+            )}
+
+            <Text
+              style={[
+                styles.meta,
+                { textTransform: 'uppercase', letterSpacing: 0.8, marginTop: theme.spacing.md },
+              ]}
+            >
+              First2 Twenty ({f2tComps.length})
+            </Text>
+            {f2tComps.length === 0 ? (
+              <Text style={styles.empty}>No F2T competitions</Text>
+            ) : (
+              f2tComps.map(renderCompCard)
             )}
           </>
         ) : tab === 'game_modes' ? (

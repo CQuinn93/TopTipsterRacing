@@ -27,8 +27,10 @@ import { getAdminAccent } from '@/constants/adminUi';
 import { isStaffRole, isOwnerRole, type ProfileRole } from '@/lib/adminSession';
 import {
   isCurrentUserBanned,
+  ownerListCompetitions,
   ownerListUsers,
   ownerSetUserBanned,
+  type OwnerCompetitionRow,
   type OwnerUserRow,
 } from '@/lib/ownerApi';
 import {
@@ -64,7 +66,7 @@ const PRIVACY_POLICY_URL =
 type HubTab = 'football' | 'racing' | 'admin' | 'account';
 
 type AdminCategory = 'football' | 'racing' | 'users';
-type FootballAdminTab = 'f2t_alerts' | 'exclusions';
+type FootballAdminTab = 'f2t_alerts' | 'exclusions' | 'competitions';
 
 const LMS_SEASON = '2026/27';
 const FOOTBALL_MODE_KEYS: HubGameModeKey[] = ['lms', 'f2t', 'f2t6'];
@@ -254,6 +256,8 @@ export default function CompetitionHubScreen() {
   const [ownerUsers, setOwnerUsers] = useState<OwnerUserRow[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const [ownerComps, setOwnerComps] = useState<OwnerCompetitionRow[]>([]);
+  const [ownerCompsLoading, setOwnerCompsLoading] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signingOutAll, setSigningOutAll] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
@@ -355,6 +359,20 @@ export default function CompetitionHubScreen() {
       setOwnerUsers([]);
     } finally {
       setUsersLoading(false);
+    }
+  }, [isOwner]);
+
+  const loadOwnerComps = useCallback(async () => {
+    if (!isOwner) return;
+    setOwnerCompsLoading(true);
+    try {
+      const list = await ownerListCompetitions();
+      setOwnerComps(list);
+    } catch (e) {
+      console.warn('[competition-hub] competitions load failed', e);
+      setOwnerComps([]);
+    } finally {
+      setOwnerCompsLoading(false);
     }
   }, [isOwner]);
 
@@ -465,11 +483,25 @@ export default function CompetitionHubScreen() {
       void loadFplAlerts();
     } else if (adminCategory === 'football' && footballAdminTab === 'exclusions') {
       void loadExclusions(selectedGwId);
+    } else if (
+      (adminCategory === 'football' && footballAdminTab === 'competitions') ||
+      adminCategory === 'racing'
+    ) {
+      void loadOwnerComps();
     } else if (adminCategory === 'users') {
       void loadOwnerUsers();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, isOwner, adminCategory, footballAdminTab, loadFplAlerts, loadExclusions, loadOwnerUsers]);
+  }, [
+    tab,
+    isOwner,
+    adminCategory,
+    footballAdminTab,
+    loadFplAlerts,
+    loadExclusions,
+    loadOwnerUsers,
+    loadOwnerComps,
+  ]);
 
   useEffect(() => {
     Animated.parallel([
@@ -1143,6 +1175,22 @@ export default function CompetitionHubScreen() {
           fontSize: 13,
           color: theme.colors.text,
         },
+        adminUserRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          paddingVertical: 10,
+          paddingHorizontal: 12,
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+        },
+        adminUserName: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 14,
+          color: theme.colors.text,
+        },
         reasonInput: {
           marginTop: 4,
           borderWidth: StyleSheet.hairlineWidth,
@@ -1498,6 +1546,7 @@ export default function CompetitionHubScreen() {
                           <View style={styles.adminSubRow}>
                             {(
                               [
+                                { key: 'competitions' as const, label: 'Competitions' },
                                 { key: 'f2t_alerts' as const, label: 'F2T alerts' },
                                 { key: 'exclusions' as const, label: 'Exclusions' },
                               ] as const
@@ -1527,7 +1576,68 @@ export default function CompetitionHubScreen() {
                             })}
                           </View>
 
-                          {footballAdminTab === 'f2t_alerts' ? (
+                          {footballAdminTab === 'competitions' ? (
+                            <View style={styles.gameModesCard}>
+                              <Text style={styles.panelLabel}>Manage competitions</Text>
+                              <Text style={styles.gameModesHint}>
+                                Open any LMS or First2Twenty league as Owner — join codes and
+                                admin tools are available even if you are not a player in that
+                                league.
+                              </Text>
+                              <Pressable
+                                style={[styles.adminCatChip, styles.adminCatChipActive]}
+                                onPress={() => openOwnerPanel('competitions')}
+                              >
+                                <Text
+                                  style={[styles.adminCatChipText, styles.adminCatChipTextActive]}
+                                >
+                                  Full owner console
+                                </Text>
+                              </Pressable>
+                              {ownerCompsLoading ? (
+                                <ActivityIndicator
+                                  size="small"
+                                  color={adminAccent}
+                                  style={{ marginTop: 8 }}
+                                />
+                              ) : (
+                                <View style={{ gap: 8, marginTop: 8 }}>
+                                  {ownerComps
+                                    .filter((c) => c.sport === 'lms' || c.sport === 'f2t')
+                                    .map((c) => (
+                                      <Pressable
+                                        key={`${c.sport}-${c.id}`}
+                                        style={styles.adminUserRow}
+                                        onPress={() => {
+                                          if (c.sport === 'lms') {
+                                            router.push(`/(lms)/${c.id}` as any);
+                                          } else {
+                                            router.push(`/(f2t)/${c.id}` as any);
+                                          }
+                                        }}
+                                      >
+                                        <View style={{ flex: 1, minWidth: 0 }}>
+                                          <Text style={styles.adminUserName} numberOfLines={1}>
+                                            {c.name}
+                                          </Text>
+                                          <Text style={styles.gameModesHint} numberOfLines={1}>
+                                            {c.sport === 'lms' ? 'LMS' : 'F2T'} ·{' '}
+                                            {c.join_code?.trim() || 'no code'} · {c.status}
+                                          </Text>
+                                        </View>
+                                        <Text style={styles.adminCatChipTextActive}>Manage</Text>
+                                      </Pressable>
+                                    ))}
+                                  {ownerComps.filter((c) => c.sport === 'lms' || c.sport === 'f2t')
+                                    .length === 0 ? (
+                                    <Text style={styles.gameModesHint}>
+                                      No football competitions yet.
+                                    </Text>
+                                  ) : null}
+                                </View>
+                              )}
+                            </View>
+                          ) : footballAdminTab === 'f2t_alerts' ? (
                             <View style={styles.gameModesCard}>
                               <F2tAlertsPanel
                                 players={fplAlertPlayers}
@@ -1656,19 +1766,53 @@ export default function CompetitionHubScreen() {
 
                       {adminCategory === 'racing' ? (
                         <View style={styles.gameModesCard}>
-                          <Text style={styles.panelLabel}>Racing admin</Text>
+                          <Text style={styles.panelLabel}>Manage competitions</Text>
                           <Text style={styles.gameModesHint}>
-                            Racing day-to-day tools live in the racing app. Use the owner console
-                            for competitions and festivals.
+                            Open any racing festival as Owner. Day-to-day tools also live in the
+                            racing app.
                           </Text>
                           <Pressable
                             style={[styles.adminCatChip, styles.adminCatChipActive]}
                             onPress={() => openOwnerPanel('competitions')}
                           >
                             <Text style={[styles.adminCatChipText, styles.adminCatChipTextActive]}>
-                              Open competitions
+                              Full owner console
                             </Text>
                           </Pressable>
+                          {ownerCompsLoading ? (
+                            <ActivityIndicator
+                              size="small"
+                              color={adminAccent}
+                              style={{ marginTop: 8 }}
+                            />
+                          ) : (
+                            <View style={{ gap: 8, marginTop: 8 }}>
+                              {ownerComps
+                                .filter((c) => c.sport === 'racing')
+                                .map((c) => (
+                                  <Pressable
+                                    key={`${c.sport}-${c.id}`}
+                                    style={styles.adminUserRow}
+                                    onPress={() =>
+                                      router.push(`/(app)/competition/${c.id}` as any)
+                                    }
+                                  >
+                                    <View style={{ flex: 1, minWidth: 0 }}>
+                                      <Text style={styles.adminUserName} numberOfLines={1}>
+                                        {c.name}
+                                      </Text>
+                                      <Text style={styles.gameModesHint} numberOfLines={1}>
+                                        Racing · {c.join_code?.trim() || 'no code'} · {c.status}
+                                      </Text>
+                                    </View>
+                                    <Text style={styles.adminCatChipTextActive}>Manage</Text>
+                                  </Pressable>
+                                ))}
+                              {ownerComps.filter((c) => c.sport === 'racing').length === 0 ? (
+                                <Text style={styles.gameModesHint}>No racing competitions yet.</Text>
+                              ) : null}
+                            </View>
+                          )}
                         </View>
                       ) : null}
 

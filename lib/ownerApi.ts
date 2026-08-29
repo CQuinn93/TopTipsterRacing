@@ -12,7 +12,7 @@ export type OwnerUserRow = {
 };
 
 export type OwnerCompetitionRow = {
-  sport: 'racing' | 'lms';
+  sport: 'racing' | 'lms' | 'f2t';
   id: string;
   name: string;
   status: string;

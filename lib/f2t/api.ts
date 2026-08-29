@@ -211,6 +211,18 @@ export async function f2tCreateCompetition(
   };
 }
 
+export async function f2tAdminDeleteCompetition(competitionId: string) {
+  const { data, error } = await db.rpc('f2t_admin_delete_competition', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  return (data ?? { success: false }) as {
+    success: boolean;
+    error?: string;
+    name?: string;
+  };
+}
+
 export async function f2tApproveJoin(requestId: string) {
   const { data, error } = await db.rpc('f2t_admin_approve_join', {
     p_code: '',
