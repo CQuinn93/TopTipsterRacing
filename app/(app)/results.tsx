@@ -15,6 +15,7 @@ import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
 import { lightTheme } from '@/constants/theme';
 import { displayHorseName } from '@/lib/displayHorseName';
+import { displayRacingCourseName } from '@/lib/racingCourses';
 import { decimalToFractional } from '@/lib/oddsFormat';
 import { POSITION_POINTS } from '@/lib/appUtils';
 import { isSelectionClosed } from '@/lib/appUtils';
@@ -157,7 +158,7 @@ export default function ResultsScreen() {
     if (!selectedDate) return [];
     return meetingResults
       .map((m) => ({
-        course: m.course,
+        course: displayRacingCourseName(m.course) || m.course,
         races: m.races
           .filter((r) => r.raceTimeUtc.slice(0, 10) === selectedDate)
           .sort((a, b) => a.raceTimeUtc.localeCompare(b.raceTimeUtc)),

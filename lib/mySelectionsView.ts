@@ -6,6 +6,7 @@
 import type { Race, RaceResult } from '@/types/races';
 import { fetchRaceDaysForCompetition } from './raceDaysForCompetition';
 import type { SelectionsBulkData } from './selectionsBulkCache';
+import { displayRacingCourseName } from './racingCourses';
 
 export type MySelectionItem = {
   meeting: string;
@@ -73,7 +74,7 @@ export async function fetchMySelectionsView(
     for (const day of days) {
       const selections = selectionByCompDate.get(`${compId}:${day.race_date}`) ?? {};
       const deadlinePassed = isDeadlinePassed(day.first_race_utc, day.race_date);
-      const course = day.course ?? 'Meeting';
+      const course = displayRacingCourseName(day.course) || 'Meeting';
       const races = day.races ?? [];
 
       for (const race of races) {
@@ -135,7 +136,7 @@ export function computeMySelectionsFromBulk(
       );
       const selections = userRow?.selections ?? {};
       const deadlinePassed = isDeadlinePassed(day.first_race_utc, day.race_date);
-      const course = day.course ?? 'Meeting';
+      const course = displayRacingCourseName(day.course) || 'Meeting';
       const races = day.races ?? [];
 
       for (const race of races) {

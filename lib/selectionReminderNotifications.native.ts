@@ -6,6 +6,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
 import { fetchAvailableRacesForUser } from '@/lib/availableRacesForUser';
+import { displayRacingCourseName } from '@/lib/racingCourses';
 
 const CHANNEL_ID = 'selection-reminders';
 const ID_PREFIX = 'selection-close-';
@@ -58,7 +59,7 @@ export async function scheduleSelectionReminders(availableRaces: AvailableRaceDa
     const triggerDate = new Date(deadlineMs);
     const id = notificationId(day);
     const title = 'Selections closing soon';
-    const body = `${day.competitionName} – make your picks in the next hour (${day.course}).`;
+    const body = `${day.competitionName} – make your picks in the next hour (${displayRacingCourseName(day.course)}).`;
 
     try {
       await Notifications.scheduleNotificationAsync({

@@ -25,6 +25,7 @@ import {
 import { getSelectionsBulk, clearSelectionsBulkCache, type SelectionsBulkData } from '@/lib/selectionsBulkCache';
 import { useTheme } from '@/contexts/ThemeContext';
 import { displayHorseName } from '@/lib/displayHorseName';
+import { displayRacingCourseName } from '@/lib/racingCourses';
 import type { Race } from '@/types/races';
 import { formatDayDate, isSelectionClosed, isCompletedMoreThanOneDay, formatTimeUntilDeadline, getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { getAvailableRacesForUser } from '@/lib/availableRacesCache';
@@ -1315,7 +1316,7 @@ export default function SelectionsScreen() {
                             <View style={styles.raceCardLeft}>
                               <Text style={styles.raceCardTitle} numberOfLines={1}>{item.competitionName}</Text>
                               <Text style={styles.raceCardMeta}>
-                                {item.course} · {new Date(item.raceDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+                                {displayRacingCourseName(item.course)} · {new Date(item.raceDate).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
                               </Text>
                               {closed ? (
                                 <Text style={styles.raceCardStatusClosed}>Closed – view only</Text>

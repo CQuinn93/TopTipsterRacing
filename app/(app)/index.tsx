@@ -34,6 +34,7 @@ import { racingCreateCompetition } from '@/lib/racingAdminApi';
 import { getProfileRole, isStaffRole } from '@/lib/adminSession';
 import {
   coursesForRegion,
+  displayRacingCourseName,
   festivalEndDateFromStart,
   type RacingCourseRegion,
 } from '@/lib/racingCourses';
@@ -1040,7 +1041,7 @@ export default function HomeScreen() {
                 <View style={styles.cardRow}>
                   <View style={styles.cardSide}>
                     <Text style={styles.cardCourse} numberOfLines={2}>
-                      {activeRace.course}
+                      {displayRacingCourseName(activeRace.course)}
                     </Text>
                     <Text style={styles.cardComp} numberOfLines={1}>
                       {activeRace.competitionName}
@@ -1630,7 +1631,7 @@ export default function HomeScreen() {
                     <View style={styles.rowCopy}>
                       <View style={styles.rowTitleRow}>
                         <Text style={styles.rowTitle} numberOfLines={1}>
-                          {day.course}
+                          {displayRacingCourseName(day.course)}
                         </Text>
                         {dayNum != null ? (
                           <View style={styles.manageChip}>

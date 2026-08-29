@@ -47,7 +47,7 @@ export const ENGLAND_COURSES = [
   'Fakenham',
   'Fontwell Park',
   'Goodwood',
-  'Great Yarmouth',
+  'Yarmouth',
   'Haydock Park',
   'Hereford',
   'Hexham',
@@ -86,6 +86,22 @@ export const ENGLAND_COURSES = [
 export const RACING_COURSES = [...IRISH_COURSES, ...ENGLAND_COURSES];
 
 export type RacingCourseRegion = 'all' | 'ireland' | 'england';
+
+/** Canonical display / catalog name for a racecourse (API aliases → app name). */
+export function displayRacingCourseName(course: string | null | undefined): string {
+  const raw = (course ?? '').trim();
+  if (!raw) return '';
+  if (/^great\s+yarmouth$/i.test(raw)) return 'Yarmouth';
+  return raw;
+}
+
+/** True when API/DB course names refer to the same meeting venue. */
+export function racingCoursesMatch(a: string, b: string): boolean {
+  const left = displayRacingCourseName(a).toLowerCase();
+  const right = displayRacingCourseName(b).toLowerCase();
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+}
 
 export function coursesForRegion(region: RacingCourseRegion): string[] {
   if (region === 'ireland') return IRISH_COURSES;

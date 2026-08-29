@@ -4,6 +4,7 @@
  */
 import type { Race, RaceResult } from '@/types/races';
 import { fetchRaceDaysForCompetition } from './raceDaysForCompetition';
+import { displayRacingCourseName } from './racingCourses';
 
 export type RaceResultItem = {
   course: string;
@@ -39,7 +40,7 @@ export async function fetchRaceResultsForUser(
     const days = await fetchRaceDaysForCompetition(supabase, compId, 'id, race_date, course, races');
     for (const d of days as RaceDayRow[]) {
       const races = d.races ?? [];
-      const course = d.course ?? 'Meeting';
+      const course = displayRacingCourseName(d.course) || 'Meeting';
       for (const race of races) {
         const winnerName = getWinnerName(race);
         if (!winnerName) continue;

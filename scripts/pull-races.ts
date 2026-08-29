@@ -19,6 +19,7 @@
 
 import 'dotenv/config';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { displayRacingCourseName, racingCoursesMatch } from '../lib/racingCourses';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
@@ -93,7 +94,7 @@ async function fetchRaceDetail(idRace: string): Promise<RaceDetailResponse> {
 }
 
 function courseMatches(apiCourse: string, filter: string): boolean {
-  return apiCourse?.toLowerCase().includes(filter.toLowerCase().trim()) ?? false;
+  return racingCoursesMatch(apiCourse ?? '', filter);
 }
 
 function delay(ms: number): Promise<void> {
@@ -285,7 +286,10 @@ async function main() {
   const allFiltered: { course: string; card: RacecardItem }[] = [];
   for (const course of coursesToFetch) {
     for (const card of racecards) {
-      if (courseMatches(card.course, course)) allFiltered.push({ course: card.course, card });
+      if (courseMatches(card.course, course)) {
+        // Store catalog/competition course name (e.g. Yarmouth) not API alias (Great Yarmouth).
+        allFiltered.push({ course: displayRacingCourseName(course) || course, card });
+      }
     }
   }
 

@@ -4,6 +4,7 @@
  */
 import type { Race } from '@/types/races';
 import { fetchRaceDaysForCompetition } from './raceDaysForCompetition';
+import { displayRacingCourseName } from './racingCourses';
 
 export type AvailableRaceDay = {
   competitionId: string;
@@ -98,7 +99,7 @@ export async function fetchAvailableRacesForUser(
     result.push({
       competitionId: compId,
       competitionName: compName,
-      course: day.course ?? 'Races',
+      course: displayRacingCourseName(day.course) || 'Races',
       raceDate: day.race_date,
       raceDayId: day.id,
       pendingCount,

@@ -5,6 +5,7 @@
  */
 import type { Race, RaceResult } from '@/types/races';
 import { fetchRaceDaysForCompetition } from './raceDaysForCompetition';
+import { displayRacingCourseName } from './racingCourses';
 
 export type ResultRow = {
   /** Numeric position 1,2,3... or null for resultCode (f/u/pu). */
@@ -113,7 +114,7 @@ export async function fetchResultsTemplateForUser(
       const key = `${compId}:${d.race_date}`;
       const userSelections = selectionsByCompDate.get(key) ?? {};
       const races = d.races ?? [];
-      const course = d.course ?? 'Meeting';
+      const course = displayRacingCourseName(d.course) || 'Meeting';
 
       for (const race of races) {
         const userSelection = userSelections[race.id] ?? '';
