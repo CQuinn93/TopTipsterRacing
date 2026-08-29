@@ -63,7 +63,7 @@ function formatStat(value: number | null, decimals = 0): string {
 function formTone(form: number | null): { fg: string; bg: string } | null {
   if (form == null) return null;
   if (form < 3) return { fg: '#ef4444', bg: 'rgba(239, 68, 68, 0.18)' };
-  if (form < 5) return { fg: '#f97316', bg: 'rgba(249, 115, 22, 0.18)' };
+  if (form < 7) return { fg: '#f97316', bg: 'rgba(249, 115, 22, 0.18)' };
   return { fg: '#15803d', bg: 'rgba(21, 128, 61, 0.2)' };
 }
 
@@ -557,6 +557,7 @@ export function F2tPlayerPicker({
                 Boolean(availability.news) ||
                 (availability.statusCode !== 'a' && availability.statusCode !== '');
               const newsColor = fplStatusAccentColor(availability.statusCode);
+              const formColors = formTone(form);
 
               return (
                 <Pressable
@@ -570,7 +571,7 @@ export function F2tPlayerPicker({
                     shortName={p.team_short_name}
                     name={p.team_name}
                     slug={p.team_slug}
-                    size={40}
+                    size={36}
                   />
                   <View style={styles.cardMain}>
                     <View style={styles.nameRow}>
@@ -614,28 +615,23 @@ export function F2tPlayerPicker({
                       <Text style={styles.statLabel}>Assists</Text>
                     </View>
                     <View style={styles.statCell}>
-                      {(() => {
-                        const tone = formTone(form);
-                        return (
-                          <View
-                            style={[
-                              styles.formBadge,
-                              tone
-                                ? { backgroundColor: tone.bg }
-                                : { backgroundColor: theme.colors.background },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.formBadgeText,
-                                { color: tone?.fg ?? theme.colors.text },
-                              ]}
-                            >
-                              {formatStat(form, 1)}
-                            </Text>
-                          </View>
-                        );
-                      })()}
+                      <View
+                        style={[
+                          styles.formBadge,
+                          {
+                            backgroundColor: formColors?.bg ?? theme.colors.background,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.formBadgeText,
+                            { color: formColors?.fg ?? theme.colors.text },
+                          ]}
+                        >
+                          {formatStat(form, 1)}
+                        </Text>
+                      </View>
                       <Text style={styles.statLabel}>Form</Text>
                     </View>
                     <View style={styles.statCell}>
