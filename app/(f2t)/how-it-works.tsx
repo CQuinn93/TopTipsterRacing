@@ -73,7 +73,11 @@ export default function F2tHowItWorksScreen() {
           Use stats and news hints in the picker. Lock in your squad before the start gameweek
           deadline.
         </Text>
-        <Text style={styles.step}>3. Track progress</Text>
+        <Text style={styles.step}>3. Team management</Text>
+        <Text style={styles.rule}>
+          Track scored players and upcoming fixtures on your squad cards. Use substitutions from
+          Team Management when a pick is flagged or your regular sub unlocks.
+        </Text>
         <Text style={styles.body}>
           Goals sync after Premier League matches. Your grid updates as players score.
         </Text>

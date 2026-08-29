@@ -31,7 +31,7 @@ import {
   f2tSessionSetPlayers,
 } from '@/lib/f2t/sessionCache';
 
-type TabKey = 'progress' | 'picker' | 'leaderboard' | 'admin';
+type TabKey = 'team' | 'leaderboard' | 'admin';
 
 export default function F2tCompetitionScreen() {
   const theme = useTheme();
@@ -42,7 +42,7 @@ export default function F2tCompetitionScreen() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [tab, setTab] = useState<TabKey>('progress');
+  const [tab, setTab] = useState<TabKey>('team');
   const [name, setName] = useState('');
   const [status, setStatus] = useState('');
   const [startGw, setStartGw] = useState<number | null>(null);
@@ -298,39 +298,6 @@ export default function F2tCompetitionScreen() {
           fontSize: 14,
           color: theme.colors.accent,
         },
-        adminCard: {
-          backgroundColor: theme.colors.surface,
-          borderRadius: theme.radius.md,
-          borderWidth: StyleSheet.hairlineWidth,
-          borderColor: theme.colors.border,
-          padding: theme.spacing.md,
-          gap: 8,
-        },
-        adminActions: { flexDirection: 'row', gap: 8 },
-        adminBtn: {
-          paddingVertical: 8,
-          paddingHorizontal: 12,
-          borderRadius: theme.radius.sm,
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-        },
-        adminBtnApprove: {
-          borderColor: theme.colors.accent,
-          backgroundColor: theme.colors.accentMuted,
-        },
-        subBtn: {
-          alignSelf: 'flex-start',
-          paddingVertical: 4,
-          paddingHorizontal: 8,
-          borderRadius: theme.radius.sm,
-          borderWidth: 1,
-          borderColor: theme.colors.accent,
-        },
-        subBtnText: {
-          fontFamily: theme.fontFamily.baiMedium,
-          fontSize: 11,
-          color: theme.colors.accent,
-        },
       }),
     [theme, insets]
   );
@@ -366,7 +333,7 @@ export default function F2tCompetitionScreen() {
       </View>
 
       <View style={styles.tabs}>
-        {(['progress', 'picker', 'leaderboard', ...(canHandleJoins ? ['admin'] : [])] as TabKey[]).map(
+        {(['team', 'leaderboard', ...(canHandleJoins ? ['admin'] : [])] as TabKey[]).map(
           (key) => (
             <Pressable
               key={key}
@@ -374,13 +341,11 @@ export default function F2tCompetitionScreen() {
               onPress={() => setTab(key)}
             >
               <Text style={[styles.tabText, tab === key && styles.tabTextActive]}>
-                {key === 'progress'
-                  ? 'Progress'
-                  : key === 'picker'
-                    ? 'Pick'
-                    : key === 'leaderboard'
-                      ? 'Standings'
-                      : 'Admin'}
+                {key === 'team'
+                  ? 'Team Management'
+                  : key === 'leaderboard'
+                    ? 'Standings'
+                    : 'Admin'}
               </Text>
             </Pressable>
           )
@@ -403,20 +368,7 @@ export default function F2tCompetitionScreen() {
             />
           }
         >
-          {tab === 'progress' ? (
-            <>
-              <PlayerProgressGrid selections={selections} scoredCount={scoredCount} />
-              {selections.some(
-                (s) => s.owner_flagged && !s.scored_at
-              ) ? (
-                <Text style={styles.subtitle}>
-                  Flagged players can be replaced with a free substitution.
-                </Text>
-              ) : null}
-            </>
-          ) : null}
-
-          {tab === 'picker' ? (
+          {tab === 'team' ? (
             <>
               {canPick ? (
                 <Pressable style={styles.primaryBtn} onPress={openPicker}>
@@ -427,7 +379,9 @@ export default function F2tCompetitionScreen() {
               ) : (
                 <Text style={styles.subtitle}>
                   {selectionCount >= 20
-                    ? 'Your 20 players are locked in.'
+                    ? deadlineAt && Date.now() >= new Date(deadlineAt).getTime()
+                      ? 'Selections locked — manage substitutions below when eligible.'
+                      : 'Your 20 players are locked in.'
                     : deadlineAt && Date.now() >= new Date(deadlineAt).getTime()
                       ? 'Selections are closed for this league.'
                       : 'Selections are not available for this league.'}
@@ -438,19 +392,23 @@ export default function F2tCompetitionScreen() {
                   {selectionCount}/20 selected — choose {20 - selectionCount} more to submit.
                 </Text>
               ) : null}
-              {selections
-                .filter((s) => !s.scored_at && (s.owner_flagged || canRegularSub))
-                .map((s) => (
-                  <View key={s.slot} style={styles.adminCard}>
-                    <Text style={styles.lbName}>{s.display_name}</Text>
-                    <Text style={styles.subtitle}>
-                      {s.owner_flagged ? 'Flagged — free sub' : 'Regular sub available'}
-                    </Text>
-                    <Pressable style={styles.subBtn} onPress={() => openSubPicker(s.player_id)}>
-                      <Text style={styles.subBtnText}>Substitute</Text>
-                    </Pressable>
-                  </View>
-                ))}
+              {canRegularSub ? (
+                <Text style={styles.subtitle}>
+                  Regular substitution available (one unused player swap after 3 completed
+                  gameweeks).
+                </Text>
+              ) : null}
+              {selections.some((s) => s.owner_flagged && !s.scored_at) ? (
+                <Text style={styles.subtitle}>
+                  Flagged players can be replaced with a free substitution from their card.
+                </Text>
+              ) : null}
+              <PlayerProgressGrid
+                selections={selections}
+                scoredCount={scoredCount}
+                canRegularSub={canRegularSub}
+                onSubstitute={openSubPicker}
+              />
             </>
           ) : null}
 
