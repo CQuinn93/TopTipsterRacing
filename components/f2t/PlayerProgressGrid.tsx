@@ -95,7 +95,15 @@ export function PlayerProgressGrid({
           color: theme.colors.accent,
           textTransform: 'uppercase',
         },
+        nameRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+        },
         name: {
+          flex: 1,
+          minWidth: 0,
           fontFamily: theme.fontFamily.baiBold,
           fontSize: 15,
           color: theme.colors.text,
@@ -143,8 +151,7 @@ export function PlayerProgressGrid({
           gap: 6,
         },
         subBtn: {
-          alignSelf: 'flex-start',
-          marginTop: 4,
+          flexShrink: 0,
           paddingVertical: 4,
           paddingHorizontal: 8,
           borderRadius: theme.radius.sm,
@@ -209,9 +216,22 @@ export function PlayerProgressGrid({
                     </Text>
                   ) : null}
                 </View>
-                <Text style={styles.name} numberOfLines={1}>
-                  {row.display_name}
-                </Text>
+                <View style={styles.nameRow}>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {row.display_name}
+                  </Text>
+                  {canSub ? (
+                    <Pressable
+                      style={styles.subBtn}
+                      onPress={() => onSubstitute?.(row.player_id)}
+                      hitSlop={6}
+                    >
+                      <Text style={styles.subBtnText}>
+                        {row.owner_flagged ? 'Free substitute' : 'Substitute'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
                 <View style={styles.chipRow}>
                   <TeamColourChip
                     shortName={row.team_short_name}
@@ -223,16 +243,6 @@ export function PlayerProgressGrid({
                 </View>
                 {row.owner_flagged && !scoredSlot ? (
                   <Text style={styles.flagged}>Flagged — free sub</Text>
-                ) : null}
-                {canSub ? (
-                  <Pressable
-                    style={styles.subBtn}
-                    onPress={() => onSubstitute?.(row.player_id)}
-                  >
-                    <Text style={styles.subBtnText}>
-                      {row.owner_flagged ? 'Free substitute' : 'Substitute'}
-                    </Text>
-                  </Pressable>
                 ) : null}
               </View>
               <View style={styles.side}>

@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
-import type { F2tSelectablePlayer } from '@/lib/f2t/api';
+import type { F2tSelectablePlayer, F2tSelectionRow } from '@/lib/f2t/api';
 import {
   formatFplAvailability,
   fplStatusAccentColor,
@@ -91,6 +91,8 @@ type Props = {
   selectedIds: string[];
   submitting?: boolean;
   subMode?: boolean;
+  /** Player being substituted out — shown at top of the picker in sub mode. */
+  outPlayer?: F2tSelectionRow | null;
   onClose: () => void;
   onToggle: (playerId: string) => void;
   onSubmit: () => void;
@@ -104,6 +106,7 @@ export function F2tPlayerPicker({
   selectedIds,
   submitting,
   subMode,
+  outPlayer,
   onClose,
   onToggle,
   onSubmit,
@@ -201,6 +204,63 @@ export function F2tPlayerPicker({
           fontSize: 18,
           color: theme.colors.text,
         },
+        outWrap: {
+          paddingHorizontal: theme.spacing.lg,
+          paddingTop: theme.spacing.md,
+          paddingBottom: theme.spacing.sm,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
+          gap: theme.spacing.sm,
+        },
+        outLabel: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 11,
+          letterSpacing: 0.3,
+          textTransform: 'uppercase',
+          color: theme.colors.textMuted,
+        },
+        outCard: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.spacing.md,
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          padding: theme.spacing.md,
+        },
+        outMain: {
+          flex: 1,
+          minWidth: 0,
+          gap: 4,
+        },
+        outName: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 16,
+          color: theme.colors.text,
+        },
+        outTeamRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 6,
+        },
+        outTeam: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+        },
+        outBadge: {
+          flexShrink: 0,
+          paddingVertical: 4,
+          paddingHorizontal: 8,
+          borderRadius: theme.radius.sm,
+          backgroundColor: 'rgba(239, 68, 68, 0.15)',
+        },
+        outBadgeText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 11,
+          color: '#ef4444',
+        },
         controls: {
           paddingHorizontal: theme.spacing.lg,
           paddingTop: theme.spacing.md,
@@ -288,19 +348,22 @@ export function F2tPlayerPicker({
           gap: 10,
         },
         card: {
+          borderRadius: theme.radius.md,
+          borderWidth: 1.5,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+          overflow: 'hidden',
+        },
+        cardSelected: {
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+        },
+        cardPress: {
           flexDirection: 'row',
           alignItems: 'center',
           gap: theme.spacing.sm,
           paddingVertical: 10,
           paddingHorizontal: theme.spacing.md,
-          borderRadius: theme.radius.md,
-          borderWidth: 1.5,
-          borderColor: theme.colors.border,
-          backgroundColor: theme.colors.surface,
-        },
-        cardSelected: {
-          borderColor: theme.colors.accent,
-          backgroundColor: theme.colors.accentMuted,
         },
         cardMain: {
           flex: 1,
@@ -482,6 +545,31 @@ export function F2tPlayerPicker({
           </Text>
         </View>
 
+        {subMode && outPlayer ? (
+          <View style={styles.outWrap}>
+            <Text style={styles.outLabel}>Substituting out</Text>
+            <View style={styles.outCard}>
+              <View style={styles.outMain}>
+                <Text style={styles.outName} numberOfLines={1}>
+                  {outPlayer.display_name}
+                </Text>
+                <View style={styles.outTeamRow}>
+                  <TeamColourChip
+                    shortName={outPlayer.team_short_name}
+                    name={outPlayer.team_name}
+                    slug={outPlayer.team_slug}
+                    size={22}
+                  />
+                  <Text style={styles.outTeam}>{outPlayer.team_short_name}</Text>
+                </View>
+              </View>
+              <View style={styles.outBadge}>
+                <Text style={styles.outBadgeText}>Out</Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
         <View style={styles.controls}>
           <TextInput
             style={styles.search}
@@ -560,91 +648,99 @@ export function F2tPlayerPicker({
               const formColors = formTone(form);
 
               return (
-                <Pressable
-                  style={[styles.card, selected && styles.cardSelected]}
-                  onPress={() => {
-                    setOpenDropdown(null);
-                    onToggle(p.id);
-                  }}
-                >
-                  <TeamColourChip
-                    shortName={p.team_short_name}
-                    name={p.team_name}
-                    slug={p.team_slug}
-                    size={36}
-                  />
-                  <View style={styles.cardMain}>
-                    <View style={styles.nameRow}>
-                      <Text style={styles.name} numberOfLines={1}>
-                        {p.display_name}
+                <View style={[styles.card, selected && styles.cardSelected]}>
+                  <Pressable
+                    style={styles.cardPress}
+                    onPress={() => {
+                      setOpenDropdown(null);
+                      onToggle(p.id);
+                    }}
+                  >
+                    <TeamColourChip
+                      shortName={p.team_short_name}
+                      name={p.team_name}
+                      slug={p.team_slug}
+                      size={36}
+                    />
+                    <View style={styles.cardMain}>
+                      <View style={styles.nameRow}>
+                        <Text style={styles.name} numberOfLines={1}>
+                          {p.display_name}
+                        </Text>
+                        {showNewsIcon ? (
+                          <Pressable
+                            hitSlop={10}
+                            onPress={(e) => {
+                              e?.stopPropagation?.();
+                              const body = [availability.chanceSummary, availability.news]
+                                .filter(Boolean)
+                                .join('\n\n');
+                              const title = availability.statusLabel || 'Player update';
+                              const message = body || availability.statusLabel || 'No further details.';
+                              if (Platform.OS === 'web') {
+                                window.alert(`${title}\n\n${message}`);
+                              } else {
+                                Alert.alert(title, message);
+                              }
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel={
+                              availability.news || availability.statusLabel || 'Player availability'
+                            }
+                          >
+                            <Ionicons
+                              name="information-circle"
+                              size={20}
+                              color={newsColor}
+                            />
+                          </Pressable>
+                        ) : null}
+                      </View>
+                      <Text style={styles.meta} numberOfLines={1}>
+                        {[p.position, p.team_short_name].filter(Boolean).join(' · ')}
                       </Text>
-                      {showNewsIcon ? (
-                        <Pressable
-                          hitSlop={8}
-                          onPress={() => {
-                            const body = [availability.chanceSummary, availability.news]
-                              .filter(Boolean)
-                              .join('\n\n');
-                            Alert.alert(
-                              availability.statusLabel,
-                              body || availability.statusLabel
-                            );
-                          }}
-                          accessibilityRole="button"
-                          accessibilityLabel={availability.news || availability.statusLabel}
-                        >
-                          <Ionicons
-                            name="information-circle"
-                            size={18}
-                            color={newsColor}
-                          />
-                        </Pressable>
-                      ) : null}
                     </View>
-                    <Text style={styles.meta} numberOfLines={1}>
-                      {[p.position, p.team_short_name].filter(Boolean).join(' · ')}
-                    </Text>
-                  </View>
-                  <View style={styles.statsRow}>
-                    <View style={styles.statCell}>
-                      <Text style={styles.statValue}>{formatStat(goals)}</Text>
-                      <Text style={styles.statLabel}>Goals</Text>
-                    </View>
-                    <View style={styles.statCell}>
-                      <Text style={styles.statValue}>{formatStat(assists)}</Text>
-                      <Text style={styles.statLabel}>Assists</Text>
-                    </View>
-                    <View style={styles.statCell}>
-                      <View
-                        style={[
-                          styles.formBadge,
-                          {
-                            backgroundColor: formColors?.bg ?? theme.colors.background,
-                          },
-                        ]}
-                      >
-                        <Text
+                    <View style={styles.statsRow}>
+                      <View style={styles.statCell}>
+                        <Text style={styles.statValue}>{formatStat(goals)}</Text>
+                        <Text style={styles.statLabel}>Goals</Text>
+                      </View>
+                      <View style={styles.statCell}>
+                        <Text style={styles.statValue}>{formatStat(assists)}</Text>
+                        <Text style={styles.statLabel}>Assists</Text>
+                      </View>
+                      <View style={styles.statCell}>
+                        <View
                           style={[
-                            styles.formBadgeText,
-                            { color: formColors?.fg ?? theme.colors.text },
+                            styles.formBadge,
+                            {
+                              backgroundColor: formColors?.bg ?? theme.colors.background,
+                            },
                           ]}
                         >
-                          {formatStat(form, 1)}
-                        </Text>
+                          <Text
+                            style={[
+                              styles.formBadgeText,
+                              { color: formColors?.fg ?? theme.colors.text },
+                            ]}
+                          >
+                            {formatStat(form, 1)}
+                          </Text>
+                        </View>
+                        <Text style={styles.statLabel}>Form</Text>
                       </View>
-                      <Text style={styles.statLabel}>Form</Text>
+                      <View style={styles.statCell}>
+                        <Text style={styles.statValue}>{formatStat(xg, 1)}</Text>
+                        <Text style={styles.statLabel}>xG</Text>
+                      </View>
                     </View>
-                    <View style={styles.statCell}>
-                      <Text style={styles.statValue}>{formatStat(xg, 1)}</Text>
-                      <Text style={styles.statLabel}>xG</Text>
+                    <View style={styles.checkSlot}>
+                      {selected ? (
+                        <Ionicons name="checkmark-circle" size={22} color={theme.colors.accent} />
+                      ) : null}
                     </View>
-                  </View>
-                  <View style={styles.checkSlot}>
-                    {selected ? (
-                      <Ionicons name="checkmark-circle" size={22} color={theme.colors.accent} />
-                    ) : null}
-                  </View>
-                </Pressable>
+                  </Pressable>
+                </View>
               );
             }}
           />

@@ -238,7 +238,7 @@ export default function F2tCompetitionScreen() {
 
   const statusLabel = (s: string | null) => {
     if (!s) return 'Observing';
-    if (s === 'active') return 'Still standing';
+    if (s === 'active') return 'In play';
     if (s === 'winner') return 'Champion';
     if (s === 'eliminated') return 'Eliminated';
     return s;
@@ -529,7 +529,7 @@ export default function F2tCompetitionScreen() {
             <Text style={styles.survivalStatValue}>
               {playersRemaining != null ? playersRemaining : '—'}
             </Text>
-            <Text style={styles.survivalStatLabel}>Players remaining</Text>
+            <Text style={styles.survivalStatLabel}>Remaining Goalscorers</Text>
           </View>
         </View>
       ) : null}
@@ -702,6 +702,11 @@ export default function F2tCompetitionScreen() {
         selectedIds={pickedIds}
         submitting={submitting}
         subMode={subMode}
+        outPlayer={
+          subMode && subOutId
+            ? selections.find((s) => s.player_id === subOutId) ?? null
+            : null
+        }
         onClose={() => setPickerOpen(false)}
         onToggle={togglePick}
         onSubmit={() => void submitPicks()}
