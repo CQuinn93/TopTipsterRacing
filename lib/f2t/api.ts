@@ -40,6 +40,15 @@ export type F2tSelectablePlayer = {
   already_scored_for_comp: boolean;
 };
 
+export type F2tNextMatch = {
+  kickoff_at: string;
+  is_home: boolean;
+  opponent_short_name: string;
+  opponent_name: string;
+  opponent_slug: string;
+  gameweek_number: number | null;
+};
+
 export type F2tSelectionRow = {
   slot: number;
   player_id: string;
@@ -50,7 +59,9 @@ export type F2tSelectionRow = {
   team_slug: string;
   scored_at: string | null;
   scored_gameweek_id: string | null;
+  scored_gameweek_number: number | null;
   owner_flagged: boolean;
+  next_match: F2tNextMatch | null;
 };
 
 export function f2tJoinErrorMessage(code?: string): string {
