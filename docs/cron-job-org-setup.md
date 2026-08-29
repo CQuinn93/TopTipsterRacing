@@ -239,7 +239,13 @@ GitHub sometimes returns 404 when the URL uses the workflow **filename**. Use th
 
 ## 4. First2Twenty (F2T) cron jobs
 
-F2T goal sync is **chained inside the existing LMS football workflow** (`sync-lms-football.yml`) — no new cron jobs needed for goals if LMS jobs already run.
+### Goalscorers (FPL live) — already on LMS football cron
+
+F2T **goal check-offs** come from the **FPL** `event/{gw}/live` endpoint via `scripts/sync-football-goals.ts`.
+
+That script is **already chained** in `sync-lms-football.yml` (runs right after the LMS football-data sync). If your existing LMS matchday cron jobs call that workflow, you do **not** need a separate goals cron.
+
+### Daily picker stats (FPL bootstrap)
 
 Add **two** new jobs for player roster and daily picker stats:
 
