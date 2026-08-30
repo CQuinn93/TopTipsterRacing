@@ -72,22 +72,13 @@ type DesiredRow = {
   is_active: boolean;
   picker_stats: PickerStats;
   fpl_element_id: number;
-  owner_flagged?: boolean;
-  owner_flagged_at?: string;
+  owner_flagged: boolean;
+  owner_flagged_at?: string | null;
   owner_flagged_by?: null;
 };
 
 function stableJson(value: unknown): string {
   return JSON.stringify(value);
-}
-
-function autoExcludePatch(status: string): Partial<DesiredRow> {
-  if (status !== 'u') return {};
-  return {
-    owner_flagged: true,
-    owner_flagged_at: new Date().toISOString(),
-    owner_flagged_by: null,
-  };
 }
 
 function buildPickerStats(el: FplElement): PickerStats {
@@ -110,10 +101,12 @@ function buildPickerStats(el: FplElement): PickerStats {
   };
 }
 
-function buildDesired(el: FplElement, teamId: string): DesiredRow {
+function buildDesired(el: FplElement, teamId: string, existing?: DbPlayer | null): DesiredRow {
   const display = el.web_name?.trim() || `${el.first_name} ${el.second_name}`.trim();
   const fullName = `${el.first_name} ${el.second_name}`.trim();
-  return {
+  const unavailable = el.status === 'u';
+  const ownerFlagged = existing?.owner_flagged === true || unavailable;
+  const row: DesiredRow = {
     team_id: teamId,
     display_name: display,
     full_name: fullName,
@@ -121,12 +114,21 @@ function buildDesired(el: FplElement, teamId: string): DesiredRow {
     is_active: !el.removed,
     picker_stats: buildPickerStats(el),
     fpl_element_id: el.id,
-    ...autoExcludePatch(el.status),
+    owner_flagged: ownerFlagged,
   };
+  if (unavailable && existing?.owner_flagged !== true) {
+    row.owner_flagged_at = new Date().toISOString();
+    row.owner_flagged_by = null;
+  }
+  return row;
 }
 
 function nameKey(teamId: string, displayName: string): string {
   return `${teamId}::${displayName.trim().toLowerCase()}`;
+}
+
+function displayNameForMatch(el: FplElement): string {
+  return el.web_name?.trim() || `${el.first_name} ${el.second_name}`.trim();
 }
 
 function rowNeedsUpdate(existing: DbPlayer, desired: DesiredRow): boolean {
@@ -137,7 +139,7 @@ function rowNeedsUpdate(existing: DbPlayer, desired: DesiredRow): boolean {
   if (existing.is_active !== desired.is_active) return true;
   if (existing.fpl_element_id !== desired.fpl_element_id) return true;
   if (stableJson(existing.picker_stats) !== stableJson(desired.picker_stats)) return true;
-  if (desired.owner_flagged === true && !existing.owner_flagged) return true;
+  if (desired.owner_flagged !== existing.owner_flagged) return true;
   return false;
 }
 
@@ -202,11 +204,10 @@ async function main() {
     const teamId = fplTeamToLms.get(el.team);
     if (!teamId) continue;
 
-    const desired = buildDesired(el, teamId);
-    if (el.status === 'u') unavailableInFpl += 1;
-
     const existing =
-      byFplId.get(el.id) ?? byName.get(nameKey(teamId, desired.display_name));
+      byFplId.get(el.id) ?? byName.get(nameKey(teamId, displayNameForMatch(el)));
+    const desired = buildDesired(el, teamId, existing);
+    if (el.status === 'u') unavailableInFpl += 1;
 
     if (!existing) {
       toInsert.push(desired);
