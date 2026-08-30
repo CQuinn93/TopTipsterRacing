@@ -150,7 +150,7 @@ export function AppSidebar() {
               <>
                 <TouchableOpacity
                   style={styles.menuButton}
-                  onPress={() => goTo('/(lms)?tab=table')}
+                  onPress={() => goTo('/(f2t)?tab=table')}
                   activeOpacity={0.7}
                 >
                   <Ionicons name="stats-chart-outline" size={22} color={theme.colors.accent} />

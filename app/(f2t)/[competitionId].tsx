@@ -177,11 +177,15 @@ export default function F2tCompetitionScreen() {
       setPickedIds([playerId]);
       return;
     }
-    setPickedIds((prev) => {
-      if (prev.includes(playerId)) return prev.filter((id) => id !== playerId);
-      if (prev.length >= 20) return prev;
-      return [...prev, playerId];
-    });
+    if (pickedIds.includes(playerId)) {
+      setPickedIds((prev) => prev.filter((id) => id !== playerId));
+      return;
+    }
+    if (pickedIds.length >= 20) {
+      Alert.alert('Selections', 'You already have 20 players. Uncheck one before adding another.');
+      return;
+    }
+    setPickedIds((prev) => [...prev, playerId]);
   };
 
   const submitPicks = async () => {

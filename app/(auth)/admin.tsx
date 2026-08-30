@@ -158,7 +158,8 @@ export default function AdminScreen() {
     returnToRaw === '/competition-hub' ||
     returnToRaw.startsWith('/competition-hub') ||
     returnToRaw.startsWith('/(app)') ||
-    returnToRaw.startsWith('/(lms)')
+    returnToRaw.startsWith('/(lms)') ||
+    returnToRaw.startsWith('/(f2t)')
       ? returnToRaw
       : '/competition-hub?tab=admin';
   const [tab, setTab] = useState<TabId>('requests');

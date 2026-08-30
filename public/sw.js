@@ -35,10 +35,10 @@ self.addEventListener('notificationclick', (event) => {
   const competitionId = payload.competitionId;
   const target =
     competitionId != null && competitionId !== ''
-      ? `/${competitionId}`
+      ? `/(lms)/${competitionId}`
       : typeof payload.url === 'string'
         ? payload.url
-        : '/';
+        : '/(lms)';
 
   event.waitUntil(
     (async () => {

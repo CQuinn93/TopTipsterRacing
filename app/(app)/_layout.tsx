@@ -17,7 +17,7 @@ function MenuHeaderButton() {
   const theme = useTheme();
   const { openSidebar } = useSidebar();
   return (
-    <TouchableOpacity onPress={openSidebar} style={{ marginLeft: 12 }} hitSlop={12}>
+    <TouchableOpacity onPress={openSidebar} style={{ marginRight: 12 }} hitSlop={12}>
       <Ionicons name="menu" size={24} color={theme.colors.text} />
     </TouchableOpacity>
   );
@@ -32,7 +32,7 @@ function AppStack() {
         headerTintColor: theme.colors.text,
         headerTitleStyle: { fontFamily: theme.fontFamily.baiBold, fontSize: 17 },
         headerShadowVisible: false,
-        headerLeft: () => <MenuHeaderButton />,
+        headerRight: () => <MenuHeaderButton />,
         animation: 'slide_from_right',
       }}
     >

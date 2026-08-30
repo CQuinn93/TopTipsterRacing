@@ -625,6 +625,7 @@ export function F2tPlayerPicker({
             style={styles.list}
             contentContainerStyle={styles.listContent}
             data={filteredPlayers}
+            extraData={selectedIds}
             keyExtractor={(item) => item.id}
             keyboardShouldPersistTaps="handled"
             onScrollBeginDrag={() => setOpenDropdown(null)}
