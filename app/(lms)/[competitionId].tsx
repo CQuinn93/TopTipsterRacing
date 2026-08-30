@@ -64,6 +64,8 @@ import {
   lmsSubmitPick,
   lmsMergeFixtures,
   lmsTeamFormFromFixtures,
+  lmsFixturesNeedRefresh,
+  lmsDefaultGameweekFilterId,
   type LmsCompetition,
   type LmsCompletedPick,
   type LmsFixture,
@@ -262,17 +264,19 @@ export default function LmsCompetitionDashboard() {
 
       if (!opts?.force && lmsSessionHasFixtures(gwId)) {
         const cached = withNumber(lmsSessionGetFixtures(gwId) ?? []);
-        const prev = lmsSessionGetFixtures(gwId) ?? [];
-        const changed =
-          cached.length !== prev.length ||
-          cached.some(
-            (f, i) => f.id !== prev[i]?.id || f.gameweek_number !== prev[i]?.gameweek_number
-          );
-        if (changed) {
-          lmsSessionSetFixtures(gwId, cached);
-          syncSeasonFixturesFromCache();
+        if (!lmsFixturesNeedRefresh(cached)) {
+          const prev = lmsSessionGetFixtures(gwId) ?? [];
+          const changed =
+            cached.length !== prev.length ||
+            cached.some(
+              (f, i) => f.id !== prev[i]?.id || f.gameweek_number !== prev[i]?.gameweek_number
+            );
+          if (changed) {
+            lmsSessionSetFixtures(gwId, cached);
+            syncSeasonFixturesFromCache();
+          }
+          return cached;
         }
-        return cached;
       }
       setFixturesLoadingGwId(gwId);
       try {
@@ -380,13 +384,18 @@ export default function LmsCompetitionDashboard() {
   );
 
   const realtimeRefreshInFlightRef = useRef(false);
+  const realtimeRefreshPendingRef = useRef(false);
 
   const ensureFormFixturesRef = useRef(ensureFormFixtures);
   ensureFormFixturesRef.current = ensureFormFixtures;
 
   /** Realtime-driven refresh: force fixtures + standing without the manual cooldown. */
   const refreshFromRealtime = useCallback(async () => {
-    if (!competitionId || realtimeRefreshInFlightRef.current) return;
+    if (!competitionId) return;
+    if (realtimeRefreshInFlightRef.current) {
+      realtimeRefreshPendingRef.current = true;
+      return;
+    }
     const gw = currentGwRef.current;
     if (!gw) return;
     realtimeRefreshInFlightRef.current = true;
@@ -411,6 +420,10 @@ export default function LmsCompetitionDashboard() {
       /* ignore transient Realtime refetch errors; next sync/event retries */
     } finally {
       realtimeRefreshInFlightRef.current = false;
+      if (realtimeRefreshPendingRef.current) {
+        realtimeRefreshPendingRef.current = false;
+        void refreshFromRealtime();
+      }
     }
   }, [competitionId]);
 
@@ -479,10 +492,11 @@ export default function LmsCompetitionDashboard() {
           ensureFormFixtures(season, opts),
         ]);
         setGameweeks(gws);
-        setFilterGwId((prev) => {
-          if (prev) return prev;
-          return currentGwIdRef.current ?? gws.find((g) => g.status !== 'complete')?.id ?? gws[0]?.id ?? null;
-        });
+        const defaultGwId = lmsDefaultGameweekFilterId(gws, currentGwIdRef.current);
+        setFilterGwId((prev) => prev ?? defaultGwId);
+        if (defaultGwId) {
+          await ensureGameweekFixtures(defaultGwId, opts);
+        }
         if (!loadedRef.current.selection) {
           const poolIds = await lmsListCompetitionTeamIds(competitionId);
           setPoolTeamIds(poolIds);
@@ -493,7 +507,7 @@ export default function LmsCompetitionDashboard() {
         setGameweeksLoading(false);
       }
     },
-    [competitionId, loadTeamsCached, ensureFormFixtures, syncSeasonFixturesFromCache]
+    [competitionId, loadTeamsCached, ensureFormFixtures, ensureGameweekFixtures, syncSeasonFixturesFromCache]
   );
 
   const loadHistoryForUser = useCallback(

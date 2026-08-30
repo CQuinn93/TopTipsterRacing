@@ -294,6 +294,35 @@ function mapEmbeddedTeam(row: unknown): LmsTeam | undefined {
   return row as LmsTeam;
 }
 
+/** True when cached fixtures may be missing live/finished scores. */
+export function lmsFixturesNeedRefresh(fixtures: LmsFixture[]): boolean {
+  if (!fixtures.length) return true;
+  const now = Date.now();
+  return fixtures.some((f) => {
+    if (f.excluded_from_lms) return false;
+    const ko = new Date(f.kickoff_at).getTime();
+    const kickedOff = !Number.isNaN(ko) && ko <= now;
+    if (f.status === 'live') return true;
+    if (f.status !== 'finished' && kickedOff) return true;
+    if (f.status === 'finished' && (f.home_goals == null || f.away_goals == null)) return true;
+    return false;
+  });
+}
+
+/** Gameweeks tab default: last completed week between GWs, otherwise live/current. */
+export function lmsDefaultGameweekFilterId(
+  gameweeks: LmsGameweek[],
+  currentId: string | null
+): string | null {
+  const current = currentId ? gameweeks.find((g) => g.id === currentId) ?? null : null;
+  if (current?.status === 'live') return current.id;
+  const lastComplete = [...gameweeks]
+    .filter((g) => g.status === 'complete')
+    .sort((a, b) => b.number - a.number)[0];
+  if (current?.status === 'upcoming' && lastComplete) return lastComplete.id;
+  return current?.id ?? lastComplete?.id ?? gameweeks[0]?.id ?? null;
+}
+
 function mapFixtureWithTeams(row: Record<string, unknown>): LmsFixture {
   const home = mapEmbeddedTeam(row.home_team);
   const away = mapEmbeddedTeam(row.away_team);

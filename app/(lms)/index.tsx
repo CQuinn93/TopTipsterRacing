@@ -25,10 +25,12 @@ import {
   lmsGetHome,
   lmsGetHomeInsights,
   lmsJoinErrorMessage,
+  lmsListFixturesForGameweek,
   lmsListGameweeks,
   lmsListParticipants,
   lmsListPicksForGameweek,
   lmsRequestJoin,
+  lmsFixturesNeedRefresh,
   type LmsCompetitionHomeSummary,
   type LmsEliminationSummary,
   type LmsHomeInsights,
@@ -40,6 +42,7 @@ import {
   type LmsTeam,
 } from '@/lib/lms/api';
 import { lmsSessionSetFixtures } from '@/lib/lms/sessionCache';
+import { useRealtimeLmsFixtures } from '@/lib/useRealtimeLmsFixtures';
 import { getProfileRole, isStaffRole } from '@/lib/adminSession';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
 import { LeagueTablePanel } from '@/components/lms/LeagueTablePanel';
@@ -109,6 +112,10 @@ export default function LmsHomeScreen() {
   const fixtureSlideAnim = useRef(new Animated.Value(0)).current;
   const fixtureAnimatingRef = useRef(false);
   const fxIndexRef = useRef(0);
+  const gwRef = useRef<LmsGameweek | null>(null);
+  const fixturesRef = useRef<LmsFixture[]>([]);
+  const fixtureRefreshInFlightRef = useRef(false);
+  const fixtureRefreshPendingRef = useRef(false);
 
   useEffect(() => {
     if (tabParam === 'table' || tabParam === 'join' || tabParam === 'competitions') {
@@ -153,9 +160,18 @@ export default function LmsHomeScreen() {
       setComps(home.competitions);
       setPending(home.pending);
       setGw(home.nextUp.gameweek);
-      setFixtures(home.nextUp.fixtures);
-      if (home.nextUp.gameweek?.id && home.nextUp.fixtures.length > 0) {
-        lmsSessionSetFixtures(home.nextUp.gameweek.id, home.nextUp.fixtures);
+      let nextFixtures = (home.nextUp.fixtures ?? []) as LmsFixture[];
+      if (home.nextUp.gameweek?.id) {
+        try {
+          const full = await lmsListFixturesForGameweek(home.nextUp.gameweek.id);
+          if (full.length) nextFixtures = full;
+        } catch {
+          /* keep home RPC fixtures */
+        }
+      }
+      setFixtures(nextFixtures);
+      if (home.nextUp.gameweek?.id && nextFixtures.length > 0) {
+        lmsSessionSetFixtures(home.nextUp.gameweek.id, nextFixtures);
       }
       setHomeInsights(insights?.success ? insights : null);
       fxIndexRef.current = 0;
@@ -198,6 +214,44 @@ export default function LmsHomeScreen() {
 
   const loadRef = useRef(load);
   loadRef.current = load;
+  gwRef.current = gw;
+  fixturesRef.current = fixtures;
+
+  const refreshLiveFixtures = useCallback(async (opts?: { force?: boolean }) => {
+    const gwId = gwRef.current?.id;
+    if (!gwId) return;
+    const current = fixturesRef.current;
+    if (!opts?.force && current.length > 0 && !lmsFixturesNeedRefresh(current)) return;
+    if (fixtureRefreshInFlightRef.current) {
+      fixtureRefreshPendingRef.current = true;
+      return;
+    }
+    fixtureRefreshInFlightRef.current = true;
+    try {
+      const full = await lmsListFixturesForGameweek(gwId);
+      if (full.length) {
+        lmsSessionSetFixtures(gwId, full);
+        setFixtures(full);
+      }
+    } catch {
+      /* ignore; next realtime/focus retries */
+    } finally {
+      fixtureRefreshInFlightRef.current = false;
+      if (fixtureRefreshPendingRef.current) {
+        fixtureRefreshPendingRef.current = false;
+        void refreshLiveFixtures({ force: true });
+      }
+    }
+  }, []);
+
+  const homeRealtimeIds = useMemo(
+    () => fixtures.map((f) => f.id).filter(Boolean),
+    [fixtures]
+  );
+
+  useRealtimeLmsFixtures(homeRealtimeIds, () => {
+    void refreshLiveFixtures({ force: true });
+  });
 
   /** Load / reload pick stats when the gameweek is live (locked, not yet complete). */
   useEffect(() => {
@@ -343,10 +397,13 @@ export default function LmsHomeScreen() {
   useFocusEffect(
     useCallback(() => {
       if (!userId) return;
-      if (homeLoadedRef.current) return;
+      if (homeLoadedRef.current) {
+        void refreshLiveFixtures();
+        return;
+      }
       homeLoadedRef.current = true;
       void loadRef.current();
-    }, [userId])
+    }, [userId, refreshLiveFixtures])
   );
 
   useEffect(() => {
