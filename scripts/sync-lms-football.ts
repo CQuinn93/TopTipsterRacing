@@ -14,9 +14,10 @@ import { createClient } from '@supabase/supabase-js';
  *   FOOTBALL_DATA_SEASON=2026   (API season start year)
  *   LMS_AUTO_SETTLE=true       (default true) settle finished gameweeks
  *
- * Endpoints used (2 calls, within free-tier rate limits):
+ * Endpoints used (2–3 calls, within free-tier rate limits):
  *   GET /v4/competitions/PL/teams?season=YYYY
  *   GET /v4/competitions/PL/matches?season=YYYY
+ *   GET /v4/competitions/PL/matches?dateFrom=…&dateTo=…  (recent results overlay)
  */
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -64,20 +65,24 @@ function sameIsoTime(a: string | null, b: string): boolean {
 
 /**
  * Finished → full-time only. Live → best current score available.
+ * If the API already exposes full-time numbers while status is still TIMED,
+ * treat those as finished scores (free-tier list payloads often lag on status).
  */
 function pickMatchGoals(
   score: FdMatch['score'],
   status: LmsFixtureStatus
 ): { home: number | null; away: number | null } {
-  if (status === 'scheduled') return { home: null, away: null };
-
   const ft = score?.fullTime;
   const rt = score?.regularTime;
   const ht = score?.halfTime;
+  const hasFullTime =
+    typeof ft?.home === 'number' && typeof ft?.away === 'number';
 
-  if (status === 'finished') {
+  if (status === 'finished' || hasFullTime) {
     return { home: ft?.home ?? null, away: ft?.away ?? null };
   }
+
+  if (status === 'scheduled') return { home: null, away: null };
 
   // Live: API may expose running score on fullTime, regularTime, or halfTime.
   const home = ft?.home ?? rt?.home ?? ht?.home ?? null;
@@ -105,6 +110,12 @@ function slugify(input: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+function statusRank(status: LmsFixtureStatus): number {
+  if (status === 'finished') return 2;
+  if (status === 'live') return 1;
+  return 0;
+}
+
 /**
  * Map football-data.org match status strings into our LMS fixture statuses.
  * Only `finished` matches are used for settlement / scoring.
@@ -112,14 +123,53 @@ function slugify(input: string): string {
 function mapMatchStatus(status: string): LmsFixtureStatus {
   switch (status) {
     case 'FINISHED':
+    case 'AWARDED':
       return 'finished';
     case 'IN_PLAY':
     case 'PAUSED':
     case 'LIVE':
+    case 'EXTRA_TIME':
+    case 'PENALTY_SHOOTOUT':
       return 'live';
     default:
       return 'scheduled';
   }
+}
+
+/** Resolve LMS status + goals, promoting TIMED rows that already carry full-time scores. */
+function resolveMatchResult(m: FdMatch): {
+  status: LmsFixtureStatus;
+  homeGoals: number | null;
+  awayGoals: number | null;
+} {
+  let status = mapMatchStatus(m.status);
+  const ft = m.score?.fullTime;
+  const hasFullTime =
+    typeof ft?.home === 'number' && typeof ft?.away === 'number';
+
+  // Free-tier season lists sometimes keep TIMED long after fullTime is populated.
+  if (hasFullTime && status !== 'live') {
+    status = 'finished';
+  }
+
+  const { home: homeGoals, away: awayGoals } = pickMatchGoals(m.score, status);
+  return { status, homeGoals, awayGoals };
+}
+
+/** Prefer the richer of two API payloads for the same match id. */
+function preferMatch(a: FdMatch, b: FdMatch): FdMatch {
+  const ra = resolveMatchResult(a);
+  const rb = resolveMatchResult(b);
+  if (statusRank(rb.status) !== statusRank(ra.status)) {
+    return statusRank(rb.status) > statusRank(ra.status) ? b : a;
+  }
+  const aGoals =
+    (typeof a.score?.fullTime?.home === 'number' ? 1 : 0) +
+    (typeof a.score?.fullTime?.away === 'number' ? 1 : 0);
+  const bGoals =
+    (typeof b.score?.fullTime?.home === 'number' ? 1 : 0) +
+    (typeof b.score?.fullTime?.away === 'number' ? 1 : 0);
+  return bGoals > aGoals ? b : a;
 }
 
 /**
@@ -298,9 +348,48 @@ async function main() {
     `/competitions/PL/matches?season=${API_SEASON}`
   );
   // Only keep valid Premier League matchdays (GW1–GW38)
-  const matches = (matchesPayload.matches ?? []).filter(
-    (m) => m.matchday != null && m.matchday >= 1 && m.matchday <= 38
-  );
+  const matchById = new Map<number, FdMatch>();
+  for (const m of matchesPayload.matches ?? []) {
+    if (m.matchday == null || m.matchday < 1 || m.matchday > 38) continue;
+    matchById.set(m.id, m);
+  }
+
+  // Season list can lag on weekend results. Overlay a short date window (1 extra call)
+  // and prefer FINISHED / scored payloads for the same match ids.
+  const overlayFrom = new Date();
+  overlayFrom.setUTCDate(overlayFrom.getUTCDate() - 4);
+  const overlayTo = new Date();
+  overlayTo.setUTCDate(overlayTo.getUTCDate() + 1);
+  const dateFrom = overlayFrom.toISOString().slice(0, 10);
+  const dateTo = overlayTo.toISOString().slice(0, 10);
+  try {
+    const recentPayload = await fdGet<{ matches: FdMatch[] }>(
+      `/competitions/PL/matches?dateFrom=${dateFrom}&dateTo=${dateTo}`
+    );
+    let overlayMerged = 0;
+    for (const m of recentPayload.matches ?? []) {
+      if (m.matchday == null || m.matchday < 1 || m.matchday > 38) continue;
+      const prev = matchById.get(m.id);
+      if (!prev) {
+        matchById.set(m.id, m);
+        overlayMerged += 1;
+        continue;
+      }
+      const preferred = preferMatch(prev, m);
+      if (preferred !== prev) overlayMerged += 1;
+      matchById.set(m.id, preferred);
+    }
+    console.log(
+      `[lms-sync] Recent overlay ${dateFrom}→${dateTo}: ${recentPayload.matches?.length ?? 0} matches, ${overlayMerged} preferred/new`
+    );
+  } catch (e) {
+    console.warn(
+      '[lms-sync] Recent matches overlay failed (continuing with season list):',
+      e instanceof Error ? e.message : e
+    );
+  }
+
+  const matches = [...matchById.values()];
   console.log(`[lms-sync] API matches (GW1–38): ${matches.length}`);
 
   // Group matches by matchday so we can set each gameweek's first kick-off / deadline
@@ -309,6 +398,41 @@ async function main() {
     const md = m.matchday as number;
     if (!byMatchday.has(md)) byMatchday.set(md, []);
     byMatchday.get(md)!.push(m);
+  }
+
+  // Debug: summarise the live / current matchday so stalled TIMED rows are visible in Actions logs
+  {
+    const now = Date.now();
+    let focusMd: number | null = null;
+    for (const [md, list] of byMatchday) {
+      const anyStarted = list.some((m) => new Date(m.utcDate).getTime() <= now);
+      const anyOpen = list.some((m) => resolveMatchResult(m).status !== 'finished');
+      if (anyStarted && anyOpen) {
+        focusMd = md;
+        break;
+      }
+    }
+    if (focusMd != null) {
+      const list = byMatchday.get(focusMd) ?? [];
+      const counts: Record<string, number> = {};
+      for (const m of list) {
+        counts[m.status] = (counts[m.status] ?? 0) + 1;
+      }
+      console.log(`[lms-sync] GW${focusMd} raw API statuses:`, counts);
+      for (const m of list) {
+        const resolved = resolveMatchResult(m);
+        const kickoffMs = new Date(m.utcDate).getTime();
+        const overdue =
+          Number.isFinite(kickoffMs) &&
+          now - kickoffMs > 2.5 * 60 * 60 * 1000 &&
+          resolved.status !== 'finished';
+        if (overdue) {
+          console.warn(
+            `[lms-sync] GW${focusMd} overdue without finished: ${m.homeTeam.tla ?? m.homeTeam.name} vs ${m.awayTeam.tla ?? m.awayTeam.name} api=${m.status} resolved=${resolved.status} ft=${m.score?.fullTime?.home ?? 'null'}-${m.score?.fullTime?.away ?? 'null'}`
+          );
+        }
+      }
+    }
   }
 
   // Load existing gameweeks for this LMS season
@@ -358,9 +482,9 @@ async function main() {
         gwsUnchanged += 1;
         continue;
       }
-      const anyLive = mdMatches.some((m) => mapMatchStatus(m.status) === 'live');
+      const anyLive = mdMatches.some((m) => resolveMatchResult(m).status === 'live');
       const allFinished =
-        mdMatches.length > 0 && mdMatches.every((m) => mapMatchStatus(m.status) === 'finished');
+        mdMatches.length > 0 && mdMatches.every((m) => resolveMatchResult(m).status === 'finished');
       const now = Date.now();
       let status = existing.status;
       if (!allFinished) {
@@ -447,6 +571,7 @@ async function main() {
   let fixturesUpserted = 0;
   let fixturesUnchanged = 0;
   let fixturesSkipped = 0;
+  let fixturesProtected = 0;
   for (const m of matches) {
     const md = m.matchday as number;
     const gw = gwByNumber.get(md);
@@ -464,8 +589,30 @@ async function main() {
       continue;
     }
 
-    const status = mapMatchStatus(m.status);
-    const { home: homeGoals, away: awayGoals } = pickMatchGoals(m.score, status);
+    let { status, homeGoals, awayGoals } = resolveMatchResult(m);
+
+    const existingFx =
+      fxByExternal.get(m.id) ?? fxByPair.get(`${gw.id}:${homeId}:${awayId}`);
+
+    // Never regress a finished/live scored row back to scheduled/null because the
+    // season list is still TIMED (seen after Friday's CRY–MCI when Saturday lagged).
+    if (existingFx) {
+      const existingStatus = existingFx.status as LmsFixtureStatus;
+      const existingRank = statusRank(existingStatus);
+      const incomingRank = statusRank(status);
+      if (
+        existingRank > incomingRank ||
+        (existingRank === incomingRank &&
+          existingFx.home_goals != null &&
+          existingFx.away_goals != null &&
+          (homeGoals == null || awayGoals == null))
+      ) {
+        status = existingStatus;
+        homeGoals = existingFx.home_goals;
+        awayGoals = existingFx.away_goals;
+        fixturesProtected += 1;
+      }
+    }
 
     const row = {
       // Intentionally omit excluded_from_lms / excluded_reason / excluded_at / excluded_by
@@ -480,15 +627,12 @@ async function main() {
       external_id: m.id,
     };
 
-    const existingFx =
-      fxByExternal.get(m.id) ?? fxByPair.get(`${gw.id}:${homeId}:${awayId}`);
-
     if (
       existingFx &&
       existingFx.gameweek_id === row.gameweek_id &&
       existingFx.home_team_id === row.home_team_id &&
       existingFx.away_team_id === row.away_team_id &&
-      existingFx.kickoff_at === row.kickoff_at &&
+      sameIsoTime(existingFx.kickoff_at, row.kickoff_at) &&
       existingFx.status === row.status &&
       sameGoals(existingFx.home_goals, row.home_goals) &&
       sameGoals(existingFx.away_goals, row.away_goals) &&
@@ -514,7 +658,7 @@ async function main() {
     fixturesUpserted += 1;
   }
   console.log(
-    `[lms-sync] Fixtures written: ${fixturesUpserted}; unchanged: ${fixturesUnchanged}; skipped: ${fixturesSkipped}`
+    `[lms-sync] Fixtures written: ${fixturesUpserted}; unchanged: ${fixturesUnchanged}; skipped: ${fixturesSkipped}; protected: ${fixturesProtected}`
   );
 
   // ---------------------------------------------------------------------------
