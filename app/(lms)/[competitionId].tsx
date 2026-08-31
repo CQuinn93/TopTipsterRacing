@@ -26,6 +26,10 @@ import {
   StandingPlayerCards,
   StandingPlayerPoolCard,
 } from '@/components/lms/StandingBetweenViews';
+import {
+  buildChampionJourney,
+  ChampionStandingJourney,
+} from '@/components/lms/ChampionStandingJourney';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import {
   lmsAdminSetCompetitionTeam,
@@ -1311,6 +1315,35 @@ export default function LmsCompetitionDashboard() {
     () => leaderboard.filter((p) => p.status === 'active' || p.status === 'winner').length,
     [leaderboard]
   );
+
+  const champion = useMemo(
+    () => leaderboard.find((p) => p.status === 'winner') ?? null,
+    [leaderboard]
+  );
+
+  const championPicks = useMemo(() => {
+    if (!champion) return [];
+    const fromBoard = standingBoardByUserId.get(champion.user_id) ?? [];
+    const fromHistory = historyByUserId.get(champion.user_id) ?? [];
+    const merged = new Map<string, (typeof fromBoard)[number]>();
+    for (const pick of [...fromHistory, ...fromBoard]) {
+      merged.set(`${pick.gameweek_id}-${pick.team_id}`, pick);
+    }
+    return [...merged.values()].sort((a, b) => a.gameweek_number - b.gameweek_number);
+  }, [champion, standingBoardByUserId, historyByUserId]);
+
+  const championJourneySteps = useMemo(() => {
+    if (!champion || !championPicks.length) return [];
+    return buildChampionJourney(champion, championPicks, leaderboard);
+  }, [champion, championPicks, leaderboard]);
+
+  useEffect(() => {
+    if (tab !== 'leaderboard' || !champion) return;
+    void loadGameweeksSliceRef.current().catch(() => {});
+    if (!historyLoadedUsersRef.current.has(champion.user_id)) {
+      void loadHistoryForUser(champion.user_id).catch(() => {});
+    }
+  }, [tab, champion, loadHistoryForUser]);
 
   const standingSections = useMemo(() => {
     const byName = (a: LmsParticipant, b: LmsParticipant) =>
@@ -3378,7 +3411,7 @@ export default function LmsCompetitionDashboard() {
                 {me?.status !== 'active' ? (
                   <Text style={styles.muted}>
                     {me?.status === 'winner'
-                      ? 'You won this competition. Check the Leaderboard for the final table.'
+                      ? 'You won this competition. Check Standing for your road to the title.'
                       : 'You are eliminated and cannot make further picks.'}
                   </Text>
                 ) : !currentGw ? (
@@ -3593,6 +3626,21 @@ export default function LmsCompetitionDashboard() {
                     )}
                   </View>
                 ) : null}
+                {champion ? (
+                  championJourneySteps.length > 0 ? (
+                    <ChampionStandingJourney
+                      champion={champion}
+                      steps={championJourneySteps}
+                      totalPlayers={leaderboard.length}
+                      isYou={champion.user_id === userId}
+                    />
+                  ) : standingBoardLoading || historyLoadingUserId === champion.user_id ? (
+                    <ActivityIndicator color={theme.colors.accent} style={{ marginTop: 16 }} />
+                  ) : (
+                    <Text style={styles.muted}>Loading champion journey…</Text>
+                  )
+                ) : (
+                  <>
                 <Text style={styles.sectionIntro}>
                   {standingViewMode === 'cards' || standingViewMode === 'pools'
                     ? 'Browse players as cards or pool grids to see used teams (with GW#) and what’s still available. List view shows the classic standing.'
@@ -3775,6 +3823,8 @@ export default function LmsCompetitionDashboard() {
                         )}
                       </View>
                     ) : null}
+                  </>
+                )}
                   </>
                 )}
               </>
