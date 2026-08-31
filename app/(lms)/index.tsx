@@ -954,6 +954,21 @@ export default function LmsHomeScreen() {
           textTransform: 'uppercase',
           color: theme.colors.statusAccent,
         },
+        championChip: {
+          paddingVertical: 2,
+          paddingHorizontal: 6,
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+        },
+        championChipText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 10,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: theme.colors.accent,
+        },
         createToggle: {
           alignSelf: 'flex-start',
           flexDirection: 'row',
@@ -2233,7 +2248,11 @@ export default function LmsHomeScreen() {
                                         <Text style={styles.manageChipText}>Manager</Text>
                                       </View>
                                     ) : null}
-                                    {c.showRolloverLabel ? (
+                                    {c.participant_status === 'winner' ? (
+                                      <View style={styles.championChip}>
+                                        <Text style={styles.championChipText}>Champion</Text>
+                                      </View>
+                                    ) : c.showRolloverLabel ? (
                                       <View style={styles.rolloverChip}>
                                         <Text style={styles.rolloverChipText}>
                                           {c.hasPendingRejoin ? 'Pending' : 'Rollover'}
@@ -2244,7 +2263,8 @@ export default function LmsHomeScreen() {
                                   <Text style={styles.rowMeta}>{remainLabel}</Text>
                                   {c.participant_status === 'active' && c.pickAvailable ? (
                                     <Text style={styles.rowPickHint}>Pick available</Text>
-                                  ) : c.participant_status !== 'active' ? (
+                                  ) : c.participant_status !== 'active' &&
+                                    c.participant_status !== 'winner' ? (
                                     <Text style={styles.rowMeta}>
                                       {statusLabel(c.participant_status)}
                                     </Text>
