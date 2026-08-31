@@ -115,6 +115,8 @@ supabase functions deploy notify-lms-rollover
 
 Apply migration `104_lms_rollover_ux.sql` so home shows a **Rollover** chip and Standing shows the rejoin code to participants.
 
+Former players tap **Rejoin** on Standing (no code); that creates a pending request and notifies organisers via `notify-lms-join-request` with rejoin copy. Newcomers still use the rejoin code on the Join tab. Admin pending rows show `(new)` vs `(re entry)`.
+
 ## Preference behaviour
 
 | Role | Default (no saved pref) | Toggle |
