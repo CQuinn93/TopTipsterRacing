@@ -65,7 +65,10 @@ export default function LmsHomeScreen() {
   const { openSidebar } = useSidebar();
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
-  const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
+  const { tab: tabParam, code: codeParam } = useLocalSearchParams<{
+    tab?: string;
+    code?: string;
+  }>();
   const [comps, setComps] = useState<LmsCompetitionHomeSummary[]>([]);
   const [pending, setPending] = useState<LmsPendingJoin[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,6 +125,13 @@ export default function LmsHomeScreen() {
       setTab(tabParam);
     }
   }, [tabParam]);
+
+  useEffect(() => {
+    const raw = typeof codeParam === 'string' ? codeParam.trim().toUpperCase() : '';
+    if (!raw) return;
+    setCode(raw.slice(0, 6));
+    setTab('join');
+  }, [codeParam]);
 
   const upcomingFixtures = useMemo(() => {
     const open = fixtures.filter((f) => f.status !== 'finished' && !f.excluded_from_lms);
@@ -928,6 +938,21 @@ export default function LmsHomeScreen() {
           letterSpacing: 0.6,
           textTransform: 'uppercase',
           color: theme.colors.accent,
+        },
+        rolloverChip: {
+          paddingVertical: 2,
+          paddingHorizontal: 6,
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.statusAccent,
+          backgroundColor: 'rgba(234, 179, 8, 0.12)',
+        },
+        rolloverChipText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 10,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: theme.colors.statusAccent,
         },
         createToggle: {
           alignSelf: 'flex-start',
@@ -2206,6 +2231,11 @@ export default function LmsHomeScreen() {
                                     ) : c.isManager || c.canHandleJoins ? (
                                       <View style={styles.manageChip}>
                                         <Text style={styles.manageChipText}>Manager</Text>
+                                      </View>
+                                    ) : null}
+                                    {c.hasActiveRejoin ? (
+                                      <View style={styles.rolloverChip}>
+                                        <Text style={styles.rolloverChipText}>Rollover</Text>
                                       </View>
                                     ) : null}
                                   </View>

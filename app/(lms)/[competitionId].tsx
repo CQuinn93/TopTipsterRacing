@@ -38,6 +38,7 @@ import {
   lmsBroadcastErrorMessage,
   lmsCanManageCompetition,
   lmsGetCompetitionJoinCodes,
+  lmsGetCompetitionRejoinInfo,
   lmsGetJoinNotifyPref,
   lmsSetJoinNotifyPref,
   lmsListAssignableManagers,
@@ -164,6 +165,8 @@ export default function LmsCompetitionDashboard() {
   const [joinNotifyBusy, setJoinNotifyBusy] = useState(false);
   const [joinCode, setJoinCode] = useState<string | null>(null);
   const [rejoinCode, setRejoinCode] = useState<string | null>(null);
+  const [rolloverRejoinCode, setRolloverRejoinCode] = useState<string | null>(null);
+  const [rolloverRejoinGw, setRolloverRejoinGw] = useState<number | null>(null);
   const [entryDraft, setEntryDraft] = useState('');
   const [entrySaving, setEntrySaving] = useState(false);
   const [broadcastTitle, setBroadcastTitle] = useState('');
@@ -643,6 +646,35 @@ export default function LmsCompetitionDashboard() {
     }
   }, [competitionId]);
 
+  const loadRolloverRejoinInfo = useCallback(async () => {
+    if (!competitionId) return;
+    try {
+      const res = await lmsGetCompetitionRejoinInfo(competitionId);
+      if (res.success && res.has_active_rejoin && res.active_rejoin_code) {
+        setRolloverRejoinCode(res.active_rejoin_code);
+        setRolloverRejoinGw(res.rejoin_valid_for_gameweek_number);
+      } else {
+        setRolloverRejoinCode(null);
+        setRolloverRejoinGw(null);
+      }
+    } catch {
+      /* leave previous */
+    }
+  }, [competitionId]);
+
+  const openJoinWithRejoinCode = async (code: string | null) => {
+    if (!code) return;
+    try {
+      await Clipboard.setStringAsync(code);
+    } catch {
+      /* still navigate */
+    }
+    router.push({
+      pathname: '/(lms)',
+      params: { tab: 'join', code },
+    } as any);
+  };
+
   const copyAccessCode = async (code: string | null, label: string) => {
     if (!code) {
       Alert.alert(`No ${label}`, `This competition does not have a ${label} yet.`);
@@ -743,6 +775,8 @@ export default function LmsCompetitionDashboard() {
   loadJoinNotifyPrefRef.current = loadJoinNotifyPref;
   const loadJoinCodesRef = useRef(loadJoinCodes);
   loadJoinCodesRef.current = loadJoinCodes;
+  const loadRolloverRejoinInfoRef = useRef(loadRolloverRejoinInfo);
+  loadRolloverRejoinInfoRef.current = loadRolloverRejoinInfo;
   const loadCompetitionManagersRef = useRef(loadCompetitionManagers);
   loadCompetitionManagersRef.current = loadCompetitionManagers;
 
@@ -759,7 +793,7 @@ export default function LmsCompetitionDashboard() {
 
       await loadShell();
       const t = tabRef.current;
-      const tasks: Promise<unknown>[] = [];
+      const tasks: Promise<unknown>[] = [loadRolloverRejoinInfoRef.current()];
       if (t === 'selection') tasks.push(loadSelectionSliceRef.current({ force: mode === 'manual' }));
       if (t === 'gameweeks' || t === 'admin') {
         const gwToRefresh = t === 'gameweeks' ? filterGwIdRef.current : currentGwIdRef.current;
@@ -1822,6 +1856,49 @@ export default function LmsCompetitionDashboard() {
           fontSize: 13,
           color: theme.colors.textSecondary,
           lineHeight: 18,
+        },
+        rolloverBanner: {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.statusAccent,
+          padding: theme.spacing.md,
+          gap: theme.spacing.sm,
+        },
+        rolloverBannerTitle: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 14,
+          color: theme.colors.statusAccent,
+          textTransform: 'uppercase',
+          letterSpacing: 0.6,
+        },
+        rolloverBannerBody: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 13,
+          color: theme.colors.textSecondary,
+          lineHeight: 18,
+        },
+        rolloverCodeBtn: {
+          alignSelf: 'flex-start',
+          marginTop: 4,
+          paddingVertical: 10,
+          paddingHorizontal: 14,
+          borderRadius: theme.radius.md,
+          borderWidth: 1,
+          borderColor: theme.colors.accent,
+          backgroundColor: theme.colors.accentMuted,
+          gap: 2,
+        },
+        rolloverCodeText: {
+          fontFamily: theme.fontFamily.baiBold,
+          fontSize: 20,
+          letterSpacing: 2,
+          color: theme.colors.accent,
+        },
+        rolloverCodeHint: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 11,
+          color: theme.colors.textMuted,
         },
         filterLabel: {
           fontFamily: theme.fontFamily.baiSemiBold,
@@ -3453,6 +3530,28 @@ export default function LmsCompetitionDashboard() {
 
             {tab === 'leaderboard' ? (
               <>
+                {rolloverRejoinCode ? (
+                  <View style={styles.rolloverBanner}>
+                    <Text style={styles.rolloverBannerTitle}>Rollover</Text>
+                    <Text style={styles.rolloverBannerBody}>
+                      There was no overall winner for this competition, the prize pool will now
+                      rollover to the next competition.
+                    </Text>
+                    <Text style={styles.rolloverBannerBody}>
+                      To rejoin please enter the following code in the join section
+                      {rolloverRejoinGw != null ? ` (valid for GW${rolloverRejoinGw})` : ''}:
+                    </Text>
+                    <Pressable
+                      style={styles.rolloverCodeBtn}
+                      onPress={() => void openJoinWithRejoinCode(rolloverRejoinCode)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Use rejoin code ${rolloverRejoinCode}`}
+                    >
+                      <Text style={styles.rolloverCodeText}>{rolloverRejoinCode}</Text>
+                      <Text style={styles.rolloverCodeHint}>Tap to copy and open Join</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
                 <Text style={styles.sectionIntro}>
                   {standingViewMode === 'cards' || standingViewMode === 'pools'
                     ? 'Browse players as cards or pool grids to see used teams (with GW#) and what’s still available. List view shows the classic standing.'

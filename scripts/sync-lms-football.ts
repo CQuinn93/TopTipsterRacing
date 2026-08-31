@@ -753,6 +753,44 @@ async function main() {
     if (ok) {
       settled += 1;
       console.log(`[lms-sync] Settled GW${gw.number}`);
+      const results = (
+        settleRes as {
+          results?: Array<{
+            outcome?: string;
+            competition_id?: string;
+            rejoin_code?: string | null;
+          }>;
+        }
+      )?.results;
+      for (const row of results ?? []) {
+        if (row?.outcome !== 'rollover' || !row.competition_id) continue;
+        try {
+          const res = await fetch(`${SUPABASE_URL}/functions/v1/notify-lms-rollover`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              competition_id: row.competition_id,
+              rejoin_code: row.rejoin_code ?? null,
+            }),
+          });
+          const text = await res.text().catch(() => '');
+          if (!res.ok) {
+            console.warn(
+              `[lms-sync] Rollover notify failed for ${row.competition_id}: ${res.status} ${text.slice(0, 200)}`
+            );
+          } else {
+            console.log(`[lms-sync] Rollover notify for ${row.competition_id}:`, text.slice(0, 200));
+          }
+        } catch (e) {
+          console.warn(
+            `[lms-sync] Rollover notify error for ${row.competition_id}:`,
+            e instanceof Error ? e.message : e
+          );
+        }
+      }
     } else {
       console.warn(`[lms-sync] Settle GW${gw.number} response:`, settleRes);
     }

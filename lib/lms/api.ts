@@ -934,6 +934,9 @@ export type LmsCompetitionHomeSummary = LmsCompetitionRow & {
   isManager: boolean;
   canManage: boolean;
   canHandleJoins: boolean;
+  hasActiveRejoin: boolean;
+  activeRejoinCode: string | null;
+  rejoinValidForGameweekNumber: number | null;
 };
 
 export type LmsHomePayload = {
@@ -987,6 +990,14 @@ export async function lmsGetHome(season = '2026/27'): Promise<LmsHomePayload> {
     isManager: !!(c as { is_manager?: boolean }).is_manager,
     canManage: !!(c as { can_manage?: boolean }).can_manage,
     canHandleJoins: !!(c as { can_handle_joins?: boolean }).can_handle_joins,
+    hasActiveRejoin: !!(c as { has_active_rejoin?: boolean }).has_active_rejoin,
+    activeRejoinCode:
+      typeof (c as { active_rejoin_code?: string | null }).active_rejoin_code === 'string'
+        ? (c as { active_rejoin_code: string }).active_rejoin_code
+        : null,
+    rejoinValidForGameweekNumber:
+      (c as { rejoin_valid_for_gameweek_number?: number | null }).rejoin_valid_for_gameweek_number ??
+      null,
   }));
 
   return {
@@ -1492,6 +1503,34 @@ export async function lmsGetCompetitionJoinCodes(competitionId: string): Promise
     success: !!row.success,
     join_code: row.join_code ?? null,
     active_rejoin_code: row.active_rejoin_code ?? null,
+    error: row.error,
+  };
+}
+
+/** Participant-safe active rejoin / rollover code for Standing + rejoin CTA. */
+export async function lmsGetCompetitionRejoinInfo(competitionId: string): Promise<{
+  success: boolean;
+  has_active_rejoin: boolean;
+  active_rejoin_code: string | null;
+  rejoin_valid_for_gameweek_number: number | null;
+  error?: string;
+}> {
+  const { data, error } = await db.rpc('lms_get_competition_rejoin_info', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  const row = (data ?? {}) as {
+    success?: boolean;
+    has_active_rejoin?: boolean;
+    active_rejoin_code?: string | null;
+    rejoin_valid_for_gameweek_number?: number | null;
+    error?: string;
+  };
+  return {
+    success: !!row.success,
+    has_active_rejoin: !!row.has_active_rejoin,
+    active_rejoin_code: row.active_rejoin_code ?? null,
+    rejoin_valid_for_gameweek_number: row.rejoin_valid_for_gameweek_number ?? null,
     error: row.error,
   };
 }
