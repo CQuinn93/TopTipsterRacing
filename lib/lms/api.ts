@@ -935,6 +935,8 @@ export type LmsCompetitionHomeSummary = LmsCompetitionRow & {
   canManage: boolean;
   canHandleJoins: boolean;
   hasActiveRejoin: boolean;
+  hasPendingRejoin: boolean;
+  showRolloverLabel: boolean;
   activeRejoinCode: string | null;
   rejoinValidForGameweekNumber: number | null;
 };
@@ -991,6 +993,8 @@ export async function lmsGetHome(season = '2026/27'): Promise<LmsHomePayload> {
     canManage: !!(c as { can_manage?: boolean }).can_manage,
     canHandleJoins: !!(c as { can_handle_joins?: boolean }).can_handle_joins,
     hasActiveRejoin: !!(c as { has_active_rejoin?: boolean }).has_active_rejoin,
+    hasPendingRejoin: !!(c as { has_pending_rejoin?: boolean }).has_pending_rejoin,
+    showRolloverLabel: !!(c as { show_rollover_label?: boolean }).show_rollover_label,
     activeRejoinCode:
       typeof (c as { active_rejoin_code?: string | null }).active_rejoin_code === 'string'
         ? (c as { active_rejoin_code: string }).active_rejoin_code
@@ -1352,6 +1356,8 @@ export type LmsJoinRequestRow = {
   username: string | null;
   code_type: string;
   created_at: string;
+  is_reentry?: boolean;
+  request_kind?: 'new' | 're_entry' | string;
 };
 
 export async function lmsAdminListPendingForCompetition(
@@ -1507,12 +1513,16 @@ export async function lmsGetCompetitionJoinCodes(competitionId: string): Promise
   };
 }
 
-/** Participant-safe active rejoin / rollover code for Standing + rejoin CTA. */
+/** Participant-safe active rejoin / rollover info for Standing + rejoin CTA. */
 export async function lmsGetCompetitionRejoinInfo(competitionId: string): Promise<{
   success: boolean;
   has_active_rejoin: boolean;
   active_rejoin_code: string | null;
   rejoin_valid_for_gameweek_number: number | null;
+  is_former_participant: boolean;
+  participant_status: string | null;
+  can_request_rejoin: boolean;
+  has_pending_rejoin: boolean;
   error?: string;
 }> {
   const { data, error } = await db.rpc('lms_get_competition_rejoin_info', {
@@ -1524,6 +1534,10 @@ export async function lmsGetCompetitionRejoinInfo(competitionId: string): Promis
     has_active_rejoin?: boolean;
     active_rejoin_code?: string | null;
     rejoin_valid_for_gameweek_number?: number | null;
+    is_former_participant?: boolean;
+    participant_status?: string | null;
+    can_request_rejoin?: boolean;
+    has_pending_rejoin?: boolean;
     error?: string;
   };
   return {
@@ -1531,8 +1545,53 @@ export async function lmsGetCompetitionRejoinInfo(competitionId: string): Promis
     has_active_rejoin: !!row.has_active_rejoin,
     active_rejoin_code: row.active_rejoin_code ?? null,
     rejoin_valid_for_gameweek_number: row.rejoin_valid_for_gameweek_number ?? null,
+    is_former_participant: !!row.is_former_participant,
+    participant_status: row.participant_status ?? null,
+    can_request_rejoin: !!row.can_request_rejoin,
+    has_pending_rejoin: !!row.has_pending_rejoin,
     error: row.error,
   };
+}
+
+/** Former participant requests re-entry during rollover (no access code). */
+export async function lmsRequestRejoin(competitionId: string): Promise<{
+  success: boolean;
+  error?: string;
+  competition_name?: string;
+  competition_id?: string;
+  status?: string;
+  join_request_id?: string;
+  is_reentry?: boolean;
+}> {
+  const { data, error } = await db.rpc('lms_request_rejoin', {
+    p_competition_id: competitionId,
+  });
+  if (error) throw error;
+  const result = (data ?? { success: false, error: 'unknown' }) as {
+    success: boolean;
+    error?: string;
+    competition_name?: string;
+    competition_id?: string;
+    status?: string;
+    join_request_id?: string;
+    is_reentry?: boolean;
+  };
+
+  if (result.success && result.join_request_id) {
+    void supabase.functions
+      .invoke('notify-lms-join-request', {
+        body: { join_request_id: result.join_request_id, is_reentry: true },
+      })
+      .then(({ data: fnData, error: fnErr }) => {
+        if (fnErr) console.warn('[lms] notify-lms-join-request (rejoin)', fnErr.message);
+        else console.log('[lms] notify-lms-join-request (rejoin)', fnData);
+      })
+      .catch((e) => {
+        console.warn('[lms] notify-lms-join-request (rejoin) failed', e);
+      });
+  }
+
+  return result;
 }
 
 export async function lmsSetJoinNotifyPref(

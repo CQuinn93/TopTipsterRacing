@@ -2233,9 +2233,11 @@ export default function LmsHomeScreen() {
                                         <Text style={styles.manageChipText}>Manager</Text>
                                       </View>
                                     ) : null}
-                                    {c.hasActiveRejoin ? (
+                                    {c.showRolloverLabel ? (
                                       <View style={styles.rolloverChip}>
-                                        <Text style={styles.rolloverChipText}>Rollover</Text>
+                                        <Text style={styles.rolloverChipText}>
+                                          {c.hasPendingRejoin ? 'Pending' : 'Rollover'}
+                                        </Text>
                                       </View>
                                     ) : null}
                                   </View>

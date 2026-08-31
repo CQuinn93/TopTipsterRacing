@@ -160,6 +160,17 @@ Deno.serve(async (req) => {
     const username = (profile as { username?: string | null } | null)?.username?.trim() || "Someone";
     const competitionName = (comp as { name?: string } | null)?.name || "your competition";
 
+    const { data: existingPart } = await admin
+      .from("lms_participants")
+      .select("user_id")
+      .eq("competition_id", jr.competition_id)
+      .eq("user_id", jr.user_id)
+      .maybeSingle();
+    const isReentry =
+      Boolean(existingPart) ||
+      (typeof (body as Record<string, unknown>)?.is_reentry === "boolean" &&
+        (body as { is_reentry?: boolean }).is_reentry === true);
+
     const { data: recipients, error: recErr } = await admin.rpc(
       "lms_list_join_notify_recipients",
       { p_competition_id: jr.competition_id },
@@ -169,10 +180,10 @@ Deno.serve(async (req) => {
     const rows = (recipients ?? []) as Recipient[];
     const targets = rows.filter((r) => r.user_id !== jr.user_id);
 
-    const title = "New join request";
-    const bodyText =
-      `${username} has requested to join ${competitionName}. ` +
-      `Please visit the admin panel within the app to accept or reject them.`;
+    const title = isReentry ? "Rejoin request" : "New join request";
+    const bodyText = isReentry
+      ? `${username} wants to rejoin ${competitionName}. Please visit the admin panel within the app to accept or reject them.`
+      : `${username} has requested to join ${competitionName}. Please visit the admin panel within the app to accept or reject them.`;
     const payload = JSON.stringify({
       title,
       body: bodyText,
@@ -180,6 +191,7 @@ Deno.serve(async (req) => {
       badge: "/favicon.png",
       competitionId: jr.competition_id,
       url: `/${jr.competition_id}`,
+      kind: isReentry ? "lms_rejoin_request" : "lms_join_request",
     });
 
     let sent = 0;

@@ -39,6 +39,7 @@ import {
   lmsCanManageCompetition,
   lmsGetCompetitionJoinCodes,
   lmsGetCompetitionRejoinInfo,
+  lmsRequestRejoin,
   lmsGetJoinNotifyPref,
   lmsSetJoinNotifyPref,
   lmsListAssignableManagers,
@@ -158,6 +159,8 @@ export default function LmsCompetitionDashboard() {
       username: string | null;
       code_type: string;
       created_at: string;
+      is_reentry?: boolean;
+      request_kind?: string;
     }[]
   >([]);
   const [joinBusyId, setJoinBusyId] = useState<string | null>(null);
@@ -165,8 +168,11 @@ export default function LmsCompetitionDashboard() {
   const [joinNotifyBusy, setJoinNotifyBusy] = useState(false);
   const [joinCode, setJoinCode] = useState<string | null>(null);
   const [rejoinCode, setRejoinCode] = useState<string | null>(null);
-  const [rolloverRejoinCode, setRolloverRejoinCode] = useState<string | null>(null);
+  const [rolloverActive, setRolloverActive] = useState(false);
   const [rolloverRejoinGw, setRolloverRejoinGw] = useState<number | null>(null);
+  const [canRequestRejoin, setCanRequestRejoin] = useState(false);
+  const [hasPendingRejoin, setHasPendingRejoin] = useState(false);
+  const [rejoinBusy, setRejoinBusy] = useState(false);
   const [entryDraft, setEntryDraft] = useState('');
   const [entrySaving, setEntrySaving] = useState(false);
   const [broadcastTitle, setBroadcastTitle] = useState('');
@@ -650,17 +656,49 @@ export default function LmsCompetitionDashboard() {
     if (!competitionId) return;
     try {
       const res = await lmsGetCompetitionRejoinInfo(competitionId);
-      if (res.success && res.has_active_rejoin && res.active_rejoin_code) {
-        setRolloverRejoinCode(res.active_rejoin_code);
+      if (res.success && res.has_active_rejoin) {
+        setRolloverActive(true);
         setRolloverRejoinGw(res.rejoin_valid_for_gameweek_number);
+        setCanRequestRejoin(!!res.can_request_rejoin);
+        setHasPendingRejoin(!!res.has_pending_rejoin);
+        if (res.active_rejoin_code) setRejoinCode(res.active_rejoin_code);
       } else {
-        setRolloverRejoinCode(null);
+        setRolloverActive(false);
         setRolloverRejoinGw(null);
+        setCanRequestRejoin(false);
+        setHasPendingRejoin(false);
       }
     } catch {
       /* leave previous */
     }
   }, [competitionId]);
+
+  const onRequestRejoin = async () => {
+    if (!competitionId || rejoinBusy) return;
+    setRejoinBusy(true);
+    try {
+      const res = await lmsRequestRejoin(competitionId);
+      if (!res.success) {
+        Alert.alert(
+          'Rejoin',
+          res.error === 'already_in'
+            ? 'You are already active in this competition.'
+            : res.error === 'no_active_rejoin' || res.error === 'code_void'
+              ? 'Rejoin is not open for this competition right now.'
+              : res.error ?? 'Could not request rejoin'
+        );
+        return;
+      }
+      setCanRequestRejoin(false);
+      setHasPendingRejoin(true);
+      Alert.alert('Rejoin requested', 'The organiser has been notified. You’ll be active again once they approve you.');
+      await loadRolloverRejoinInfo();
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not request rejoin');
+    } finally {
+      setRejoinBusy(false);
+    }
+  };
 
   const openJoinWithRejoinCode = async (code: string | null) => {
     if (!code) return;
@@ -3530,26 +3568,42 @@ export default function LmsCompetitionDashboard() {
 
             {tab === 'leaderboard' ? (
               <>
-                {rolloverRejoinCode ? (
+                {rolloverActive && (canRequestRejoin || hasPendingRejoin) ? (
                   <View style={styles.rolloverBanner}>
                     <Text style={styles.rolloverBannerTitle}>Rollover</Text>
                     <Text style={styles.rolloverBannerBody}>
                       There was no overall winner for this competition, the prize pool will now
                       rollover to the next competition.
                     </Text>
-                    <Text style={styles.rolloverBannerBody}>
-                      To rejoin please enter the following code in the join section
-                      {rolloverRejoinGw != null ? ` (valid for GW${rolloverRejoinGw})` : ''}:
-                    </Text>
-                    <Pressable
-                      style={styles.rolloverCodeBtn}
-                      onPress={() => void openJoinWithRejoinCode(rolloverRejoinCode)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Use rejoin code ${rolloverRejoinCode}`}
-                    >
-                      <Text style={styles.rolloverCodeText}>{rolloverRejoinCode}</Text>
-                      <Text style={styles.rolloverCodeHint}>Tap to copy and open Join</Text>
-                    </Pressable>
+                    {hasPendingRejoin ? (
+                      <Text style={styles.rolloverBannerBody}>
+                        Your rejoin request is waiting for organiser approval
+                        {rolloverRejoinGw != null ? ` (GW${rolloverRejoinGw})` : ''}.
+                      </Text>
+                    ) : (
+                      <>
+                        <Text style={styles.rolloverBannerBody}>
+                          Tap Rejoin to ask the organiser to bring you back in
+                          {rolloverRejoinGw != null ? ` for GW${rolloverRejoinGw}` : ''}.
+                        </Text>
+                        <Pressable
+                          style={[styles.rolloverCodeBtn, rejoinBusy && styles.primaryBtnDisabled]}
+                          onPress={() => void onRequestRejoin()}
+                          disabled={rejoinBusy}
+                          accessibilityRole="button"
+                          accessibilityLabel="Request to rejoin this competition"
+                        >
+                          {rejoinBusy ? (
+                            <ActivityIndicator color={theme.colors.accent} />
+                          ) : (
+                            <>
+                              <Text style={styles.rolloverCodeText}>Rejoin</Text>
+                              <Text style={styles.rolloverCodeHint}>Notify the organiser</Text>
+                            </>
+                          )}
+                        </Pressable>
+                      </>
+                    )}
                   </View>
                 ) : null}
                 <Text style={styles.sectionIntro}>
@@ -3930,12 +3984,17 @@ export default function LmsCompetitionDashboard() {
                     ) : (
                       pendingJoins.map((r) => {
                         const busy = joinBusyId === r.id;
+                        const kindLabel =
+                          r.request_kind === 're_entry' || r.is_reentry ? 're entry' : 'new';
                         return (
                           <View key={r.id} style={styles.adminRow}>
                             <View style={styles.adminRowBody}>
-                              <Text style={styles.adminRowTitle}>{r.username || 'User'}</Text>
+                              <Text style={styles.adminRowTitle}>
+                                {r.username || 'User'}{' '}
+                                <Text style={styles.adminRowMeta}>({kindLabel})</Text>
+                              </Text>
                               <Text style={styles.adminRowMeta}>
-                                {r.code_type} code
+                                {r.code_type === 'rejoin' ? 'Rejoin' : 'Join'} request
                                 {r.created_at
                                   ? ` · ${new Date(r.created_at).toLocaleDateString()}`
                                   : ''}
