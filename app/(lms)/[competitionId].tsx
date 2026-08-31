@@ -700,19 +700,6 @@ export default function LmsCompetitionDashboard() {
     }
   };
 
-  const openJoinWithRejoinCode = async (code: string | null) => {
-    if (!code) return;
-    try {
-      await Clipboard.setStringAsync(code);
-    } catch {
-      /* still navigate */
-    }
-    router.push({
-      pathname: '/(lms)',
-      params: { tab: 'join', code },
-    } as any);
-  };
-
   const copyAccessCode = async (code: string | null, label: string) => {
     if (!code) {
       Alert.alert(`No ${label}`, `This competition does not have a ${label} yet.`);
