@@ -100,6 +100,21 @@ supabase functions deploy notify-lms-competition-broadcast
 - Reaches participants who have Home Screen + **Deadline Alerts** enabled  
 - Competition managers cannot send broadcasts  
 
+## 9. Competition rollover
+
+When settle ends a gameweek with **no one still active**, LMS mints a rejoin code and opens the same competition for the next GW. Sync then calls:
+
+```bash
+supabase functions deploy notify-lms-rollover
+```
+
+- **Title:** `Rollover for <competition name>`  
+- **Body:** `Visit the competition for more information.`  
+- Audience: all `lms_participants` with Home Screen + Deadline Alerts subscriptions  
+- Triggered automatically from `scripts/sync-lms-football.ts` after settle (service role)
+
+Apply migration `104_lms_rollover_ux.sql` so home shows a **Rollover** chip and Standing shows the rejoin code to participants.
+
 ## Preference behaviour
 
 | Role | Default (no saved pref) | Toggle |
