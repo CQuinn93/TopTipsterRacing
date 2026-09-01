@@ -1,19 +1,25 @@
 /**
- * 1) Remove race days whose last race was more than 2 days ago, and only when every
+ * Cleanup old data from Supabase:
+ *
+ * 1) Racing — remove race days whose last race was more than 2 days ago, and only when every
  *    competition linked to that race_day has festival_end_date more than 2 days ago.
- * 2) Remove competitions that have been finished for 2 or more days (festival_end_date < today - 2).
+ * 2) Racing — remove tipster competitions finished 2+ days ago (festival_end_date).
+ * 3) LMS — remove competitions with status `completed` for more than 1 week (updated_at).
+ * 4) F2T — remove competitions with status `completed` for more than 1 week (updated_at).
  *
  * Env: SUPABASE_URL, SUPABASE_SERVICE_KEY
  *
- * Run daily (e.g. after pull-races or on a separate schedule).
+ * Run daily (e.g. cron-job.org workflow_dispatch).
  */
 
 import 'dotenv/config';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 const DAYS_AFTER_LAST_RACE = 2;
+const DAYS_AFTER_GAME_COMPLETION = 7;
 
 async function main() {
   console.log('[remove-old-races] Env check:', {
@@ -34,6 +40,10 @@ async function main() {
   cutoff.setDate(cutoff.getDate() - DAYS_AFTER_LAST_RACE);
   const cutoffIso = cutoff.toISOString();
   const cutoffDateStr = cutoff.toISOString().slice(0, 10);
+
+  const gameCutoff = new Date(now);
+  gameCutoff.setDate(gameCutoff.getDate() - DAYS_AFTER_GAME_COMPLETION);
+  const gameCutoffIso = gameCutoff.toISOString();
 
   // 1. Per race_day: latest scheduled_time_utc (last race of that day)
   const { data: raceRows } = await supabase
@@ -68,73 +78,74 @@ async function main() {
 
   if (candidateRaceDayIds.length === 0) {
     console.log('No race_days with last race (or race_date) more than 2 days ago.');
-    console.log('Done');
-    return;
-  }
+  } else {
+    const { data: crdRows } = await supabase
+      .from('competition_race_days')
+      .select('race_day_id, competition_id')
+      .in('race_day_id', candidateRaceDayIds);
+    const links = (crdRows ?? []) as { race_day_id: string; competition_id: string }[];
 
-  // 3. For each candidate, check: every linked competition has festival_end_date < cutoff date
-  const { data: crdRows } = await supabase
-    .from('competition_race_days')
-    .select('race_day_id, competition_id')
-    .in('race_day_id', candidateRaceDayIds);
-  const links = (crdRows ?? []) as { race_day_id: string; competition_id: string }[];
-
-  const compIdsByRaceDay = new Map<string, string[]>();
-  for (const l of links) {
-    const list = compIdsByRaceDay.get(l.race_day_id) ?? [];
-    if (!list.includes(l.competition_id)) list.push(l.competition_id);
-    compIdsByRaceDay.set(l.race_day_id, list);
-  }
-
-  const allCompIds = [...new Set(links.map((l) => l.competition_id))];
-  const { data: compRows } = await supabase
-    .from('competitions')
-    .select('id, festival_end_date')
-    .in('id', allCompIds);
-  const comps = (compRows ?? []) as { id: string; festival_end_date: string }[];
-  const compEndDate = new Map<string, string>();
-  for (const c of comps) compEndDate.set(c.id, c.festival_end_date ?? '');
-
-  const idsToDelete: string[] = [];
-  for (const raceDayId of candidateRaceDayIds) {
-    const compIds = compIdsByRaceDay.get(raceDayId) ?? [];
-    if (compIds.length === 0) {
-      idsToDelete.push(raceDayId);
-      continue;
+    const compIdsByRaceDay = new Map<string, string[]>();
+    for (const l of links) {
+      const list = compIdsByRaceDay.get(l.race_day_id) ?? [];
+      if (!list.includes(l.competition_id)) list.push(l.competition_id);
+      compIdsByRaceDay.set(l.race_day_id, list);
     }
-    const allOver = compIds.every((cid) => {
-      const endDate = compEndDate.get(cid) ?? '';
-      return endDate !== '' && endDate < cutoffDateStr;
-    });
-    if (allOver) idsToDelete.push(raceDayId);
-  }
 
-  if (idsToDelete.length === 0) {
-    console.log('No race_days to remove (all are linked to a competition still within 2 days of festival_end_date).');
-    console.log('Done');
-    return;
-  }
+    const allCompIds = [...new Set(links.map((l) => l.competition_id))];
+    const { data: compRows } = await supabase
+      .from('competitions')
+      .select('id, festival_end_date')
+      .in('id', allCompIds);
+    const comps = (compRows ?? []) as { id: string; festival_end_date: string }[];
+    const compEndDate = new Map<string, string>();
+    for (const c of comps) compEndDate.set(c.id, c.festival_end_date ?? '');
 
-  const { data: deleted, error } = await supabase
-    .from('race_days')
-    .delete()
-    .in('id', idsToDelete)
-    .select('id, race_date, course');
+    const idsToDelete: string[] = [];
+    for (const raceDayId of candidateRaceDayIds) {
+      const compIds = compIdsByRaceDay.get(raceDayId) ?? [];
+      if (compIds.length === 0) {
+        idsToDelete.push(raceDayId);
+        continue;
+      }
+      const allOver = compIds.every((cid) => {
+        const endDate = compEndDate.get(cid) ?? '';
+        return endDate !== '' && endDate < cutoffDateStr;
+      });
+      if (allOver) idsToDelete.push(raceDayId);
+    }
 
-  if (error) {
-    console.error('Delete race_days', error);
-    process.exit(1);
-  }
+    if (idsToDelete.length === 0) {
+      console.log(
+        'No race_days to remove (all are linked to a competition still within 2 days of festival_end_date).'
+      );
+    } else {
+      const { data: deleted, error } = await supabase
+        .from('race_days')
+        .delete()
+        .in('id', idsToDelete)
+        .select('id, race_date, course');
 
-  const count = deleted?.length ?? 0;
-  if (count > 0) {
-    console.log(`Removed ${count} race day(s): last race > ${DAYS_AFTER_LAST_RACE} days ago and all linked competitions over.`);
-    for (const d of deleted ?? []) {
-      console.log(`  - ${(d as { course: string; race_date: string }).course} ${(d as { race_date: string }).race_date}`);
+      if (error) {
+        console.error('Delete race_days', error);
+        process.exit(1);
+      }
+
+      const count = deleted?.length ?? 0;
+      if (count > 0) {
+        console.log(
+          `Removed ${count} race day(s): last race > ${DAYS_AFTER_LAST_RACE} days ago and all linked competitions over.`
+        );
+        for (const d of deleted ?? []) {
+          console.log(
+            `  - ${(d as { course: string; race_date: string }).course} ${(d as { race_date: string }).race_date}`
+          );
+        }
+      }
     }
   }
 
-  // 4. Remove competitions finished 2+ days ago (cascade removes competition_race_days, daily_selections, etc.)
+  // 4. Remove tipster competitions finished 2+ days ago (cascade removes competition_race_days, daily_selections, etc.)
   const { data: allComps } = await supabase
     .from('competitions')
     .select('id, name, festival_end_date');
@@ -162,7 +173,58 @@ async function main() {
     }
   }
 
+  await removeCompletedGameCompetitions(supabase, 'lms_competitions', gameCutoffIso);
+  await removeCompletedGameCompetitions(supabase, 'f2t_competitions', gameCutoffIso);
+
   console.log('Done');
+}
+
+async function removeCompletedGameCompetitions(
+  supabase: SupabaseClient,
+  table: 'lms_competitions' | 'f2t_competitions',
+  cutoffIso: string
+) {
+  const label = table === 'lms_competitions' ? 'LMS' : 'F2T';
+
+  const { data: staleRows, error: listErr } = await supabase
+    .from(table)
+    .select('id, name, updated_at')
+    .eq('status', 'completed')
+    .lt('updated_at', cutoffIso);
+
+  if (listErr) {
+    console.error(`List ${label} competitions`, listErr);
+    process.exit(1);
+  }
+
+  const stale = (staleRows ?? []) as { id: string; name: string; updated_at: string }[];
+  if (!stale.length) {
+    console.log(`No ${label} competitions completed ${DAYS_AFTER_GAME_COMPLETION}+ days ago.`);
+    return;
+  }
+
+  const ids = stale.map((row) => row.id);
+  const { data: deleted, error: deleteErr } = await supabase
+    .from(table)
+    .delete()
+    .in('id', ids)
+    .select('id, name, updated_at');
+
+  if (deleteErr) {
+    console.error(`Delete ${label} competitions`, deleteErr);
+    process.exit(1);
+  }
+
+  const count = deleted?.length ?? 0;
+  if (count > 0) {
+    console.log(
+      `Removed ${count} ${label} competition(s) completed ${DAYS_AFTER_GAME_COMPLETION}+ days ago:`
+    );
+    for (const row of deleted ?? []) {
+      const item = row as { name: string; updated_at: string };
+      console.log(`  - ${item.name} (completed ${item.updated_at.slice(0, 10)})`);
+    }
+  }
 }
 
 main().catch((e) => {

@@ -1,6 +1,7 @@
-# Remove race data older than 5 days. Triggered by cron-job.org daily at 18:00 UTC.
+# Remove old racing data, plus completed LMS/F2T competitions older than 1 week.
+# Triggered by cron-job.org daily at 18:00 UTC.
 # GitHub Secrets: SUPABASE_URL, SUPABASE_SERVICE_KEY
-name: Remove old races
+name: Remove old data
 
 on:
   workflow_dispatch:
@@ -15,7 +16,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      - name: Remove races older than 5 days
+      - name: Remove old races and completed game competitions
         run: npx tsx scripts/remove-old-races.ts
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
