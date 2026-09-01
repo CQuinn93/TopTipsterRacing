@@ -48,7 +48,6 @@ function AppStack() {
       <Stack.Screen name="account" options={{ title: 'Account' }} />
       <Stack.Screen name="change-password" options={{ title: 'Change password' }} />
       <Stack.Screen name="reminders" options={{ title: 'Reminders' }} />
-      <Stack.Screen name="tutorial-sandbox" options={{ title: 'Tutorial' }} />
     </Stack>
   );
 }

@@ -95,21 +95,9 @@ Deno.serve(async (req) => {
     }
 
     // Racing tables (no auth.users FK) — same cleanup as self-service delete-account.
-    await admin.from("selections").delete().eq("user_id", targetId);
     await admin.from("daily_selections").delete().eq("user_id", targetId);
     await admin.from("competition_join_requests").delete().eq("user_id", targetId);
     await admin.from("competition_participants").delete().eq("user_id", targetId);
-
-    // WC FKs that block auth.users delete.
-    const wc = admin.schema("wc2026");
-    await wc
-      .from("football_competitions")
-      .update({ created_by: ownerId })
-      .eq("created_by", targetId);
-    await wc
-      .from("ante_post_submissions")
-      .update({ reopened_by: null })
-      .eq("reopened_by", targetId);
 
     // Best-effort: clear password reset rows for this email.
     const { data: authUserData } = await admin.auth.admin.getUserById(targetId);

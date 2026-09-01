@@ -180,6 +180,15 @@ export function AppSidebar() {
               <>
                 <TouchableOpacity
                   style={styles.menuButton}
+                  onPress={() => goTo('/getting-started')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="help-circle-outline" size={22} color={theme.colors.accent} />
+                  <Text style={styles.menuButtonText}>Getting started</Text>
+                  <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.menuButton}
                   onPress={() => goTo('/(app)/results')}
                   activeOpacity={0.7}
                 >

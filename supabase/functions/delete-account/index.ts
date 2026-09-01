@@ -42,7 +42,6 @@ Deno.serve(async (req) => {
     const admin = createClient(supabaseUrl, supabaseServiceKey);
 
     // Delete user data (order can matter for FKs; these tables reference user_id only)
-    await admin.from("selections").delete().eq("user_id", userId);
     await admin.from("daily_selections").delete().eq("user_id", userId);
     await admin.from("competition_join_requests").delete().eq("user_id", userId);
     await admin.from("competition_participants").delete().eq("user_id", userId);

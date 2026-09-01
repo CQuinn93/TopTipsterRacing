@@ -18,7 +18,7 @@ export interface RaceResult {
 
 /**
  * Race data shape (derived from races + horses tables).
- * Built by buildRacesFromTables / get_races_for_race_day. results from horses.position, horses.sp.
+ * Built by buildRacesFromTables. results from horses.position, horses.sp.
  */
 export interface Race {
   id: string;

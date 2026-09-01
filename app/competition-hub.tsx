@@ -1248,6 +1248,24 @@ export default function CompetitionHubScreen() {
           fontWeight: '700',
           color: theme.colors.error,
         },
+        gettingStartedBtn: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          paddingVertical: 12,
+          paddingHorizontal: 14,
+          borderRadius: theme.radius.md,
+          borderWidth: 1,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+          marginBottom: theme.spacing.sm,
+        },
+        gettingStartedBtnText: {
+          flex: 1,
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 14,
+          color: theme.colors.text,
+        },
         signOutAllBtn: {
           alignSelf: 'center',
           flexDirection: 'row',
@@ -1424,6 +1442,18 @@ export default function CompetitionHubScreen() {
             <View style={styles.panel}>
               {tab === 'account' ? (
                 <View style={styles.accountCard}>
+                  <Pressable
+                    style={styles.gettingStartedBtn}
+                    onPress={() => router.push('/getting-started')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Getting started guide"
+                  >
+                    <Ionicons name="help-circle-outline" size={20} color={activeAccent} />
+                    <Text style={styles.gettingStartedBtnText}>
+                      Getting started — join codes, game modes, organisers
+                    </Text>
+                    <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />
+                  </Pressable>
                   <Text style={styles.panelLabel}>Your account</Text>
                   <Text style={styles.accountBlurb}>
                     Lost a phone? Sign out of every device and stop notifications on those devices.
@@ -1882,6 +1912,18 @@ export default function CompetitionHubScreen() {
                     </>
                   ) : (
                     <>
+                      <Pressable
+                        style={styles.gettingStartedBtn}
+                        onPress={() => router.push('/getting-started')}
+                        accessibilityRole="button"
+                        accessibilityLabel="Getting started guide"
+                      >
+                        <Ionicons name="help-circle-outline" size={20} color={activeAccent} />
+                        <Text style={styles.gettingStartedBtnText}>
+                          New here? Getting started guide
+                        </Text>
+                        <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />
+                      </Pressable>
                       <Text style={styles.panelLabel}>Select a mode</Text>
                       <View style={styles.modeGrid}>
                         {modes.map((item) => (
@@ -1917,6 +1959,14 @@ export default function CompetitionHubScreen() {
             hitSlop={8}
           >
             <Text style={styles.legalLink}>Privacy</Text>
+          </Pressable>
+          <View style={styles.legalDot} />
+          <Pressable
+            onPress={() => router.push('/getting-started')}
+            accessibilityRole="link"
+            hitSlop={8}
+          >
+            <Text style={styles.legalLink}>Getting started</Text>
           </Pressable>
         </View>
       </View>

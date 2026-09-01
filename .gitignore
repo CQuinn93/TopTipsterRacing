@@ -28,6 +28,13 @@ scripts/debug/
 .env.local
 .env.*.local
 
+# Private business documents (founder only — not for repo)
+private/
+
+# Local exports / test data (not for repo)
+trial_data/
+Tester accounts.xlsx
+
 # OS
 .DS_Store
 *.pem
