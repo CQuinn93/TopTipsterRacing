@@ -30,6 +30,7 @@ import type { ParticipationRow } from '@/lib/availableRacesCache';
 import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
 import { getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
+import { confirmJoinLimitDisclaimer } from '@/lib/joinLimitDisclaimer';
 import { racingCreateCompetition } from '@/lib/racingAdminApi';
 import { canCreateCompetitions } from '@/lib/adminSession';
 import {
@@ -340,6 +341,9 @@ export default function HomeScreen() {
       Alert.alert('Error', 'You must be signed in.');
       return;
     }
+    const confirmed = await confirmJoinLimitDisclaimer(joinCode);
+    if (!confirmed) return;
+
     setJoining(true);
     try {
       const outcome = await joinCompetitionWithAccessCode({

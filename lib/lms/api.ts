@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { subscriptionErrorMessage } from '@/lib/subscriptionEntitlements';
 
 /** Untyped client for LMS tables/RPCs not yet in generated Database types. */
 const db = supabase as any;
@@ -1890,7 +1891,9 @@ export function lmsJoinErrorMessage(code?: string): string {
       return "Entries are closed — the pick deadline for this competition's starting gameweek has passed.";
     case 'account_banned':
       return 'This account has been banned and cannot join competitions.';
+    case 'join_limit_reached':
+      return subscriptionErrorMessage(code);
     default:
-      return 'Could not send join request.';
+      return subscriptionErrorMessage(code, 'Could not send join request.');
   }
 }

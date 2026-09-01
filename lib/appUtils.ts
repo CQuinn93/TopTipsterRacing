@@ -72,3 +72,15 @@ export function isCompletedMoreThanOneDay(endDate: string): boolean {
 export function placeLabel(p?: 'won' | 'place' | 'lost'): string {
   return p === 'won' ? 'Won' : p === 'place' ? 'Place' : p === 'lost' ? 'Lost' : '—';
 }
+
+/** User-facing label for LMS/F2T/racing competition status strings from the database. */
+export function formatSportCompetitionStatusLabel(status: string): string {
+  const s = status.trim().toLowerCase();
+  if (s === 'open') return 'Open';
+  if (s === 'active') return 'Active';
+  if (s === 'live') return 'Live';
+  if (s === 'upcoming') return 'Upcoming';
+  if (s === 'complete' || s === 'completed' || s === 'finished') return 'Complete';
+  if (s.length === 0) return '—';
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}

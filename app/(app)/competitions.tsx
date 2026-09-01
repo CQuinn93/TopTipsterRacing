@@ -21,6 +21,7 @@ import { clearAvailableRacesCache } from '@/lib/availableRacesCache';
 import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
 import { getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
+import { confirmJoinLimitDisclaimer } from '@/lib/joinLimitDisclaimer';
 import { useNarrowWebCompact, cfs } from '@/lib/narrowWebTypography';
 import { getProfileRole, isOwnerRole, canCreateCompetitions } from '@/lib/adminSession';
 import {
@@ -277,6 +278,9 @@ export default function MyCompetitionsScreen() {
       Alert.alert('Error', 'You must be signed in.');
       return;
     }
+    const confirmed = await confirmJoinLimitDisclaimer(joinCode);
+    if (!confirmed) return;
+
     setJoinLoading(true);
     try {
       const outcome = await joinCompetitionWithAccessCode({

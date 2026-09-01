@@ -46,12 +46,8 @@ import {
   ownerSetFootballPlayerFlagged,
 } from '@/lib/f2t/api';
 import { F2tAlertsPanel } from '@/components/f2t/F2tAlertsPanel';
-import {
-  fetchMyEntitlements,
-  formatCreatorTier,
-  participantTierLabel,
-  type SubscriptionEntitlements,
-} from '@/lib/subscriptionEntitlements';
+import { AccountSubscriptionPanel } from '@/components/AccountSubscriptionPanel';
+import { fetchMyEntitlements, type SubscriptionEntitlements } from '@/lib/subscriptionEntitlements';
 import {
   lmsAdminSetFixtureExcluded,
   lmsGetCurrentGameweek,
@@ -1243,21 +1239,21 @@ export default function CompetitionHubScreen() {
         },
         accountCard: {
           width: '100%',
-          paddingVertical: theme.spacing.lg,
-          paddingHorizontal: theme.spacing.md,
-          gap: theme.spacing.md,
+          paddingVertical: theme.spacing.md,
+          paddingHorizontal: theme.spacing.sm,
         },
         accountBlurb: {
           fontFamily: theme.fontFamily.regular,
-          fontSize: 14,
+          fontSize: 13,
           color: theme.colors.textSecondary,
-          lineHeight: 20,
-          textAlign: 'center',
+          lineHeight: 19,
+          textAlign: 'left',
         },
         deleteBtn: {
-          alignSelf: 'center',
+          alignSelf: 'stretch',
           flexDirection: 'row',
           alignItems: 'center',
+          justifyContent: 'center',
           gap: 8,
           paddingVertical: 12,
           paddingHorizontal: 18,
@@ -1291,9 +1287,10 @@ export default function CompetitionHubScreen() {
           color: theme.colors.text,
         },
         signOutAllBtn: {
-          alignSelf: 'center',
+          alignSelf: 'stretch',
           flexDirection: 'row',
           alignItems: 'center',
+          justifyContent: 'center',
           gap: 8,
           paddingVertical: 12,
           paddingHorizontal: 18,
@@ -1466,89 +1463,54 @@ export default function CompetitionHubScreen() {
             <View style={styles.panel}>
               {tab === 'account' ? (
                 <View style={styles.accountCard}>
-                  <Pressable
-                    style={styles.gettingStartedBtn}
-                    onPress={() => router.push('/getting-started')}
-                    accessibilityRole="button"
-                    accessibilityLabel="Getting started guide"
+                  <AccountSubscriptionPanel
+                    displayName={displayName}
+                    userId={userId}
+                    entitlements={entitlements}
+                    loading={entitlementsLoading}
+                    playerAccent={activeAccent}
+                    organiserAccent={theme.colors.accent}
                   >
-                    <Ionicons name="help-circle-outline" size={20} color={activeAccent} />
-                    <Text style={styles.gettingStartedBtnText}>
-                      Getting started — join codes, game modes, organisers
+                    <Text style={styles.accountBlurb}>
+                      Sign out everywhere if you have lost a device. You will need to sign in again on
+                      phones you still use.
                     </Text>
-                    <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />
-                  </Pressable>
-                  <Text style={styles.panelLabel}>Your account</Text>
-                  {entitlementsLoading ? (
-                    <ActivityIndicator size="small" color={theme.colors.textMuted} style={{ marginBottom: 12 }} />
-                  ) : entitlements ? (
-                    <View style={{ marginBottom: 12, gap: 4 }}>
-                      <Text style={styles.accountBlurb}>
-                        Plan: {participantTierLabel(entitlements)}
-                        {entitlements.creator_tier
-                          ? ` · ${formatCreatorTier(entitlements.creator_tier)}`
-                          : entitlements.lifetime_creator_tier
-                            ? ` · Lifetime ${formatCreatorTier(entitlements.lifetime_creator_tier)}`
-                            : ''}
-                      </Text>
-                      <Text style={styles.accountBlurb}>
-                        Joins: {entitlements.current_join_count ?? 0}
-                        {entitlements.max_concurrent_joins != null
-                          ? ` / ${entitlements.max_concurrent_joins}`
-                          : ' (unlimited)'}
-                        {entitlements.creator_tier || entitlements.lifetime_creator_tier
-                          ? ` · Active comps: ${entitlements.current_create_count ?? 0}${
-                              entitlements.max_concurrent_creates != null
-                                ? ` / ${entitlements.max_concurrent_creates}`
-                                : ''
-                            }`
-                          : ''}
-                      </Text>
-                      <Text style={[styles.accountBlurb, { opacity: 0.85 }]}>
-                        Subscription upgrades (Stripe) coming soon — limits are enforced on join and create.
-                      </Text>
-                    </View>
-                  ) : null}
-                  <Text style={styles.accountBlurb}>
-                    Lost a phone? Sign out of every device and stop notifications on those devices.
-                    You will need to sign in again on phones you still use.
-                  </Text>
-                  <Pressable
-                    style={styles.signOutAllBtn}
-                    onPress={handleSignOutAllDevices}
-                    disabled={signingOutAll || signingOut || deletingAccount}
-                    accessibilityRole="button"
-                    accessibilityLabel="Sign out of all devices"
-                  >
-                    {signingOutAll ? (
-                      <ActivityIndicator size="small" color={theme.colors.text} />
-                    ) : (
-                      <>
-                        <Ionicons name="phone-portrait-outline" size={18} color={theme.colors.text} />
-                        <Text style={styles.signOutAllBtnText}>Sign out of all devices</Text>
-                      </>
-                    )}
-                  </Pressable>
-                  <Text style={styles.accountBlurb}>
-                    Delete your account permanently if you no longer want to use Top Tipster. This
-                    removes your profile and competition data and cannot be undone.
-                  </Text>
-                  <Pressable
-                    style={styles.deleteBtn}
-                    onPress={handleDeleteAccount}
-                    disabled={deletingAccount || signingOutAll}
-                    accessibilityRole="button"
-                    accessibilityLabel="Delete account"
-                  >
-                    {deletingAccount ? (
-                      <ActivityIndicator size="small" color={theme.colors.error} />
-                    ) : (
-                      <>
-                        <Ionicons name="trash-outline" size={18} color={theme.colors.error} />
-                        <Text style={styles.deleteBtnText}>Delete account</Text>
-                      </>
-                    )}
-                  </Pressable>
+                    <Pressable
+                      style={styles.signOutAllBtn}
+                      onPress={handleSignOutAllDevices}
+                      disabled={signingOutAll || signingOut || deletingAccount}
+                      accessibilityRole="button"
+                      accessibilityLabel="Sign out of all devices"
+                    >
+                      {signingOutAll ? (
+                        <ActivityIndicator size="small" color={theme.colors.text} />
+                      ) : (
+                        <>
+                          <Ionicons name="phone-portrait-outline" size={18} color={theme.colors.text} />
+                          <Text style={styles.signOutAllBtnText}>Sign out of all devices</Text>
+                        </>
+                      )}
+                    </Pressable>
+                    <Text style={styles.accountBlurb}>
+                      Permanently delete your account and all competition data. This cannot be undone.
+                    </Text>
+                    <Pressable
+                      style={styles.deleteBtn}
+                      onPress={handleDeleteAccount}
+                      disabled={deletingAccount || signingOutAll}
+                      accessibilityRole="button"
+                      accessibilityLabel="Delete account"
+                    >
+                      {deletingAccount ? (
+                        <ActivityIndicator size="small" color={theme.colors.error} />
+                      ) : (
+                        <>
+                          <Ionicons name="trash-outline" size={18} color={theme.colors.error} />
+                          <Text style={styles.deleteBtnText}>Delete account</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </AccountSubscriptionPanel>
                 </View>
               ) : (
                 <>

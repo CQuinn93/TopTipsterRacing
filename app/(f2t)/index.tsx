@@ -30,6 +30,7 @@ import {
 } from '@/lib/f2t/api';
 import { lmsListGameweeks, type LmsGameweek } from '@/lib/lms/api';
 import { canCreateCompetitions } from '@/lib/adminSession';
+import { confirmJoinLimitDisclaimer } from '@/lib/joinLimitDisclaimer';
 
 type HomeTab = 'competitions' | 'join' | 'table';
 const F2T_SEASON = '2026/27';
@@ -140,6 +141,9 @@ export default function F2tHomeScreen() {
       Alert.alert('Competition code', 'Enter the competition code to join.');
       return;
     }
+    const confirmed = await confirmJoinLimitDisclaimer(code);
+    if (!confirmed) return;
+
     setJoining(true);
     try {
       const res = await f2tRequestJoin(code);

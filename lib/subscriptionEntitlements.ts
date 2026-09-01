@@ -3,6 +3,17 @@ import { supabase } from '@/lib/supabase';
 export type ParticipantTier = 'user' | 'user_plus' | 'user_premium';
 export type CreatorTier = 'creator' | 'creator_plus' | 'creator_pro' | 'gamemaster';
 
+export type SubscriptionSportKind = 'lms' | 'f2t' | 'racing';
+
+export type SubscriptionUsageCompetition = {
+  id: string;
+  name: string;
+  sport: SubscriptionSportKind;
+  status: string;
+  participantStatus?: string;
+  countsTowardLimit: boolean;
+};
+
 export type SubscriptionEntitlements = {
   is_owner?: boolean;
   participant_tier?: ParticipantTier;
@@ -19,6 +30,7 @@ export type SubscriptionEntitlements = {
   lifetime_participant_tier?: ParticipantTier | null;
   lifetime_creator_tier?: CreatorTier | null;
   current_join_count?: number;
+  current_eliminated_in_live_count?: number;
   current_create_count?: number;
   current_aggregate_participants?: number;
 };
@@ -49,6 +61,155 @@ export async function fetchMyEntitlements(): Promise<SubscriptionEntitlements | 
     return null;
   }
   return (data as SubscriptionEntitlements) ?? null;
+}
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function formatSubscriptionSportLabel(sport: SubscriptionSportKind): string {
+  switch (sport) {
+    case 'lms':
+      return 'Football LMS';
+    case 'f2t':
+      return 'Football F2T';
+    case 'racing':
+      return 'Racing';
+    default:
+      return sport;
+  }
+}
+
+function lmsCountsTowardLimit(participantStatus: string, competitionStatus: string): boolean {
+  return participantStatus === 'active' && ['open', 'active'].includes(competitionStatus.toLowerCase());
+}
+
+function f2tCountsTowardLimit(participantStatus: string, competitionStatus: string): boolean {
+  return participantStatus === 'active' && ['open', 'active'].includes(competitionStatus.toLowerCase());
+}
+
+function racingCountsTowardLimit(festivalEndDate: string): boolean {
+  return festivalEndDate >= todayIsoDate();
+}
+
+export async function fetchMySubscriptionJoins(userId: string): Promise<SubscriptionUsageCompetition[]> {
+  const [lmsRes, f2tRes, racingRes] = await Promise.all([
+    supabase
+      .from('lms_participants')
+      .select('competition_id, status')
+      .eq('user_id', userId)
+      .in('status', ['active', 'eliminated', 'winner']),
+    supabase
+      .from('f2t_participants')
+      .select('competition_id, status')
+      .eq('user_id', userId)
+      .in('status', ['active', 'winner']),
+    supabase.from('competition_participants').select('competition_id').eq('user_id', userId),
+  ]);
+
+  const lmsByComp = new Map(
+    (lmsRes.data ?? []).map((r) => [r.competition_id as string, r.status as string])
+  );
+  const f2tByComp = new Map(
+    (f2tRes.data ?? []).map((r) => [r.competition_id as string, r.status as string])
+  );
+  const racingIds = (racingRes.data ?? []).map((r) => r.competition_id as string);
+
+  const lmsIds = [...lmsByComp.keys()];
+  const f2tIds = [...f2tByComp.keys()];
+
+  const [lmsComps, f2tComps, racingComps] = await Promise.all([
+    lmsIds.length
+      ? supabase.from('lms_competitions').select('id, name, status').in('id', lmsIds)
+      : Promise.resolve({ data: [] as { id: string; name: string; status: string }[] }),
+    f2tIds.length
+      ? supabase.from('f2t_competitions').select('id, name, status').in('id', f2tIds)
+      : Promise.resolve({ data: [] as { id: string; name: string; status: string }[] }),
+    racingIds.length
+      ? supabase.from('competitions').select('id, name, festival_end_date').in('id', racingIds)
+      : Promise.resolve({ data: [] as { id: string; name: string; festival_end_date: string }[] }),
+  ]);
+
+  const out: SubscriptionUsageCompetition[] = [];
+  for (const c of lmsComps.data ?? []) {
+    const participantStatus = lmsByComp.get(c.id) ?? 'active';
+    out.push({
+      id: c.id,
+      name: c.name,
+      sport: 'lms',
+      status: c.status,
+      participantStatus,
+      countsTowardLimit: lmsCountsTowardLimit(participantStatus, c.status),
+    });
+  }
+  for (const c of f2tComps.data ?? []) {
+    const participantStatus = f2tByComp.get(c.id) ?? 'active';
+    out.push({
+      id: c.id,
+      name: c.name,
+      sport: 'f2t',
+      status: c.status,
+      participantStatus,
+      countsTowardLimit: f2tCountsTowardLimit(participantStatus, c.status),
+    });
+  }
+  for (const c of racingComps.data ?? []) {
+    out.push({
+      id: c.id,
+      name: c.name,
+      sport: 'racing',
+      status: c.festival_end_date >= todayIsoDate() ? 'live' : 'complete',
+      countsTowardLimit: racingCountsTowardLimit(c.festival_end_date),
+    });
+  }
+
+  out.sort((a, b) => {
+    if (a.countsTowardLimit !== b.countsTowardLimit) return a.countsTowardLimit ? -1 : 1;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+  });
+  return out;
+}
+
+export async function fetchMySubscriptionCreatedCompetitions(
+  userId: string
+): Promise<SubscriptionUsageCompetition[]> {
+  const today = todayIsoDate();
+  const [lmsRes, f2tRes, racingRes] = await Promise.all([
+    supabase
+      .from('lms_competitions')
+      .select('id, name, status')
+      .eq('created_by_user_id', userId)
+      .in('status', ['open', 'active']),
+    supabase
+      .from('f2t_competitions')
+      .select('id, name, status')
+      .eq('created_by_user_id', userId)
+      .in('status', ['open', 'active']),
+    supabase
+      .from('competitions')
+      .select('id, name, festival_end_date')
+      .eq('created_by_user_id', userId)
+      .gte('festival_end_date', today),
+  ]);
+
+  const out: SubscriptionUsageCompetition[] = [];
+  for (const c of lmsRes.data ?? []) {
+    out.push({ id: c.id, name: c.name, sport: 'lms', status: c.status });
+  }
+  for (const c of f2tRes.data ?? []) {
+    out.push({ id: c.id, name: c.name, sport: 'f2t', status: c.status });
+  }
+  for (const c of racingRes.data ?? []) {
+    out.push({
+      id: c.id,
+      name: c.name,
+      sport: 'racing',
+      status: c.festival_end_date >= today ? 'live' : 'complete',
+    });
+  }
+
+  out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  return out;
 }
 
 export function hasCreatorEntitlement(ent: SubscriptionEntitlements | null | undefined): boolean {

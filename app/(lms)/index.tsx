@@ -44,6 +44,7 @@ import {
 import { lmsSessionSetFixtures } from '@/lib/lms/sessionCache';
 import { useRealtimeLmsFixtures } from '@/lib/useRealtimeLmsFixtures';
 import { canCreateCompetitions } from '@/lib/adminSession';
+import { confirmJoinLimitDisclaimer } from '@/lib/joinLimitDisclaimer';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
 import { LeagueTablePanel } from '@/components/lms/LeagueTablePanel';
 import { lmsDisplayTeamName } from '@/lib/lms/teamColours';
@@ -515,6 +516,9 @@ export default function LmsHomeScreen() {
       Alert.alert('Competition code', 'Enter the competition code to join.');
       return;
     }
+    const confirmed = await confirmJoinLimitDisclaimer(code);
+    if (!confirmed) return;
+
     setJoining(true);
     try {
       const res = await lmsRequestJoin(code);

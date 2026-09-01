@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { subscriptionErrorMessage } from '@/lib/subscriptionEntitlements';
 
 const db = supabase as any;
 
@@ -78,8 +79,10 @@ export function f2tJoinErrorMessage(code?: string): string {
       return 'Your account cannot join competitions.';
     case 'competition_completed':
       return 'This competition has finished.';
+    case 'join_limit_reached':
+      return subscriptionErrorMessage(code);
     default:
-      return code ?? 'Could not join.';
+      return subscriptionErrorMessage(code, code ?? 'Could not join.');
   }
 }
 
