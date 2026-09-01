@@ -31,7 +31,7 @@ import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
 import { getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
 import { racingCreateCompetition } from '@/lib/racingAdminApi';
-import { getProfileRole, isStaffRole } from '@/lib/adminSession';
+import { canCreateCompetitions } from '@/lib/adminSession';
 import {
   coursesForRegion,
   displayRacingCourseName,
@@ -109,8 +109,8 @@ export default function HomeScreen() {
     let cancelled = false;
     void (async () => {
       try {
-        const role = await getProfileRole(userId);
-        if (!cancelled) setIsStaff(isStaffRole(role));
+        const canCreate = await canCreateCompetitions(userId);
+        if (!cancelled) setIsStaff(canCreate);
       } catch {
         if (!cancelled) setIsStaff(false);
       }

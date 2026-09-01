@@ -1,5 +1,6 @@
 import { Alert, Platform } from 'react-native';
 import { supabase } from '@/lib/supabase';
+import { fetchMyEntitlements, hasCreatorEntitlement } from '@/lib/subscriptionEntitlements';
 
 export type ProfileRole = 'User' | 'Admin' | 'Owner';
 
@@ -42,7 +43,14 @@ export async function getProfileRole(userId: string): Promise<ProfileRole> {
 /** True for Admin or Owner (can use admin tools). */
 export async function isProfileAdmin(userId: string): Promise<boolean> {
   const role = await getProfileRole(userId);
-  return isStaffRole(role);
+  if (isStaffRole(role)) return true;
+  const ent = await fetchMyEntitlements();
+  return hasCreatorEntitlement(ent);
+}
+
+/** True if user can create competitions (Creator subscription or legacy Admin / Owner). */
+export async function canCreateCompetitions(userId: string): Promise<boolean> {
+  return isProfileAdmin(userId);
 }
 
 export async function isProfileOwner(userId: string): Promise<boolean> {

@@ -43,7 +43,7 @@ import {
 } from '@/lib/lms/api';
 import { lmsSessionSetFixtures } from '@/lib/lms/sessionCache';
 import { useRealtimeLmsFixtures } from '@/lib/useRealtimeLmsFixtures';
-import { getProfileRole, isStaffRole } from '@/lib/adminSession';
+import { canCreateCompetitions } from '@/lib/adminSession';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
 import { LeagueTablePanel } from '@/components/lms/LeagueTablePanel';
 import { lmsDisplayTeamName } from '@/lib/lms/teamColours';
@@ -160,12 +160,11 @@ export default function LmsHomeScreen() {
   const load = useCallback(async () => {
     if (!userId) return;
     try {
-      const [home, role, insights] = await Promise.all([
+      const [home, insights] = await Promise.all([
         lmsGetHome('2026/27'),
-        getProfileRole(userId),
         lmsGetHomeInsights('2026/27').catch(() => null),
       ]);
-      const staff = isStaffRole(role);
+      const staff = await canCreateCompetitions(userId);
       setIsStaff(staff);
       setComps(home.competitions);
       setPending(home.pending);

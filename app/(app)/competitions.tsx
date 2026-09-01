@@ -22,7 +22,7 @@ import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
 import { getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
 import { useNarrowWebCompact, cfs } from '@/lib/narrowWebTypography';
-import { getProfileRole, isOwnerRole, isStaffRole } from '@/lib/adminSession';
+import { getProfileRole, isOwnerRole, canCreateCompetitions } from '@/lib/adminSession';
 import {
   racingAdminListCompetitions,
   racingCreateCompetition,
@@ -100,7 +100,7 @@ export default function MyCompetitionsScreen() {
       try {
         const role = await getProfileRole(userId);
         if (cancelled) return;
-        setIsStaff(isStaffRole(role));
+        setIsStaff(await canCreateCompetitions(userId));
         setIsOwner(isOwnerRole(role));
       } catch {
         if (!cancelled) {

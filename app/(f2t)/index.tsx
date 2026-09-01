@@ -29,7 +29,7 @@ import {
   type F2tPendingJoin,
 } from '@/lib/f2t/api';
 import { lmsListGameweeks, type LmsGameweek } from '@/lib/lms/api';
-import { getProfileRole, isStaffRole } from '@/lib/adminSession';
+import { canCreateCompetitions } from '@/lib/adminSession';
 
 type HomeTab = 'competitions' | 'join' | 'table';
 const F2T_SEASON = '2026/27';
@@ -87,8 +87,7 @@ export default function F2tHomeScreen() {
           : 'competitions';
       });
 
-      const role = await getProfileRole(userId);
-      const staff = isStaffRole(role);
+      const staff = await canCreateCompetitions(userId);
       setIsStaff(staff);
 
       if (staff && !createGwsLoadedRef.current) {

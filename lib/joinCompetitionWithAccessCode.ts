@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { subscriptionErrorMessage } from '@/lib/subscriptionEntitlements';
 
 export type JoinCompetitionOutcome =
   | { kind: 'invalid_code' }
@@ -29,40 +30,32 @@ export async function joinCompetitionWithAccessCode(params: {
       return { kind: 'error', message: 'This account has been banned and cannot join competitions.' };
     }
 
-    const { data: comp, error: compError } = await supabase
-      .from('competitions')
-      .select('id, name')
-      .eq('access_code', trimmed)
-      .maybeSingle();
+    const { data, error } = await (supabase as any).rpc('racing_request_join', {
+      p_access_code: trimmed,
+      p_display_name: displayNameToUse,
+    });
 
-    if (compError) throw compError;
-    if (!comp) {
-      return { kind: 'invalid_code' };
+    if (error) throw error;
+
+    const res = data as {
+      success?: boolean;
+      error?: string;
+      competition_name?: string;
+    };
+
+    if (!res?.success) {
+      const code = res?.error;
+      if (code === 'invalid_code') return { kind: 'invalid_code' };
+      if (code === 'already_in') {
+        return { kind: 'already_in', competitionName: res.competition_name ?? 'Competition' };
+      }
+      return {
+        kind: 'error',
+        message: subscriptionErrorMessage(code, 'Failed to join competition.'),
+      };
     }
 
-    const { data: existing } = await supabase
-      .from('competition_participants')
-      .select('id')
-      .eq('competition_id', comp.id)
-      .eq('user_id', userId)
-      .maybeSingle();
-    if (existing) {
-      return { kind: 'already_in', competitionName: comp.name };
-    }
-
-    const { error: requestError } = await supabase.from('competition_join_requests').upsert(
-      {
-        competition_id: comp.id,
-        user_id: userId,
-        display_name: displayNameToUse,
-        status: 'pending',
-      },
-      { onConflict: 'competition_id,user_id' }
-    );
-
-    if (requestError) throw requestError;
-
-    return { kind: 'request_sent', competitionName: comp.name };
+    return { kind: 'request_sent', competitionName: res.competition_name ?? 'Competition' };
   } catch (e: unknown) {
     let msg = 'Failed to join competition';
     if (e && typeof e === 'object' && 'message' in e && typeof (e as { message: unknown }).message === 'string') {

@@ -47,6 +47,12 @@ import {
 } from '@/lib/f2t/api';
 import { F2tAlertsPanel } from '@/components/f2t/F2tAlertsPanel';
 import {
+  fetchMyEntitlements,
+  formatCreatorTier,
+  participantTierLabel,
+  type SubscriptionEntitlements,
+} from '@/lib/subscriptionEntitlements';
+import {
   lmsAdminSetFixtureExcluded,
   lmsGetCurrentGameweek,
   lmsListFixturesForGameweek,
@@ -261,6 +267,8 @@ export default function CompetitionHubScreen() {
   const [signingOut, setSigningOut] = useState(false);
   const [signingOutAll, setSigningOutAll] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [entitlements, setEntitlements] = useState<SubscriptionEntitlements | null>(null);
+  const [entitlementsLoading, setEntitlementsLoading] = useState(false);
   const initialTab = String(params.tab ?? '').trim();
   const [tab, setTab] = useState<HubTab>(
     initialTab === 'admin' || initialTab === 'racing' || initialTab === 'account'
@@ -279,6 +287,22 @@ export default function CompetitionHubScreen() {
   const contentShift = useRef(new Animated.Value(0)).current;
   const enterOpacity = useRef(new Animated.Value(0)).current;
   const enterRise = useRef(new Animated.Value(12)).current;
+
+  useEffect(() => {
+    if (tab !== 'account' || !userId) return;
+    let cancelled = false;
+    setEntitlementsLoading(true);
+    void fetchMyEntitlements()
+      .then((ent) => {
+        if (!cancelled) setEntitlements(ent);
+      })
+      .finally(() => {
+        if (!cancelled) setEntitlementsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, userId]);
 
   useEffect(() => {
     if (!isOwner && tab === 'admin') setTab('football');
@@ -1455,6 +1479,36 @@ export default function CompetitionHubScreen() {
                     <Ionicons name="chevron-forward" size={18} color={theme.colors.textMuted} />
                   </Pressable>
                   <Text style={styles.panelLabel}>Your account</Text>
+                  {entitlementsLoading ? (
+                    <ActivityIndicator size="small" color={theme.colors.textMuted} style={{ marginBottom: 12 }} />
+                  ) : entitlements ? (
+                    <View style={{ marginBottom: 12, gap: 4 }}>
+                      <Text style={styles.accountBlurb}>
+                        Plan: {participantTierLabel(entitlements)}
+                        {entitlements.creator_tier
+                          ? ` · ${formatCreatorTier(entitlements.creator_tier)}`
+                          : entitlements.lifetime_creator_tier
+                            ? ` · Lifetime ${formatCreatorTier(entitlements.lifetime_creator_tier)}`
+                            : ''}
+                      </Text>
+                      <Text style={styles.accountBlurb}>
+                        Joins: {entitlements.current_join_count ?? 0}
+                        {entitlements.max_concurrent_joins != null
+                          ? ` / ${entitlements.max_concurrent_joins}`
+                          : ' (unlimited)'}
+                        {entitlements.creator_tier || entitlements.lifetime_creator_tier
+                          ? ` · Active comps: ${entitlements.current_create_count ?? 0}${
+                              entitlements.max_concurrent_creates != null
+                                ? ` / ${entitlements.max_concurrent_creates}`
+                                : ''
+                            }`
+                          : ''}
+                      </Text>
+                      <Text style={[styles.accountBlurb, { opacity: 0.85 }]}>
+                        Subscription upgrades (Stripe) coming soon — limits are enforced on join and create.
+                      </Text>
+                    </View>
+                  ) : null}
                   <Text style={styles.accountBlurb}>
                     Lost a phone? Sign out of every device and stop notifications on those devices.
                     You will need to sign in again on phones you still use.
