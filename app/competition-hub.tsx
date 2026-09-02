@@ -46,6 +46,7 @@ import {
   ownerSetFootballPlayerFlagged,
 } from '@/lib/f2t/api';
 import { F2tAlertsPanel } from '@/components/f2t/F2tAlertsPanel';
+import { GamemasterCustomPricingPanel } from '@/components/GamemasterCustomPricingPanel';
 import { AccountSubscriptionPanel } from '@/components/AccountSubscriptionPanel';
 import { fetchMyEntitlements, type SubscriptionEntitlements } from '@/lib/subscriptionEntitlements';
 import {
@@ -67,7 +68,7 @@ const PRIVACY_POLICY_URL =
 
 type HubTab = 'football' | 'racing' | 'admin' | 'account';
 
-type AdminCategory = 'football' | 'racing' | 'users';
+type AdminCategory = 'football' | 'racing' | 'users' | 'gamemaster';
 type FootballAdminTab = 'f2t_alerts' | 'exclusions' | 'competitions';
 
 const LMS_SEASON = '2026/27';
@@ -1468,8 +1469,7 @@ export default function CompetitionHubScreen() {
                     userId={userId}
                     entitlements={entitlements}
                     loading={entitlementsLoading}
-                    playerAccent={activeAccent}
-                    organiserAccent={theme.colors.accent}
+                    accent={activeAccent}
                   >
                     <Text style={styles.accountBlurb}>
                       Sign out everywhere if you have lost a device. You will need to sign in again on
@@ -1522,6 +1522,7 @@ export default function CompetitionHubScreen() {
                             { key: 'football' as const, label: 'Football' },
                             { key: 'racing' as const, label: 'Racing' },
                             { key: 'users' as const, label: 'Users' },
+                            { key: 'gamemaster' as const, label: 'Club pricing' },
                           ] as const
                         ).map((cat) => {
                           const active = adminCategory === cat.key;
@@ -1546,7 +1547,7 @@ export default function CompetitionHubScreen() {
                         })}
                       </View>
 
-                      {adminCategory !== 'users' ? (
+                      {adminCategory !== 'users' && adminCategory !== 'gamemaster' ? (
                         <View style={styles.gameModesCard}>
                           <Text style={styles.panelLabel}>Game modes for users</Text>
                           <Text style={styles.gameModesHint}>
@@ -1859,6 +1860,13 @@ export default function CompetitionHubScreen() {
                               ) : null}
                             </View>
                           )}
+                        </View>
+                      ) : null}
+
+                      {adminCategory === 'gamemaster' ? (
+                        <View style={styles.gameModesCard}>
+                          <Text style={styles.panelLabel}>Club League Bill</Text>
+                          <GamemasterCustomPricingPanel accent={adminAccent} />
                         </View>
                       ) : null}
 

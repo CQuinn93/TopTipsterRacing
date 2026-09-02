@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Pressable,
   ActivityIndicator,
+  TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -19,9 +20,15 @@ import {
   type SubscriptionEntitlements,
   type SubscriptionUsageCompetition,
 } from '@/lib/subscriptionEntitlements';
+import { formatPublicCreatorPrice } from '@/lib/gamemasterCustomPricing';
 
-type ExpandKey = 'player' | 'organiser' | null;
 type DetailKey = 'joins' | 'creates' | null;
+
+const COMPETITION_HUB_INFO = {
+  title: 'Competition hubs',
+  message:
+    '€50 deposit, €10 per month per hub.\n\nWe supply a tablet in a secure box, set up and locked to your club account. Players use it in the venue to make selections and join competitions.\n\nThe deposit is refundable when the hub is returned in good condition.',
+};
 
 const PARTICIPANT_PRICES: Record<ParticipantTier, string> = {
   user: 'Free',
@@ -29,16 +36,34 @@ const PARTICIPANT_PRICES: Record<ParticipantTier, string> = {
   user_premium: '€1.99/mo',
 };
 
-const CREATOR_PRICES: Record<CreatorTier, string> = {
-  creator: '€3.99/mo',
-  creator_plus: '€4.99/mo',
-  creator_pro: '€9.99/mo',
-  gamemaster: '€19.99/mo',
+const CREATOR_PRICES: Record<Exclude<CreatorTier, 'gamemaster'>, string> = {
+  creator: formatPublicCreatorPrice('creator'),
+  creator_plus: formatPublicCreatorPrice('creator_plus'),
+  creator_pro: formatPublicCreatorPrice('creator_pro'),
 };
+
+function creatorPlanSubtitle(ent: SubscriptionEntitlements, tier: CreatorTier): string {
+  if (ent.is_owner) return 'Full platform access';
+  if (ent.lifetime_creator_tier && !ent.creator_tier) return 'Lifetime · no payment';
+  if (tier === 'gamemaster') return 'Club plan · custom agreement';
+  return CREATOR_PRICES[tier as Exclude<CreatorTier, 'gamemaster'>];
+}
 
 function formatLimit(value: number | null | undefined): string {
   if (value == null) return 'Unlimited';
   return String(value);
+}
+
+function formatParticipantTierLabel(tier: ParticipantTier): string {
+  if (tier === 'user_premium') return 'User Premium';
+  if (tier === 'user_plus') return 'User Plus';
+  return 'User';
+}
+
+/** Bundled player tier included with a creator subscription (matches DB). */
+function bundledParticipantTier(creator: CreatorTier): ParticipantTier {
+  if (creator === 'creator_pro' || creator === 'gamemaster') return 'user_premium';
+  return 'user_plus';
 }
 
 function effectiveParticipantTier(ent: SubscriptionEntitlements): ParticipantTier {
@@ -47,38 +72,50 @@ function effectiveParticipantTier(ent: SubscriptionEntitlements): ParticipantTie
   return ent.participant_tier ?? 'user';
 }
 
-function playerPlanTitle(ent: SubscriptionEntitlements): string {
-  if (ent.is_owner) return 'Owner';
-  const tier = effectiveParticipantTier(ent);
-  if (ent.lifetime_participant_tier === 'user_premium') return 'User Premium';
-  if (tier === 'user_premium') return 'User Premium';
-  if (tier === 'user_plus') return 'User Plus';
-  return 'User';
+function effectiveCreatorTier(ent: SubscriptionEntitlements): CreatorTier | null {
+  if (ent.is_owner) return null;
+  return ent.creator_tier ?? ent.lifetime_creator_tier ?? null;
 }
 
-function playerPlanSubtitle(ent: SubscriptionEntitlements): string {
-  if (ent.is_owner) return 'Full access as a player';
-  if (ent.lifetime_participant_tier === 'user_premium') return 'Lifetime · no payment';
-  const tier = effectiveParticipantTier(ent);
-  return PARTICIPANT_PRICES[tier];
-}
+type PlanSummary = {
+  title: string;
+  subtitle: string;
+  badge?: string;
+  isCreatorPlan: boolean;
+  bundledPlayerLabel?: string;
+};
 
-function organiserPlanTitle(ent: SubscriptionEntitlements): string {
-  if (ent.is_owner) return 'Owner';
-  const tier = ent.creator_tier ?? ent.lifetime_creator_tier;
-  if (!tier) return 'No organiser plan';
-  if (ent.lifetime_creator_tier && !ent.creator_tier) {
-    return `Lifetime ${formatCreatorTier(ent.lifetime_creator_tier)}`;
+function planSummary(ent: SubscriptionEntitlements): PlanSummary {
+  if (ent.is_owner) {
+    return {
+      title: 'Owner',
+      subtitle: 'Full platform access',
+      isCreatorPlan: true,
+      bundledPlayerLabel: 'User Premium included',
+    };
   }
-  return formatCreatorTier(tier);
-}
 
-function organiserPlanSubtitle(ent: SubscriptionEntitlements): string {
-  if (ent.is_owner) return 'Full access as an organiser';
-  const tier = ent.creator_tier ?? ent.lifetime_creator_tier;
-  if (!tier) return 'Upgrade to run competitions';
-  if (ent.lifetime_creator_tier && !ent.creator_tier) return 'Lifetime · no payment';
-  return CREATOR_PRICES[tier];
+  const creator = effectiveCreatorTier(ent);
+  if (creator) {
+    const bundled = formatParticipantTierLabel(bundledParticipantTier(creator));
+    const lifetimeCreatorOnly = !!ent.lifetime_creator_tier && !ent.creator_tier;
+    return {
+      title: creator === 'gamemaster' ? 'Club plan' : formatCreatorTier(creator),
+      subtitle: creatorPlanSubtitle(ent, creator),
+      badge: lifetimeCreatorOnly ? 'Lifetime' : creator === 'gamemaster' ? 'Gamemaster' : undefined,
+      isCreatorPlan: true,
+      bundledPlayerLabel: `${bundled} included with subscription`,
+    };
+  }
+
+  const player = effectiveParticipantTier(ent);
+  const lifetimePlayer = ent.lifetime_participant_tier === 'user_premium';
+  return {
+    title: formatParticipantTierLabel(player),
+    subtitle: lifetimePlayer ? 'Lifetime · no payment' : PARTICIPANT_PRICES[player],
+    badge: lifetimePlayer ? 'Lifetime' : undefined,
+    isCreatorPlan: false,
+  };
 }
 
 type LimitRowProps = {
@@ -91,6 +128,8 @@ type LimitRowProps = {
   onToggleDetail?: () => void;
   detailLoading?: boolean;
   detail?: ReactNode;
+  infoTitle?: string;
+  infoMessage?: string;
 };
 
 function LimitRow({
@@ -103,8 +142,16 @@ function LimitRow({
   onToggleDetail,
   detailLoading,
   detail,
+  infoTitle,
+  infoMessage,
 }: LimitRowProps) {
   const theme = useTheme();
+  const [infoOpen, setInfoOpen] = useState(false);
+
+  const toggleInfo = () => {
+    setInfoOpen((open) => !open);
+  };
+
   const rowBody = (
     <View style={limitRowStyles.row}>
       <Ionicons name={icon} size={18} color={theme.colors.textMuted} style={limitRowStyles.icon} />
@@ -115,6 +162,26 @@ function LimitRow({
         ) : null}
       </View>
       <View style={limitRowStyles.valueWrap}>
+        {infoMessage ? (
+          <TouchableOpacity
+            onPress={(e) => {
+              e.stopPropagation?.();
+              toggleInfo();
+            }}
+            activeOpacity={0.6}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: infoOpen }}
+            accessibilityLabel={`More about ${infoTitle ?? label}`}
+            style={limitRowStyles.infoBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons
+              name="information-circle-outline"
+              size={20}
+              color={infoOpen ? theme.colors.accent : theme.colors.textMuted}
+            />
+          </TouchableOpacity>
+        ) : null}
         <Text style={[limitRowStyles.value, { color: theme.colors.text }]}>{value}</Text>
         {expandable ? (
           <Ionicons
@@ -141,6 +208,18 @@ function LimitRow({
       ) : (
         rowBody
       )}
+      {infoOpen && infoMessage ? (
+        <View
+          style={[
+            limitRowStyles.infoPanel,
+            { backgroundColor: theme.colors.background, borderColor: theme.colors.border },
+          ]}
+        >
+          <Text style={[limitRowStyles.infoPanelText, { color: theme.colors.textSecondary }]}>
+            {infoMessage}
+          </Text>
+        </View>
+      ) : null}
       {detailExpanded ? (
         <View style={[limitRowStyles.detail, { borderTopColor: theme.colors.border }]}>
           {detailLoading ? (
@@ -238,6 +317,26 @@ const limitRowStyles = StyleSheet.create({
   icon: { marginTop: 2 },
   body: { flex: 1, minWidth: 0 },
   label: { fontSize: 14, lineHeight: 20 },
+  infoBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 2,
+  },
+  infoPanel: {
+    marginLeft: 28,
+    marginRight: 4,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  infoPanelText: {
+    fontSize: 13,
+    lineHeight: 19,
+  },
   hint: { fontSize: 12, lineHeight: 16, marginTop: 2 },
   valueWrap: {
     flexDirection: 'row',
@@ -269,7 +368,6 @@ const limitRowStyles = StyleSheet.create({
 });
 
 type PlanCardProps = {
-  kindLabel: string;
   title: string;
   subtitle: string;
   accent: string;
@@ -279,16 +377,7 @@ type PlanCardProps = {
   badge?: string;
 };
 
-function PlanCard({
-  kindLabel,
-  title,
-  subtitle,
-  accent,
-  expanded,
-  onPress,
-  children,
-  badge,
-}: PlanCardProps) {
+function PlanCard({ title, subtitle, accent, expanded, onPress, children, badge }: PlanCardProps) {
   const theme = useTheme();
   return (
     <View
@@ -305,11 +394,10 @@ function PlanCard({
         style={cardStyles.header}
         accessibilityRole="button"
         accessibilityState={{ expanded }}
-        accessibilityLabel={`${kindLabel}, ${title}, ${subtitle}`}
+        accessibilityLabel={`${title}, ${subtitle}`}
       >
         <View style={[cardStyles.accentDot, { backgroundColor: accent }]} />
         <View style={cardStyles.headerText}>
-          <Text style={[cardStyles.kindLabel, { color: theme.colors.textMuted }]}>{kindLabel}</Text>
           <View style={cardStyles.titleRow}>
             <Text style={[cardStyles.title, { color: theme.colors.text }]}>{title}</Text>
             {badge ? (
@@ -352,12 +440,6 @@ const cardStyles = StyleSheet.create({
     borderRadius: 5,
   },
   headerText: { flex: 1, minWidth: 0 },
-  kindLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -394,8 +476,7 @@ type Props = {
   userId: string | null;
   entitlements: SubscriptionEntitlements | null;
   loading: boolean;
-  playerAccent: string;
-  organiserAccent: string;
+  accent: string;
   children?: ReactNode;
 };
 
@@ -404,12 +485,11 @@ export function AccountSubscriptionPanel({
   userId,
   entitlements,
   loading,
-  playerAccent,
-  organiserAccent,
+  accent,
   children,
 }: Props) {
   const theme = useTheme();
-  const [expanded, setExpanded] = useState<ExpandKey>(null);
+  const [expanded, setExpanded] = useState(false);
   const [detailExpanded, setDetailExpanded] = useState<DetailKey>(null);
   const [joinsList, setJoinsList] = useState<SubscriptionUsageCompetition[] | null>(null);
   const [createsList, setCreatesList] = useState<SubscriptionUsageCompetition[] | null>(null);
@@ -441,7 +521,14 @@ export function AccountSubscriptionPanel({
           marginBottom: 8,
           marginTop: 4,
         },
-        planStack: { gap: 10 },
+        includedNote: {
+          fontSize: 13,
+          fontWeight: '600',
+          color: theme.colors.text,
+          lineHeight: 18,
+          marginTop: 4,
+          marginBottom: 4,
+        },
         upgradeNote: {
           fontSize: 13,
           color: theme.colors.textMuted,
@@ -455,10 +542,6 @@ export function AccountSubscriptionPanel({
       }),
     [theme]
   );
-
-  const toggle = (key: ExpandKey) => {
-    setExpanded((prev) => (prev === key ? null : key));
-  };
 
   const loadJoins = useCallback(async () => {
     if (!userId) return;
@@ -500,9 +583,7 @@ export function AccountSubscriptionPanel({
   };
 
   const ent = entitlements;
-  const hasOrganiser = ent
-    ? ent.is_owner || ent.creator_tier || ent.lifetime_creator_tier
-    : false;
+  const plan = ent ? planSummary(ent) : null;
 
   return (
     <View style={styles.root}>
@@ -515,115 +596,96 @@ export function AccountSubscriptionPanel({
 
       {loading ? (
         <ActivityIndicator size="small" color={theme.colors.textMuted} />
-      ) : ent ? (
-        <View style={styles.planStack}>
-          <PlanCard
-            kindLabel="PLAYER PLAN"
-            title={playerPlanTitle(ent)}
-            subtitle={playerPlanSubtitle(ent)}
-            accent={playerAccent}
-            expanded={expanded === 'player'}
-            onPress={() => toggle('player')}
-            badge={ent.lifetime_participant_tier ? 'Lifetime' : undefined}
-          >
-            <LimitRow
-              icon="enter-outline"
-              label="Competition joins"
-              value={`${ent.current_join_count ?? 0} / ${formatLimit(ent.max_concurrent_joins)}`}
-              hint="Only alive in live competitions counts. Eliminated or completed leagues do not."
-              expandable={
-                (ent.current_join_count ?? 0) > 0 ||
-                (ent.current_eliminated_in_live_count ?? 0) > 0
-              }
-              detailExpanded={detailExpanded === 'joins'}
-              onToggleDetail={() => toggleDetail('joins')}
-              detailLoading={joinsLoading}
-              detail={<CompetitionUsageList items={joinsList ?? []} />}
-            />
-            <LimitRow
-              icon="megaphone-outline"
-              label="In-app advertising"
-              value={ent.show_ads ? 'Shown' : 'None'}
-              hint={
-                ent.show_ads
-                  ? 'Free User plan may show occasional banners in the app. Paid player plans remove ads.'
-                  : 'Your plan does not show advertising.'
-              }
-            />
-            {!ent.is_owner && effectiveParticipantTier(ent) === 'user' ? (
-              <Text style={styles.upgradeNote}>
-                Upgrade to User Plus or User Premium for more joins and no ads. Payments coming soon.
-              </Text>
-            ) : null}
-          </PlanCard>
+      ) : ent && plan ? (
+        <PlanCard
+          title={plan.title}
+          subtitle={plan.subtitle}
+          accent={accent}
+          expanded={expanded}
+          onPress={() => setExpanded((v) => !v)}
+          badge={plan.badge}
+        >
+          {plan.bundledPlayerLabel ? (
+            <Text style={styles.includedNote}>{plan.bundledPlayerLabel}</Text>
+          ) : null}
 
-          <PlanCard
-            kindLabel="ORGANISER PLAN"
-            title={organiserPlanTitle(ent)}
-            subtitle={organiserPlanSubtitle(ent)}
-            accent={organiserAccent}
-            expanded={expanded === 'organiser'}
-            onPress={() => toggle('organiser')}
-            badge={
-              ent.lifetime_creator_tier && !ent.creator_tier ? 'Lifetime' : undefined
+          <LimitRow
+            icon="enter-outline"
+            label="Competition joins"
+            value={`${ent.current_join_count ?? 0} / ${formatLimit(ent.max_concurrent_joins)}`}
+            hint="Only alive in live competitions counts. Eliminated or completed leagues do not."
+            expandable={
+              (ent.current_join_count ?? 0) > 0 || (ent.current_eliminated_in_live_count ?? 0) > 0
             }
-          >
-            {hasOrganiser ? (
-              <>
+            detailExpanded={detailExpanded === 'joins'}
+            onToggleDetail={() => toggleDetail('joins')}
+            detailLoading={joinsLoading}
+            detail={<CompetitionUsageList items={joinsList ?? []} />}
+          />
+          <LimitRow
+            icon="megaphone-outline"
+            label="In-app advertising"
+            value={ent.show_ads ? 'Shown' : 'None'}
+            hint={
+              ent.show_ads
+                ? 'Free User plan may show occasional banners in the app. Paid plans remove ads.'
+                : 'Your plan does not show advertising.'
+            }
+          />
+
+          {plan.isCreatorPlan ? (
+            <>
+              <LimitRow
+                icon="trophy-outline"
+                label="Active competitions"
+                value={`${ent.current_create_count ?? 0} / ${formatLimit(ent.max_concurrent_creates)}`}
+                hint="Open or running competitions you created"
+                expandable={(ent.current_create_count ?? 0) > 0}
+                detailExpanded={detailExpanded === 'creates'}
+                onToggleDetail={() => toggleDetail('creates')}
+                detailLoading={createsLoading}
+                detail={<CompetitionUsageList items={createsList ?? []} />}
+              />
+              <LimitRow
+                icon="people-outline"
+                label="Players per competition"
+                value={formatLimit(ent.max_participants_per_competition)}
+              />
+              <LimitRow
+                icon="analytics-outline"
+                label="Total players (all comps)"
+                value={`${ent.current_aggregate_participants ?? 0} / ${formatLimit(
+                  ent.max_aggregate_active_participants
+                )}`}
+                hint="Across your live competitions"
+              />
+              <LimitRow
+                icon="football-outline"
+                label="Sports"
+                value={
+                  ent.create_sport_scope === 'all'
+                    ? 'Football, racing & more'
+                    : 'One sport at a time'
+                }
+              />
+              {ent.kiosk_purchase_allowed ? (
                 <LimitRow
-                  icon="trophy-outline"
-                  label="Active competitions"
-                  value={`${ent.current_create_count ?? 0} / ${formatLimit(ent.max_concurrent_creates)}`}
-                  hint="Open or running competitions you created"
-                  expandable={(ent.current_create_count ?? 0) > 0}
-                  detailExpanded={detailExpanded === 'creates'}
-                  onToggleDetail={() => toggleDetail('creates')}
-                  detailLoading={createsLoading}
-                  detail={<CompetitionUsageList items={createsList ?? []} />}
+                  icon="storefront-outline"
+                  label="Competition hubs"
+                  value={String(ent.kiosk_licenses_count ?? 0)}
+                  infoTitle={COMPETITION_HUB_INFO.title}
+                  infoMessage={COMPETITION_HUB_INFO.message}
                 />
-                <LimitRow
-                  icon="people-outline"
-                  label="Players per competition"
-                  value={formatLimit(ent.max_participants_per_competition)}
-                />
-                <LimitRow
-                  icon="analytics-outline"
-                  label="Total players (all comps)"
-                  value={`${ent.current_aggregate_participants ?? 0} / ${formatLimit(
-                    ent.max_aggregate_active_participants
-                  )}`}
-                  hint="Across your live competitions"
-                />
-                <LimitRow
-                  icon="football-outline"
-                  label="Sports"
-                  value={
-                    ent.create_sport_scope === 'all'
-                      ? 'Football, racing & more'
-                      : 'One sport at a time'
-                  }
-                />
-                {ent.kiosk_purchase_allowed ? (
-                  <LimitRow
-                    icon="tablet-outline"
-                    label="Kiosk licences"
-                    value={String(ent.kiosk_licenses_count ?? 0)}
-                    hint="€80 per kiosk when available"
-                  />
-                ) : null}
-              </>
-            ) : (
-              <>
-                <Text style={styles.upgradeNote}>
-                  Creator plans let you run pub and club competitions with join codes, approvals, and
-                  admin tools.
-                </Text>
-                <LimitRow icon="create-outline" label="Create competitions" value="Not included" />
-                <LimitRow icon="enter-outline" label="Player plan includes" value="User Plus benefits" />
-              </>
-            )}
-          </PlanCard>
-        </View>
+              ) : null}
+            </>
+          ) : (
+            <Text style={styles.upgradeNote}>
+              {effectiveParticipantTier(ent) === 'user'
+                ? 'Upgrade to User Plus or User Premium for more joins and no ads — or a Creator plan to run competitions. Payments coming soon.'
+                : 'Need a larger club setup? Contact us for a custom Gamemaster package. Payments coming soon.'}
+            </Text>
+          )}
+        </PlanCard>
       ) : (
         <Text style={styles.upgradeNote}>Could not load subscription details. Pull to refresh.</Text>
       )}
