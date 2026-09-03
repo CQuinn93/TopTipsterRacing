@@ -25,12 +25,18 @@ import {
   verifyKioskExitPin,
   type KioskDeviceConfig,
 } from '@/lib/kioskSession';
+import { KioskLmsPickPanel } from '@/components/kiosk/KioskLmsPickPanel';
+import { KioskCompetitionDashboard } from '@/components/kiosk/KioskCompetitionDashboard';
+import { KioskHubHeader } from '@/components/kiosk/KioskHubHeader';
+import { lmsGetMyParticipant, lmsJoinErrorMessage } from '@/lib/lms/api';
+import { f2tJoinErrorMessage } from '@/lib/f2t/api';
 
 type Phase =
   | 'loading'
   | 'idle'
   | 'auth'
   | 'payment'
+  | 'pick'
   | 'done'
   | 'exit'
   | 'missing';
@@ -52,6 +58,7 @@ export default function KioskScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [joinRequestId, setJoinRequestId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'online' | null>(null);
+  const [patronUserId, setPatronUserId] = useState<string | null>(null);
   const [exitPin, setExitPin] = useState('');
   const [exitError, setExitError] = useState<string | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -74,6 +81,7 @@ export default function KioskScreen() {
     setDisplayName('');
     setJoinRequestId(null);
     setPaymentMethod(null);
+    setPatronUserId(null);
     setAuthMode('signin');
     setBusy(false);
     if (userId) {
@@ -113,7 +121,7 @@ export default function KioskScreen() {
   }, [clearIdleTimer]);
 
   useEffect(() => {
-    if (phase === 'done') scheduleIdleReturn();
+    if (phase === 'done' || phase === 'pick') scheduleIdleReturn();
     return () => clearIdleTimer();
   }, [phase, scheduleIdleReturn, clearIdleTimer]);
 
@@ -191,6 +199,18 @@ export default function KioskScreen() {
         return;
       }
 
+      // Existing members (incl. eliminated) must not hit the join-code path —
+      // after kickoff that returns entries_closed instead of already_in.
+      if (config.sport === 'lms') {
+        const me = await lmsGetMyParticipant(config.competitionId, activeUserId);
+        if (me) {
+          setPatronUserId(activeUserId);
+          setMessage(null);
+          setPhase('pick');
+          return;
+        }
+      }
+
       const joinRes = await kioskRequestJoin({
         sport: config.sport,
         joinCode: config.joinCode,
@@ -203,15 +223,21 @@ export default function KioskScreen() {
       });
 
       if (joinRes.already_in) {
-        setMessage(
-          `You are already in ${joinRes.competition_name ?? config.competitionName}. Ask staff if you need help with picks.`
-        );
-        setPhase('done');
+        setPatronUserId(activeUserId);
+        setMessage(null);
+        setPhase('pick');
         return;
       }
 
       if (!joinRes.success) {
-        setMessage(joinRes.error ?? 'Could not submit join request.');
+        const raw = joinRes.error ?? 'Could not submit join request.';
+        setMessage(
+          config.sport === 'lms'
+            ? lmsJoinErrorMessage(raw)
+            : config.sport === 'f2t'
+              ? f2tJoinErrorMessage(raw)
+              : raw
+        );
         return;
       }
 
@@ -286,254 +312,311 @@ export default function KioskScreen() {
     );
   }
 
+  const showDashboard = phase === 'idle';
+
   return (
     <KeyboardAvoidingView
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.topBar}>
-          <View>
-            <Text style={styles.eyebrow}>Competition Hub</Text>
-            <Text style={styles.compName}>{config.competitionName}</Text>
-            <Text style={styles.compMeta}>{sportLabel(config.sport)}</Text>
+      <View style={[styles.shell, showDashboard ? styles.shellWide : styles.shellNarrow]}>
+        {showDashboard ? (
+          <KioskHubHeader
+            clubName={config.clubName}
+            clubLogoUrl={config.clubLogoUrl}
+            competitionName={config.competitionName}
+            sport={config.sport}
+            onStaffExit={() => {
+              setExitPin('');
+              setExitError(null);
+              setPhase('exit');
+            }}
+          />
+        ) : (
+          <View style={styles.topBar}>
+            <View>
+              <Text style={styles.eyebrow}>Competition Hub</Text>
+              <Text style={styles.compName}>{config.competitionName}</Text>
+              <Text style={styles.compMeta}>{sportLabel(config.sport)}</Text>
+            </View>
+            {phase !== 'exit' ? (
+              <Pressable onPress={() => void returnToIdle()} hitSlop={12}>
+                <Text style={styles.cancelLink}>Cancel</Text>
+              </Pressable>
+            ) : null}
           </View>
-          {phase === 'idle' ? (
-            <Pressable
-              onPress={() => {
-                setExitPin('');
-                setExitError(null);
-                setPhase('exit');
-              }}
-              hitSlop={12}
-              accessibilityRole="button"
-              accessibilityLabel="Staff exit"
-            >
-              <Ionicons name="lock-closed-outline" size={22} color={theme.colors.textMuted} />
-            </Pressable>
-          ) : phase !== 'exit' ? (
-            <Pressable onPress={() => void returnToIdle()} hitSlop={12}>
-              <Text style={styles.cancelLink}>Cancel</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        )}
 
-        {config.entryNote ? (
+        {config.entryNote && !showDashboard ? (
           <View style={styles.entryBanner}>
             <Text style={styles.entryLabel}>Entry</Text>
             <Text style={styles.entryValue}>{config.entryNote}</Text>
           </View>
         ) : null}
 
-        {phase === 'idle' ? (
-          <View style={styles.idleBlock}>
-            <Text style={styles.idleTitle}>Join or sign in</Text>
-            <Text style={styles.idleBody}>
-              Create a Top Tipster account or sign in to request a place in this competition.
-              Staff will confirm once payment is sorted.
-            </Text>
-            <Pressable style={styles.primaryBtn} onPress={() => setPhase('auth')}>
-              <Text style={styles.primaryBtnText}>Get started</Text>
-            </Pressable>
+        {showDashboard ? (
+          <View style={styles.dashboardWrap}>
+            <KioskCompetitionDashboard
+              competitionId={config.competitionId}
+              sport={config.sport}
+              clubName={config.clubName}
+              clubLogoUrl={config.clubLogoUrl}
+              onClubBranding={(clubName, clubLogoUrl) => {
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        clubName: clubName ?? prev.clubName,
+                        clubLogoUrl: clubLogoUrl ?? prev.clubLogoUrl,
+                      }
+                    : prev
+                );
+              }}
+              onGetStarted={() => setPhase('auth')}
+            />
           </View>
-        ) : null}
-
-        {phase === 'auth' ? (
-          <View style={styles.formBlock}>
-            <View style={styles.modeRow}>
-              <Pressable
-                style={[styles.modeChip, authMode === 'signin' && styles.modeChipActive]}
-                onPress={() => setAuthMode('signin')}
-              >
-                <Text
-                  style={[
-                    styles.modeChipText,
-                    authMode === 'signin' && styles.modeChipTextActive,
-                  ]}
-                >
-                  Sign in
+        ) : (
+          <ScrollView
+            style={styles.formScroll}
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+          >
+            {phase === 'idle' ? (
+              <View style={styles.idleBlock}>
+                <Text style={styles.idleTitle}>Join or make your pick</Text>
+                <Text style={styles.idleBody}>
+                  New players: create an account to request a place (staff confirm once payment
+                  is sorted). Already in? Sign in to see or lock in your next selection.
                 </Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modeChip, authMode === 'signup' && styles.modeChipActive]}
-                onPress={() => setAuthMode('signup')}
-              >
-                <Text
-                  style={[
-                    styles.modeChipText,
-                    authMode === 'signup' && styles.modeChipTextActive,
-                  ]}
-                >
-                  Sign up
-                </Text>
-              </Pressable>
-            </View>
-
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              placeholderTextColor={theme.colors.textMuted}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              editable={!busy}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              placeholderTextColor={theme.colors.textMuted}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              editable={!busy}
-            />
-            {authMode === 'signup' ? (
-              <TextInput
-                style={styles.input}
-                placeholder="Username"
-                placeholderTextColor={theme.colors.textMuted}
-                value={username}
-                onChangeText={setUsername}
-                autoCapitalize="none"
-                editable={!busy}
-              />
-            ) : null}
-            {config.sport === 'racing' ? (
-              <TextInput
-                style={styles.input}
-                placeholder="Display name (leaderboard)"
-                placeholderTextColor={theme.colors.textMuted}
-                value={displayName}
-                onChangeText={setDisplayName}
-                editable={!busy}
-              />
+                <Pressable style={styles.primaryBtn} onPress={() => setPhase('auth')}>
+                  <Text style={styles.primaryBtnText}>Get started</Text>
+                </Pressable>
+              </View>
             ) : null}
 
-            {message && phase === 'auth' ? <Text style={styles.errorText}>{message}</Text> : null}
+            {phase === 'auth' ? (
+              <View style={styles.formBlock}>
+                <View style={styles.modeRow}>
+                  <Pressable
+                    style={[styles.modeChip, authMode === 'signin' && styles.modeChipActive]}
+                    onPress={() => setAuthMode('signin')}
+                  >
+                    <Text
+                      style={[
+                        styles.modeChipText,
+                        authMode === 'signin' && styles.modeChipTextActive,
+                      ]}
+                    >
+                      Sign in
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.modeChip, authMode === 'signup' && styles.modeChipActive]}
+                    onPress={() => setAuthMode('signup')}
+                  >
+                    <Text
+                      style={[
+                        styles.modeChipText,
+                        authMode === 'signup' && styles.modeChipTextActive,
+                      ]}
+                    >
+                      Sign up
+                    </Text>
+                  </Pressable>
+                </View>
 
-            <Pressable
-              style={[styles.primaryBtn, busy && styles.primaryBtnDisabled]}
-              disabled={busy}
-              onPress={() => void onPatronAuth()}
-            >
-              {busy ? (
-                <ActivityIndicator color={theme.colors.white} />
-              ) : (
-                <Text style={styles.primaryBtnText}>
-                  {authMode === 'signup' ? 'Create account & join' : 'Sign in & join'}
+                <TextInput
+                  style={styles.input}
+                  placeholder="Email"
+                  placeholderTextColor={theme.colors.textMuted}
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  editable={!busy}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Password"
+                  placeholderTextColor={theme.colors.textMuted}
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                  editable={!busy}
+                />
+                {authMode === 'signup' ? (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Username"
+                    placeholderTextColor={theme.colors.textMuted}
+                    value={username}
+                    onChangeText={setUsername}
+                    autoCapitalize="none"
+                    editable={!busy}
+                  />
+                ) : null}
+                {config.sport === 'racing' ? (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Display name (leaderboard)"
+                    placeholderTextColor={theme.colors.textMuted}
+                    value={displayName}
+                    onChangeText={setDisplayName}
+                    editable={!busy}
+                  />
+                ) : null}
+
+                {message && phase === 'auth' ? (
+                  <Text style={styles.errorText}>{message}</Text>
+                ) : null}
+
+                <Pressable
+                  style={[styles.primaryBtn, busy && styles.primaryBtnDisabled]}
+                  disabled={busy}
+                  onPress={() => void onPatronAuth()}
+                >
+                  {busy ? (
+                    <ActivityIndicator color={theme.colors.white} />
+                  ) : (
+                    <Text style={styles.primaryBtnText}>
+                      {authMode === 'signup' ? 'Create account & join' : 'Sign in'}
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+            ) : null}
+
+            {phase === 'pick' && patronUserId && config.sport === 'lms' ? (
+              <KioskLmsPickPanel
+                competitionId={config.competitionId}
+                userId={patronUserId}
+                onActivity={scheduleIdleReturn}
+                onFinished={() => void returnToIdle()}
+              />
+            ) : null}
+
+            {phase === 'pick' && patronUserId && config.sport !== 'lms' ? (
+              <View style={styles.formBlock}>
+                <View style={styles.doneIcon}>
+                  <Ionicons name="checkmark-circle" size={48} color={theme.colors.accent} />
+                </View>
+                <Text style={styles.idleTitle}>You&apos;re already in</Text>
+                <Text style={styles.idleBody}>
+                  You&apos;re in {config.competitionName}. Hub pick entry for{' '}
+                  {sportLabel(config.sport)} is coming soon — use your own phone or ask staff to
+                  open the competition for you.
                 </Text>
-              )}
-            </Pressable>
-          </View>
-        ) : null}
+                <Pressable style={styles.secondaryBtn} onPress={() => void returnToIdle()}>
+                  <Text style={styles.secondaryBtnText}>Done</Text>
+                </Pressable>
+              </View>
+            ) : null}
 
-        {phase === 'payment' ? (
-          <View style={styles.formBlock}>
-            <Text style={styles.idleTitle}>How are you paying?</Text>
-            <Text style={styles.idleBody}>
-              Top Tipster does not take the entry fee. Choose how you will pay the club or
-              venue, then wait for staff to confirm you in.
-            </Text>
+            {phase === 'payment' ? (
+              <View style={styles.formBlock}>
+                <Text style={styles.idleTitle}>How are you paying?</Text>
+                <Text style={styles.idleBody}>
+                  Top Tipster does not take the entry fee. Choose how you will pay the club or
+                  venue, then wait for staff to confirm you in.
+                </Text>
 
-            <Pressable
-              style={[styles.payCard, busy && styles.primaryBtnDisabled]}
-              disabled={busy}
-              onPress={() => void onChoosePayment('cash')}
-            >
-              <Text style={styles.payTitle}>Cash at collection point</Text>
-              <Text style={styles.payBody}>
-                Hand the entry to the bar or club person in charge. They will approve your
-                request in the app once paid.
-              </Text>
-            </Pressable>
+                <Pressable
+                  style={[styles.payCard, busy && styles.primaryBtnDisabled]}
+                  disabled={busy}
+                  onPress={() => void onChoosePayment('cash')}
+                >
+                  <Text style={styles.payTitle}>Cash at collection point</Text>
+                  <Text style={styles.payBody}>
+                    Hand the entry to the bar or club person in charge. They will approve your
+                    request in the app once paid.
+                  </Text>
+                </Pressable>
 
-            <Pressable
-              style={[styles.payCard, busy && styles.primaryBtnDisabled]}
-              disabled={busy}
-              onPress={() => void onChoosePayment('online')}
-            >
-              <Text style={styles.payTitle}>Pay online</Text>
-              <Text style={styles.payBody}>
-                Open the club payment / charity page, pay there, then come back. Staff will
-                confirm once they see the payment.
-              </Text>
-            </Pressable>
+                <Pressable
+                  style={[styles.payCard, busy && styles.primaryBtnDisabled]}
+                  disabled={busy}
+                  onPress={() => void onChoosePayment('online')}
+                >
+                  <Text style={styles.payTitle}>Pay online</Text>
+                  <Text style={styles.payBody}>
+                    Open the club payment / charity page, pay there, then come back. Staff will
+                    confirm once they see the payment.
+                  </Text>
+                </Pressable>
 
-            {config.fundraiserPaymentUrl ? (
-              <Pressable
-                style={styles.linkBtn}
-                onPress={() => void Linking.openURL(config.fundraiserPaymentUrl!)}
-              >
-                <Text style={styles.linkBtnText}>Open payment page</Text>
-              </Pressable>
-            ) : (
-              <Text style={styles.muted}>
-                No online payment link is set for this competition — ask staff for the QR or
-                link.
-              </Text>
-            )}
+                {config.fundraiserPaymentUrl ? (
+                  <Pressable
+                    style={styles.linkBtn}
+                    onPress={() => void Linking.openURL(config.fundraiserPaymentUrl!)}
+                  >
+                    <Text style={styles.linkBtnText}>Open payment page</Text>
+                  </Pressable>
+                ) : (
+                  <Text style={styles.muted}>
+                    No online payment link is set for this competition — ask staff for the QR or
+                    link.
+                  </Text>
+                )}
 
-            {message ? <Text style={styles.errorText}>{message}</Text> : null}
-          </View>
-        ) : null}
+                {message ? <Text style={styles.errorText}>{message}</Text> : null}
+              </View>
+            ) : null}
 
-        {phase === 'done' ? (
-          <View style={styles.formBlock}>
-            <View style={styles.doneIcon}>
-              <Ionicons name="checkmark-circle" size={48} color={theme.colors.accent} />
-            </View>
-            <Text style={styles.idleTitle}>You&apos;re on the list</Text>
-            {paymentMethod === 'cash' ? (
-              <Text style={styles.idleBody}>
-                Next: pay cash at the collection point. Once staff confirm payment, you will
-                be accepted into {config.competitionName}.
-              </Text>
-            ) : paymentMethod === 'online' ? (
-              <Text style={styles.idleBody}>
-                Next: complete payment on the club page if you have not already. Staff will
-                approve your entry when payment is confirmed.
-              </Text>
-            ) : (
-              <Text style={styles.idleBody}>
-                Your request is with the organiser. This screen returns to the home page
-                shortly.
-              </Text>
-            )}
-            {message ? <Text style={styles.muted}>{message}</Text> : null}
-            <Pressable style={styles.secondaryBtn} onPress={() => void returnToIdle()}>
-              <Text style={styles.secondaryBtnText}>Done</Text>
-            </Pressable>
-          </View>
-        ) : null}
+            {phase === 'done' ? (
+              <View style={styles.formBlock}>
+                <View style={styles.doneIcon}>
+                  <Ionicons name="checkmark-circle" size={48} color={theme.colors.accent} />
+                </View>
+                <Text style={styles.idleTitle}>You&apos;re on the list</Text>
+                {paymentMethod === 'cash' ? (
+                  <Text style={styles.idleBody}>
+                    Next: pay cash at the collection point. Once staff confirm payment, you will
+                    be accepted into {config.competitionName}.
+                  </Text>
+                ) : paymentMethod === 'online' ? (
+                  <Text style={styles.idleBody}>
+                    Next: complete payment on the club page if you have not already. Staff will
+                    approve your entry when payment is confirmed.
+                  </Text>
+                ) : (
+                  <Text style={styles.idleBody}>
+                    Your request is with the organiser. This screen returns to the home page
+                    shortly.
+                  </Text>
+                )}
+                {message ? <Text style={styles.muted}>{message}</Text> : null}
+                <Pressable style={styles.secondaryBtn} onPress={() => void returnToIdle()}>
+                  <Text style={styles.secondaryBtnText}>Done</Text>
+                </Pressable>
+              </View>
+            ) : null}
 
-        {phase === 'exit' ? (
-          <View style={styles.formBlock}>
-            <Text style={styles.idleTitle}>Staff exit</Text>
-            <Text style={styles.idleBody}>Enter the 4-digit PIN to leave hub mode.</Text>
-            <TextInput
-              style={styles.input}
-              value={exitPin}
-              onChangeText={(t) => setExitPin(t.replace(/\D/g, '').slice(0, 4))}
-              placeholder="••••"
-              placeholderTextColor={theme.colors.textMuted}
-              keyboardType="number-pad"
-              secureTextEntry
-              maxLength={4}
-            />
-            {exitError ? <Text style={styles.errorText}>{exitError}</Text> : null}
-            <Pressable style={styles.primaryBtn} onPress={() => void onExitConfirm()}>
-              <Text style={styles.primaryBtnText}>Exit hub mode</Text>
-            </Pressable>
-            <Pressable style={styles.secondaryBtn} onPress={() => setPhase('idle')}>
-              <Text style={styles.secondaryBtnText}>Cancel</Text>
-            </Pressable>
-          </View>
-        ) : null}
-      </ScrollView>
+            {phase === 'exit' ? (
+              <View style={styles.formBlock}>
+                <Text style={styles.idleTitle}>Staff exit</Text>
+                <Text style={styles.idleBody}>Enter the 4-digit PIN to leave hub mode.</Text>
+                <TextInput
+                  style={styles.input}
+                  value={exitPin}
+                  onChangeText={(t) => setExitPin(t.replace(/\D/g, '').slice(0, 4))}
+                  placeholder="••••"
+                  placeholderTextColor={theme.colors.textMuted}
+                  keyboardType="number-pad"
+                  secureTextEntry
+                  maxLength={4}
+                />
+                {exitError ? <Text style={styles.errorText}>{exitError}</Text> : null}
+                <Pressable style={styles.primaryBtn} onPress={() => void onExitConfirm()}>
+                  <Text style={styles.primaryBtnText}>Exit hub mode</Text>
+                </Pressable>
+                <Pressable style={styles.secondaryBtn} onPress={() => setPhase('idle')}>
+                  <Text style={styles.secondaryBtnText}>Cancel</Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </ScrollView>
+        )}
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -547,6 +630,33 @@ function makeStyles(
       flex: 1,
       backgroundColor: theme.colors.background,
     },
+    shell: {
+      flex: 1,
+      width: '100%',
+      alignSelf: 'center',
+    },
+    shellNarrow: {
+      paddingHorizontal: theme.spacing.lg,
+      paddingTop: insets.top + theme.spacing.md,
+      paddingBottom: insets.bottom + theme.spacing.md,
+      gap: theme.spacing.sm,
+      maxWidth: 720,
+    },
+    shellWide: {
+      paddingHorizontal: 12,
+      paddingTop: insets.top + 8,
+      paddingBottom: insets.bottom + 8,
+      gap: 8,
+      maxWidth: 9999,
+    },
+    dashboardWrap: {
+      flex: 1,
+      minHeight: 0,
+      width: '100%',
+    },
+    formScroll: {
+      flex: 1,
+    },
     centered: {
       flex: 1,
       alignItems: 'center',
@@ -556,14 +666,9 @@ function makeStyles(
       gap: theme.spacing.md,
     },
     content: {
-      paddingHorizontal: theme.spacing.lg,
-      paddingTop: insets.top + theme.spacing.lg,
-      paddingBottom: insets.bottom + theme.spacing.xl,
       gap: theme.spacing.md,
-      maxWidth: 640,
-      width: '100%',
-      alignSelf: 'center',
       flexGrow: 1,
+      paddingBottom: theme.spacing.lg,
     },
     topBar: {
       flexDirection: 'row',
@@ -573,20 +678,20 @@ function makeStyles(
     },
     eyebrow: {
       fontFamily: theme.fontFamily.baiSemiBold,
-      fontSize: 12,
+      fontSize: 13,
       letterSpacing: 1,
       textTransform: 'uppercase',
       color: theme.colors.accent,
     },
     compName: {
       fontFamily: theme.fontFamily.baiBold,
-      fontSize: 26,
+      fontSize: 28,
       color: theme.colors.text,
       marginTop: 2,
     },
     compMeta: {
       fontFamily: theme.fontFamily.baiLight,
-      fontSize: 14,
+      fontSize: 15,
       color: theme.colors.textMuted,
       marginTop: 2,
     },

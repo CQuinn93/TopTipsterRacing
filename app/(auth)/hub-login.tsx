@@ -46,6 +46,8 @@ export default function HubLoginSetupScreen() {
   const [pinConfirm, setPinConfirm] = useState('');
   const [saving, setSaving] = useState(false);
   const [staffUsername, setStaffUsername] = useState<string | null>(null);
+  const [clubName, setClubName] = useState<string | null>(null);
+  const [clubLogoUrl, setClubLogoUrl] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [signingIn, setSigningIn] = useState(false);
@@ -64,11 +66,22 @@ export default function HubLoginSetupScreen() {
     setGateError(null);
     try {
       const [{ data: profile }, gate, list] = await Promise.all([
-        supabase.from('profiles').select('username').eq('id', userId).maybeSingle(),
+        supabase
+          .from('profiles')
+          .select('username, club_name, club_logo_url')
+          .eq('id', userId)
+          .maybeSingle(),
         kioskCanSetup(),
         kioskListMyCompetitions().catch(() => [] as KioskCompetitionOption[]),
       ]);
-      setStaffUsername((profile as { username?: string } | null)?.username ?? null);
+      const p = profile as {
+        username?: string | null;
+        club_name?: string | null;
+        club_logo_url?: string | null;
+      } | null;
+      setStaffUsername(p?.username ?? null);
+      setClubName(p?.club_name ?? null);
+      setClubLogoUrl(p?.club_logo_url ?? null);
       if (!gate.success) {
         setGateError(
           gate.message ??
@@ -164,6 +177,21 @@ export default function HubLoginSetupScreen() {
       }
 
       const exitPinHash = await hashKioskPin(pin);
+      const clubNameTrim = (clubName ?? '').trim() || null;
+      const clubLogoTrim = (clubLogoUrl ?? '').trim() || null;
+      if (clubLogoTrim && !/^https?:\/\//i.test(clubLogoTrim)) {
+        Alert.alert('Club logo', 'Logo URL must start with http:// or https://');
+        return;
+      }
+
+      await (supabase.from('profiles') as any)
+        .update({
+          club_name: clubNameTrim,
+          club_logo_url: clubLogoTrim,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', userId);
+
       await saveKioskDeviceConfig({
         version: 1,
         competitionId: selected.id,
@@ -175,6 +203,8 @@ export default function HubLoginSetupScreen() {
         exitPinHash,
         staffUserId: userId,
         staffUsername,
+        clubName: clubNameTrim,
+        clubLogoUrl: clubLogoTrim,
         activatedAt: new Date().toISOString(),
       });
 
@@ -290,6 +320,31 @@ export default function HubLoginSetupScreen() {
                 </Pressable>
               );
             })}
+
+            <Text style={styles.sectionLabel}>Club branding</Text>
+            <Text style={styles.hint}>
+              Shown on the hub header (logo on both sides). Owners can leave the club name
+              blank to show “Top Tipster”.
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={clubName ?? ''}
+              onChangeText={setClubName}
+              placeholder="Club name"
+              placeholderTextColor={theme.colors.textMuted}
+              editable={!saving}
+            />
+            <TextInput
+              style={styles.input}
+              value={clubLogoUrl ?? ''}
+              onChangeText={setClubLogoUrl}
+              placeholder="Logo image URL (https://…)"
+              placeholderTextColor={theme.colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              editable={!saving}
+            />
 
             <Text style={styles.sectionLabel}>Online payment link (optional)</Text>
             <Text style={styles.hint}>

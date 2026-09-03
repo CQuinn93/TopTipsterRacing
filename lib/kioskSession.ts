@@ -14,6 +14,9 @@ export type KioskDeviceConfig = {
   staffUserId: string;
   staffUsername: string | null;
   activatedAt: string;
+  /** Gamemaster club branding (optional for Owner accounts). */
+  clubName?: string | null;
+  clubLogoUrl?: string | null;
 };
 
 const STORAGE_KEY = 'toptipster.kiosk.device.v1';
@@ -68,11 +71,11 @@ export async function verifyKioskExitPin(pin: string): Promise<boolean> {
 export function sportLabel(sport: KioskSport): string {
   switch (sport) {
     case 'lms':
-      return 'Football LMS';
+      return 'LMS';
     case 'f2t':
-      return 'Football F2T';
+      return 'Tipster20';
     case 'racing':
-      return 'Racing';
+      return 'Top Tipster Racing';
     default:
       return sport;
   }
@@ -82,4 +85,10 @@ export function paymentMethodLabel(method: string | null | undefined): string {
   if (method === 'cash') return 'Cash at collection';
   if (method === 'online') return 'Paid online';
   return 'Payment not set';
+}
+
+/** App download / landing URL encoded in the hub QR. */
+export function kioskAppLinkUrl(): string {
+  const base = (process.env.EXPO_PUBLIC_WEB_BASE_URL ?? '').replace(/\/$/, '');
+  return base || 'https://toptipster.app';
 }

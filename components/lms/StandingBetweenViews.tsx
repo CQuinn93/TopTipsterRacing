@@ -77,23 +77,35 @@ type PoolRowProps = {
   poolTeams: LmsTeam[];
   picks: LmsCompletedPick[];
   onPress?: () => void;
+  /** Larger type/chips for venue hub tablets. */
+  large?: boolean;
 };
 
 /** One compact pool strip: 5 cols, check/X overlays for W/L picks. */
-export function StandingPlayerPoolCard({ player, poolTeams, picks, onPress }: PoolRowProps) {
+export function StandingPlayerPoolCard({
+  player,
+  poolTeams,
+  picks,
+  onPress,
+  large = false,
+}: PoolRowProps) {
   const theme = useTheme();
   const styles = makeStyles(theme);
   const pickByTeamId = new Map(picks.map((p) => [p.team_id, p]));
   const name = player.username?.trim() || player.user_id.slice(0, 8);
   const alive = player.status === 'active' || player.status === 'winner';
+  const chipSize = large ? 32 : 22;
+  const markSize = large ? 16 : 14;
+  const markIcon = large ? 12 : 10;
 
   return (
     <Pressable
       style={[
         styles.poolCard,
+        large && styles.poolCardLarge,
         {
           borderColor: alive ? theme.colors.accent : theme.colors.error,
-          borderWidth: 1.5,
+          borderWidth: large ? 2 : 1.5,
         },
       ]}
       onPress={onPress}
@@ -101,10 +113,10 @@ export function StandingPlayerPoolCard({ player, poolTeams, picks, onPress }: Po
       accessibilityLabel={`${name} pool, ${alive ? 'still in' : 'eliminated'}`}
     >
       <View style={styles.poolHead}>
-        <Text style={styles.poolName} numberOfLines={1}>
+        <Text style={[styles.poolName, large && styles.poolNameLarge]} numberOfLines={1}>
           {name}
         </Text>
-        <Text style={styles.poolMeta}>
+        <Text style={[styles.poolMeta, large && styles.poolMetaLarge]}>
           {player.status === 'winner'
             ? 'Winner'
             : player.status === 'eliminated'
@@ -118,27 +130,53 @@ export function StandingPlayerPoolCard({ player, poolTeams, picks, onPress }: Po
           const won = pick?.result === 'correct';
           const lost = pick?.result === 'incorrect';
           return (
-            <View key={team.id} style={styles.poolCell}>
-              <View style={[styles.crestWrap, pick && styles.crestUsed]}>
+            <View key={team.id} style={[styles.poolCell, large && styles.poolCellLarge]}>
+              <View style={[styles.crestWrap, large && styles.crestWrapLarge, pick && styles.crestUsed]}>
                 <TeamColourChip
                   shortName={team.short_name}
                   name={team.name}
                   slug={team.slug}
-                  size={22}
+                  size={chipSize}
                 />
                 {won ? (
-                  <View style={[styles.mark, { backgroundColor: theme.colors.accent }]}>
-                    <Ionicons name="checkmark" size={10} color={theme.colors.white} />
+                  <View
+                    style={[
+                      styles.mark,
+                      large && styles.markLarge,
+                      {
+                        backgroundColor: theme.colors.accent,
+                        width: markSize,
+                        height: markSize,
+                        borderRadius: markSize / 2,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="checkmark" size={markIcon} color={theme.colors.white} />
                   </View>
                 ) : null}
                 {lost ? (
-                  <View style={[styles.mark, { backgroundColor: theme.colors.error }]}>
-                    <Ionicons name="close" size={10} color={theme.colors.white} />
+                  <View
+                    style={[
+                      styles.mark,
+                      large && styles.markLarge,
+                      {
+                        backgroundColor: theme.colors.error,
+                        width: markSize,
+                        height: markSize,
+                        borderRadius: markSize / 2,
+                      },
+                    ]}
+                  >
+                    <Ionicons name="close" size={markIcon} color={theme.colors.white} />
                   </View>
                 ) : null}
               </View>
               <Text
-                style={[styles.poolAbbrev, pick && styles.poolAbbrevUsed]}
+                style={[
+                  styles.poolAbbrev,
+                  large && styles.poolAbbrevLarge,
+                  pick && styles.poolAbbrevUsed,
+                ]}
                 numberOfLines={1}
               >
                 {team.short_name || team.name.slice(0, 3)}
@@ -214,6 +252,12 @@ function makeStyles(theme: ReturnType<typeof useTheme>) {
       paddingVertical: 8,
       gap: 6,
     },
+    poolCardLarge: {
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      gap: 10,
+      borderRadius: theme.radius.lg,
+    },
     poolHead: {
       flexDirection: 'row',
       alignItems: 'baseline',
@@ -226,10 +270,16 @@ function makeStyles(theme: ReturnType<typeof useTheme>) {
       fontSize: 13,
       color: theme.colors.text,
     },
+    poolNameLarge: {
+      fontSize: 20,
+    },
     poolMeta: {
       fontFamily: theme.fontFamily.baiLight,
       fontSize: 11,
       color: theme.colors.textMuted,
+    },
+    poolMetaLarge: {
+      fontSize: 15,
     },
     poolGrid: {
       flexDirection: 'row',
@@ -241,11 +291,19 @@ function makeStyles(theme: ReturnType<typeof useTheme>) {
       paddingVertical: 3,
       gap: 2,
     },
+    poolCellLarge: {
+      paddingVertical: 6,
+      gap: 4,
+    },
     crestWrap: {
       width: 22,
       height: 22,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    crestWrapLarge: {
+      width: 32,
+      height: 32,
     },
     crestUsed: {
       opacity: 0.45,
@@ -262,11 +320,18 @@ function makeStyles(theme: ReturnType<typeof useTheme>) {
       borderWidth: 1,
       borderColor: theme.colors.surface,
     },
+    markLarge: {
+      right: -5,
+      bottom: -4,
+    },
     poolAbbrev: {
       fontFamily: theme.fontFamily.baiSemiBold,
       fontSize: 9,
       color: theme.colors.text,
       letterSpacing: 0.2,
+    },
+    poolAbbrevLarge: {
+      fontSize: 12,
     },
     poolAbbrevUsed: {
       color: theme.colors.textMuted,

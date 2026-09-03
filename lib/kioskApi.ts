@@ -3,6 +3,11 @@ import { lmsRequestJoin } from '@/lib/lms/api';
 import { f2tRequestJoin } from '@/lib/f2t/api';
 import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
 import type { KioskSport } from '@/lib/kioskSession';
+import type {
+  LmsCompletedPick,
+  LmsEliminationSummary,
+  LmsTeam,
+} from '@/lib/lms/api';
 
 const db = supabase as any;
 
@@ -168,3 +173,141 @@ export async function kioskRequestJoin(params: {
     status: 'pending',
   };
 }
+
+export type KioskDisplayParticipant = {
+  id: string;
+  competition_id: string;
+  user_id: string;
+  status: string;
+  username?: string | null;
+  display_name?: string | null;
+  score?: number | null;
+  eliminated_gameweek_id?: string | null;
+  joined_at?: string;
+  rollover_count?: number;
+  lives_remaining?: number | null;
+};
+
+export type KioskF2tPick = {
+  user_id: string;
+  slot: number;
+  player_id: string;
+  display_name: string;
+  team_short_name?: string | null;
+  team_slug?: string | null;
+  scored: boolean;
+  scored_gameweek_number?: number | null;
+};
+
+export type KioskRacingPick = {
+  user_id: string;
+  race_date: string;
+  race_name: string;
+  horse_name: string;
+  runner_id?: string | null;
+  points?: number | null;
+};
+
+export type KioskGoalscorerStat = {
+  player_id: string;
+  display_name: string;
+  team_short_name?: string | null;
+  team_slug?: string | null;
+  goals: number;
+  holder_count: number;
+};
+
+export type KioskRaceDayBoard = {
+  race_day_id: string;
+  race_date: string;
+  day_label: string;
+  races: Array<{
+    race_id: string;
+    name: string;
+    scheduled_time_utc?: string | null;
+    horses: Array<{
+      name: string;
+      position: number | null;
+      points: number;
+    }>;
+  }>;
+};
+
+export type KioskDisplayBoard = {
+  success: boolean;
+  error?: string;
+  sport: KioskSport;
+  competition_id: string;
+  competition_name: string;
+  season: string | null;
+  status: string;
+  club_name: string | null;
+  club_logo_url: string | null;
+  alive_count: number;
+  total_count: number;
+  participants: KioskDisplayParticipant[];
+  pool_teams: LmsTeam[];
+  picks: LmsCompletedPick[] | KioskF2tPick[] | KioskRacingPick[];
+  elimination: LmsEliminationSummary | null;
+  goalscorers: KioskGoalscorerStat[];
+  race_days: KioskRaceDayBoard[];
+};
+
+export async function kioskGetDisplayBoard(
+  competitionId: string,
+  sport: KioskSport
+): Promise<KioskDisplayBoard> {
+  const { data, error } = await db.rpc('kiosk_get_display_board', {
+    p_competition_id: competitionId,
+    p_sport: sport,
+  });
+  if (error) throw error;
+  const raw = (data ?? {}) as Partial<KioskDisplayBoard> & {
+    success?: boolean;
+    error?: string;
+    picks?: any[];
+    pool_teams?: LmsTeam[];
+    participants?: KioskDisplayParticipant[];
+    elimination?: LmsEliminationSummary | null;
+    goalscorers?: KioskGoalscorerStat[];
+    race_days?: KioskRaceDayBoard[];
+  };
+  if (!raw.success) {
+    throw new Error(raw.error ?? 'Could not load hub display');
+  }
+  return {
+    success: true,
+    sport: (raw.sport as KioskSport) ?? sport,
+    competition_id: raw.competition_id ?? competitionId,
+    competition_name: raw.competition_name ?? '',
+    season: raw.season ?? null,
+    status: raw.status ?? '',
+    club_name: raw.club_name ?? null,
+    club_logo_url: raw.club_logo_url ?? null,
+    alive_count: Number(raw.alive_count ?? 0),
+    total_count: Number(raw.total_count ?? 0),
+    participants: Array.isArray(raw.participants) ? raw.participants : [],
+    pool_teams: Array.isArray(raw.pool_teams) ? raw.pool_teams : [],
+    picks: Array.isArray(raw.picks) ? raw.picks : [],
+    elimination: raw.elimination
+      ? {
+          success: !!raw.elimination.success,
+          season: raw.elimination.season ?? raw.season ?? '',
+          competition_id: raw.elimination.competition_id ?? competitionId,
+          still_standing: Number(
+            raw.elimination.still_standing ?? raw.alive_count ?? 0
+          ),
+          gameweeks: (raw.elimination.gameweeks ?? []).map((g) => ({
+            gameweek_id: g.gameweek_id,
+            gameweek_number: Number(g.gameweek_number ?? 0),
+            eliminated_count: Number(g.eliminated_count ?? 0),
+            entrants_count: Number(g.entrants_count ?? 0),
+            survival_pct: Number(g.survival_pct ?? 100),
+          })),
+        }
+      : null,
+    goalscorers: Array.isArray(raw.goalscorers) ? raw.goalscorers : [],
+    race_days: Array.isArray(raw.race_days) ? raw.race_days : [],
+  };
+}
+
