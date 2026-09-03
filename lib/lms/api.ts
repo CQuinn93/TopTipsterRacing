@@ -1359,6 +1359,8 @@ export type LmsJoinRequestRow = {
   created_at: string;
   is_reentry?: boolean;
   request_kind?: 'new' | 're_entry' | string;
+  payment_method?: 'cash' | 'online' | string | null;
+  payment_note?: string | null;
 };
 
 export async function lmsAdminListPendingForCompetition(

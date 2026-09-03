@@ -10,6 +10,7 @@ export default function AuthLayout() {
       <Stack.Screen name="admin" />
       <Stack.Screen name="admin-edit-selection" />
       <Stack.Screen name="owner" />
+      <Stack.Screen name="hub-login" />
     </Stack>
   );
 }

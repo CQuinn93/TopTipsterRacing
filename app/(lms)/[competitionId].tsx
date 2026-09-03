@@ -165,6 +165,8 @@ export default function LmsCompetitionDashboard() {
       created_at: string;
       is_reentry?: boolean;
       request_kind?: string;
+      payment_method?: string | null;
+      payment_note?: string | null;
     }[]
   >([]);
   const [joinBusyId, setJoinBusyId] = useState<string | null>(null);
@@ -4036,6 +4038,15 @@ export default function LmsCompetitionDashboard() {
                                   ? ` · ${new Date(r.created_at).toLocaleDateString()}`
                                   : ''}
                               </Text>
+                              {r.payment_method ? (
+                                <Text style={styles.adminRowMeta}>
+                                  {r.payment_method === 'cash'
+                                    ? 'Payment: cash at collection'
+                                    : r.payment_method === 'online'
+                                      ? 'Payment: online'
+                                      : `Payment: ${r.payment_method}`}
+                                </Text>
+                              ) : null}
                               <View style={styles.adminJoinActions}>
                                 <Pressable
                                   style={[styles.adminConfirmBtn, busy && styles.primaryBtnDisabled]}

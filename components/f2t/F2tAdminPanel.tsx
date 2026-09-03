@@ -37,6 +37,8 @@ type PendingJoin = {
   user_id: string;
   username: string | null;
   created_at: string;
+  payment_method?: string | null;
+  payment_note?: string | null;
 };
 
 type Props = {
@@ -691,6 +693,15 @@ export function F2tAdminPanel({
                 <Text style={styles.muted}>
                   Requested {new Date(p.created_at).toLocaleString()}
                 </Text>
+                {p.payment_method ? (
+                  <Text style={styles.muted}>
+                    {p.payment_method === 'cash'
+                      ? 'Payment: cash at collection'
+                      : p.payment_method === 'online'
+                        ? 'Payment: online'
+                        : `Payment: ${p.payment_method}`}
+                  </Text>
+                ) : null}
                 <View style={styles.adminActions}>
                   <Pressable
                     style={[styles.adminBtn, styles.adminBtnApprove]}

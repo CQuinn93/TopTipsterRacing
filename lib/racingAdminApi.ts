@@ -9,6 +9,8 @@ export type RacingJoinRequestRow = {
   user_id: string;
   display_name: string | null;
   created_at: string;
+  payment_method?: string | null;
+  payment_note?: string | null;
 };
 
 export type RacingCompetitionListRow = {

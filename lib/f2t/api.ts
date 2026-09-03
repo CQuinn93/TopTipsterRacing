@@ -283,6 +283,8 @@ export async function f2tListPendingForCompetition(competitionId: string) {
     user_id: string;
     username: string | null;
     created_at: string;
+    payment_method?: string | null;
+    payment_note?: string | null;
   }>;
 }
 

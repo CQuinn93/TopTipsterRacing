@@ -427,6 +427,15 @@ export default function RacingCompetitionHubScreen() {
                   <Text style={styles.requestMeta}>
                     {r.created_at ? new Date(r.created_at).toLocaleString() : ''}
                   </Text>
+                  {r.payment_method ? (
+                    <Text style={styles.requestMeta}>
+                      {r.payment_method === 'cash'
+                        ? 'Payment: cash at collection'
+                        : r.payment_method === 'online'
+                          ? 'Payment: online'
+                          : `Payment: ${r.payment_method}`}
+                    </Text>
+                  ) : null}
                   <View style={styles.actionsRow}>
                     <TouchableOpacity
                       style={[styles.approveBtn, busy && { opacity: 0.7 }]}

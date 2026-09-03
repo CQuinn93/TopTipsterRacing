@@ -185,6 +185,7 @@ export default function LoginScreen() {
           flexDirection: 'row',
           justifyContent: 'center',
           alignItems: 'center',
+          flexWrap: 'wrap',
           gap: theme.spacing.md,
           marginTop: theme.spacing.xl,
         },
@@ -192,6 +193,12 @@ export default function LoginScreen() {
           fontFamily: theme.fontFamily.regular,
           fontSize: 13,
           color: '#737373',
+          textDecorationLine: 'underline',
+        },
+        hubLoginLink: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: '#a3a3a3',
           textDecorationLine: 'underline',
         },
         homeTip: {
@@ -515,6 +522,14 @@ export default function LoginScreen() {
             disabled={loading}
           >
             <Text style={styles.policyLink}>Terms of Use</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => router.push('/(auth)/hub-login')}
+            disabled={loading}
+            accessibilityRole="button"
+            accessibilityLabel="Competition Hub login"
+          >
+            <Text style={styles.hubLoginLink}>Hub login</Text>
           </TouchableOpacity>
         </View>
       </View>
