@@ -47,7 +47,13 @@ import { canCreateCompetitions } from '@/lib/adminSession';
 import { confirmJoinLimitDisclaimer } from '@/lib/joinLimitDisclaimer';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
 import { LeagueTablePanel } from '@/components/lms/LeagueTablePanel';
+import { FundraiserForClub } from '@/components/FundraiserForClub';
 import { lmsDisplayTeamName } from '@/lib/lms/teamColours';
+import {
+  fetchCompetitionsFundraiserBranding,
+  fundraiserKey,
+  type FundraiserBranding,
+} from '@/lib/fundraiserBranding';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import { LmsPushNotificationsCard } from '@/components/lms/LmsPushNotificationsCard';
 import { SurvivalDonut } from '@/components/lms/SurvivalDonut';
@@ -71,6 +77,7 @@ export default function LmsHomeScreen() {
     code?: string;
   }>();
   const [comps, setComps] = useState<LmsCompetitionHomeSummary[]>([]);
+  const [fundraiserByComp, setFundraiserByComp] = useState<Record<string, FundraiserBranding>>({});
   const [pending, setPending] = useState<LmsPendingJoin[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -169,6 +176,17 @@ export default function LmsHomeScreen() {
       setIsStaff(staff);
       setComps(home.competitions);
       setPending(home.pending);
+      try {
+        const branding = await fetchCompetitionsFundraiserBranding(
+          home.competitions.map((c) => ({
+            sport: 'lms' as const,
+            competition_id: c.competition_id,
+          }))
+        );
+        setFundraiserByComp(branding);
+      } catch {
+        setFundraiserByComp({});
+      }
       setGw(home.nextUp.gameweek);
       let nextFixtures = (home.nextUp.fixtures ?? []) as LmsFixture[];
       if (home.nextUp.gameweek?.id) {
@@ -2264,6 +2282,19 @@ export default function LmsHomeScreen() {
                                     ) : null}
                                   </View>
                                   <Text style={styles.rowMeta}>{remainLabel}</Text>
+                                  {fundraiserByComp[fundraiserKey('lms', c.competition_id)] ? (
+                                    <FundraiserForClub
+                                      clubName={
+                                        fundraiserByComp[fundraiserKey('lms', c.competition_id)]
+                                          .club_name
+                                      }
+                                      clubLogoUrl={
+                                        fundraiserByComp[fundraiserKey('lms', c.competition_id)]
+                                          .club_logo_url
+                                      }
+                                      size="compact"
+                                    />
+                                  ) : null}
                                   {c.participant_status === 'active' && c.pickAvailable ? (
                                     <Text style={styles.rowPickHint}>Pick available</Text>
                                   ) : c.participant_status !== 'active' &&

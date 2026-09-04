@@ -16,6 +16,12 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
+import { FundraiserForClub } from '@/components/FundraiserForClub';
+import {
+  fetchCompetitionsFundraiserBranding,
+  fundraiserKey,
+  type FundraiserBranding,
+} from '@/lib/fundraiserBranding';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
@@ -116,6 +122,7 @@ export default function LmsCompetitionDashboard() {
   const [gameweeksLoading, setGameweeksLoading] = useState(false);
   const [tab, setTab] = useState<TabKey>('leaderboard');
   const [name, setName] = useState('');
+  const [fundraiser, setFundraiser] = useState<FundraiserBranding | null>(null);
   const [compStatus, setCompStatus] = useState('');
   const [startGwNumber, setStartGwNumber] = useState<number | null>(null);
   const [extraLives, setExtraLives] = useState(0);
@@ -560,6 +567,14 @@ export default function LmsCompetitionDashboard() {
     const gw = gwInfo.gameweek;
 
     setName(comp?.name ?? 'Competition');
+    try {
+      const branding = await fetchCompetitionsFundraiserBranding([
+        { sport: 'lms', competition_id: competitionId },
+      ]);
+      setFundraiser(branding[fundraiserKey('lms', competitionId)] ?? null);
+    } catch {
+      setFundraiser(null);
+    }
     setCompStatus(comp?.status ?? '');
     setStartGwNumber(gwInfo.startGameweekNumber);
     setExtraLives(comp?.extra_lives ?? 0);
@@ -3129,6 +3144,16 @@ export default function LmsCompetitionDashboard() {
           )}
         </Pressable>
       </View>
+
+      {fundraiser ? (
+        <View style={{ paddingHorizontal: theme.spacing.md, paddingBottom: 8 }}>
+          <FundraiserForClub
+            clubName={fundraiser.club_name}
+            clubLogoUrl={fundraiser.club_logo_url}
+            size="header"
+          />
+        </View>
+      ) : null}
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={theme.colors.accent} />

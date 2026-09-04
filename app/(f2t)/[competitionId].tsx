@@ -13,6 +13,12 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
+import { FundraiserForClub } from '@/components/FundraiserForClub';
+import {
+  fetchCompetitionsFundraiserBranding,
+  fundraiserKey,
+  type FundraiserBranding,
+} from '@/lib/fundraiserBranding';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { PlayerProgressGrid } from '@/components/f2t/PlayerProgressGrid';
 import { F2tPlayerPicker } from '@/components/f2t/F2tPlayerPicker';
@@ -44,6 +50,7 @@ export default function F2tCompetitionScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<TabKey>('team');
   const [name, setName] = useState('');
+  const [fundraiser, setFundraiser] = useState<FundraiserBranding | null>(null);
   const [status, setStatus] = useState('');
   const [startGw, setStartGw] = useState<number | null>(null);
   const [deadlineAt, setDeadlineAt] = useState<string | null>(null);
@@ -87,6 +94,14 @@ export default function F2tCompetitionScreen() {
         return;
       }
       setName(data.competition.name);
+      try {
+        const branding = await fetchCompetitionsFundraiserBranding([
+          { sport: 'f2t', competition_id: competitionId },
+        ]);
+        setFundraiser(branding[fundraiserKey('f2t', competitionId)] ?? null);
+      } catch {
+        setFundraiser(null);
+      }
       setStatus(data.competition.status);
       setStartGw(data.competition.start_gameweek_number);
       setDeadlineAt(data.competition.start_gameweek_deadline ?? null);
@@ -520,6 +535,16 @@ export default function F2tCompetitionScreen() {
           <Ionicons name="menu" size={24} color={theme.colors.text} />
         </Pressable>
       </View>
+
+      {fundraiser ? (
+        <View style={{ paddingHorizontal: theme.spacing.md, paddingBottom: 8 }}>
+          <FundraiserForClub
+            clubName={fundraiser.club_name}
+            clubLogoUrl={fundraiser.club_logo_url}
+            size="header"
+          />
+        </View>
+      ) : null}
 
       {!loading ? (
         <View style={styles.survivalBanner}>
