@@ -18,6 +18,10 @@ import { router, useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  fetchMyEntitlements,
+  isGamemasterAccount,
+} from '@/lib/subscriptionEntitlements';
 
 function isRunningAsInstalledWebApp(): boolean {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
@@ -71,6 +75,9 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
+  const [signInError, setSignInError] = useState<string | null>(null);
+  const [failedSignInAttempts, setFailedSignInAttempts] = useState(0);
+  const [showResetHelper, setShowResetHelper] = useState(false);
   const showHomeScreenTip = Platform.OS === 'web' && !isRunningAsInstalledWebApp();
 
   const styles = useMemo(
@@ -146,6 +153,50 @@ export default function LoginScreen() {
           width: 44,
           justifyContent: 'center',
           alignItems: 'center',
+        },
+        signInError: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 13,
+          color: '#f87171',
+          marginTop: -theme.spacing.sm,
+          marginBottom: theme.spacing.md,
+          textAlign: 'left',
+        },
+        resetHelperCard: {
+          backgroundColor: 'rgba(20, 20, 20, 0.92)',
+          borderWidth: 1,
+          borderColor: '#2a2a2a',
+          borderRadius: theme.radius.md,
+          padding: theme.spacing.md,
+          marginBottom: theme.spacing.md,
+          gap: theme.spacing.sm,
+        },
+        resetHelperText: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: '#e5e5e5',
+          lineHeight: 20,
+          textAlign: 'center',
+        },
+        resetHelperActions: {
+          flexDirection: 'row',
+          justifyContent: 'center',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: theme.spacing.md,
+          marginTop: theme.spacing.xs,
+        },
+        resetHelperPrimary: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          fontWeight: '700',
+          color: theme.colors.accent,
+          textDecorationLine: 'underline',
+        },
+        resetHelperSecondary: {
+          fontFamily: theme.fontFamily.regular,
+          fontSize: 14,
+          color: '#a3a3a3',
         },
         button: {
           backgroundColor: theme.colors.accent,
@@ -282,17 +333,23 @@ export default function LoginScreen() {
     }
   };
 
+  const isWrongPasswordError = (e: unknown): boolean => {
+    const raw = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
+    const lower = raw.toLowerCase();
+    return (
+      lower.includes('invalid login') ||
+      lower.includes('invalid credentials') ||
+      lower.includes('user not found') ||
+      lower.includes('invalid email or password') ||
+      lower.includes('email not confirmed')
+    );
+  };
+
   const authErrorMessage = (e: unknown, mode: 'signIn' | 'signUp'): string => {
     const raw = e instanceof Error ? e.message : typeof e === 'string' ? e : '';
     const lower = raw.toLowerCase();
     if (mode === 'signIn') {
-      if (
-        lower.includes('invalid login') ||
-        lower.includes('invalid credentials') ||
-        lower.includes('email not confirmed') ||
-        lower.includes('user not found') ||
-        lower.includes('invalid email or password')
-      ) {
+      if (isWrongPasswordError(e)) {
         return 'Incorrect email or password. Please try again.';
       }
     }
@@ -307,9 +364,28 @@ export default function LoginScreen() {
     return raw || 'Something went wrong. Please try again.';
   };
 
+  const clearSignInFeedback = () => {
+    setSignInError(null);
+    setShowResetHelper(false);
+  };
+
+  const registerFailedSignIn = (message: string) => {
+    setSignInError(message);
+    setFailedSignInAttempts((prev) => {
+      const next = prev + 1;
+      if (next >= 3) setShowResetHelper(true);
+      return next;
+    });
+  };
+
   const handleAuth = async () => {
+    clearSignInFeedback();
     if (!email.trim() || !password) {
-      showMessage('Missing details', 'Please enter your email and password.');
+      if (!isSignUp) {
+        setSignInError('Please enter your email and password.');
+      } else {
+        showMessage('Missing details', 'Please enter your email and password.');
+      }
       return;
     }
     if (isSignUp && !username.trim()) {
@@ -358,6 +434,8 @@ export default function LoginScreen() {
         );
         setIsSignUp(false);
         setUsername('');
+        setFailedSignInAttempts(0);
+        clearSignInFeedback();
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
@@ -367,20 +445,24 @@ export default function LoginScreen() {
         const { data: banned } = await (supabase as any).rpc('is_profile_banned');
         if (banned) {
           await supabase.auth.signOut();
-          showMessage(
-            'Account banned',
-            'This account has been banned and cannot sign in.'
-          );
+          setFailedSignInAttempts(0);
+          setShowResetHelper(false);
+          setSignInError('This account has been banned and cannot sign in.');
           return;
         }
+        setFailedSignInAttempts(0);
+        clearSignInFeedback();
         resetWebZoomChrome();
-        router.replace('/competition-hub');
+        const ent = await fetchMyEntitlements();
+        router.replace(isGamemasterAccount(ent) ? '/gamemaster-hub' : '/competition-hub');
       }
     } catch (e: unknown) {
       if (isSignUp) {
         showMessage('Sign up failed', authErrorMessage(e, 'signUp'));
+      } else if (isWrongPasswordError(e)) {
+        registerFailedSignIn('Incorrect email or password. Please try again.');
       } else {
-        showMessage('Sign in failed', authErrorMessage(e, 'signIn'));
+        registerFailedSignIn(authErrorMessage(e, 'signIn'));
       }
     } finally {
       setLoading(false);
@@ -393,6 +475,11 @@ export default function LoginScreen() {
       pathname: '/(auth)/forgot-password',
       params: trimmedEmail ? { email: trimmedEmail } : undefined,
     });
+  };
+
+  const dismissResetHelper = () => {
+    setShowResetHelper(false);
+    setFailedSignInAttempts(0);
   };
 
   return (
@@ -422,7 +509,10 @@ export default function LoginScreen() {
             placeholder="Email"
             placeholderTextColor="#737373"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(text) => {
+              setEmail(text);
+              if (signInError) clearSignInFeedback();
+            }}
             autoCapitalize="none"
             keyboardType="email-address"
             editable={!loading}
@@ -433,7 +523,10 @@ export default function LoginScreen() {
               placeholder="Password"
               placeholderTextColor="#737373"
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(text) => {
+                setPassword(text);
+                if (signInError) setSignInError(null);
+              }}
               secureTextEntry={!passwordVisible}
               editable={!loading}
               autoCapitalize="none"
@@ -455,6 +548,38 @@ export default function LoginScreen() {
               />
             </TouchableOpacity>
           </View>
+
+          {!isSignUp && signInError ? (
+            <Text style={styles.signInError} accessibilityLiveRegion="polite">
+              {signInError}
+            </Text>
+          ) : null}
+
+          {!isSignUp && showResetHelper ? (
+            <View style={styles.resetHelperCard}>
+              <Text style={styles.resetHelperText}>
+                Still having trouble? Would you like to reset your password?
+              </Text>
+              <View style={styles.resetHelperActions}>
+                <TouchableOpacity
+                  onPress={() => void handleForgotPassword()}
+                  disabled={loading || resetLoading}
+                  accessibilityRole="button"
+                  accessibilityLabel="Yes, reset password"
+                >
+                  <Text style={styles.resetHelperPrimary}>Yes, reset password</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={dismissResetHelper}
+                  disabled={loading}
+                  accessibilityRole="button"
+                  accessibilityLabel="No thanks"
+                >
+                  <Text style={styles.resetHelperSecondary}>No thanks</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
 
           {isSignUp && (
             <TextInput
@@ -486,7 +611,15 @@ export default function LoginScreen() {
               <Text style={styles.forgotPasswordText}>{resetLoading ? 'Sending reset email...' : 'Forgot password?'}</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity style={styles.switchTextWrap} onPress={() => setIsSignUp(!isSignUp)} disabled={loading}>
+          <TouchableOpacity
+            style={styles.switchTextWrap}
+            onPress={() => {
+              setIsSignUp(!isSignUp);
+              setFailedSignInAttempts(0);
+              clearSignInFeedback();
+            }}
+            disabled={loading}
+          >
             <Text style={styles.switchText}>
               {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
             </Text>

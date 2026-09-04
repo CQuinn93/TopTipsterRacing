@@ -16,6 +16,11 @@ export type SubscriptionUsageCompetition = {
 
 export type SubscriptionEntitlements = {
   is_owner?: boolean;
+  is_gamemaster?: boolean;
+  club_setup_complete?: boolean;
+  club_name?: string | null;
+  club_logo_url?: string | null;
+  club_payment_url?: string | null;
   participant_tier?: ParticipantTier;
   creator_tier?: CreatorTier | null;
   show_ads?: boolean;
@@ -46,7 +51,9 @@ export const SUBSCRIPTION_ERROR_MESSAGES: Record<string, string> = {
   create_limit_reached:
     'You have reached your active competition limit for your Creator plan.',
   single_sport_locked:
-    'Your Creator plan only allows competitions in one sport at a time. Finish or remove other sport competitions first.',
+    'Your Creator plan is locked to one sport. Upgrade Creator Plus or Pro to run all sports.',
+  gamemaster_cannot_join:
+    'Gamemaster club accounts manage competitions and cannot join as a player.',
 };
 
 export function subscriptionErrorMessage(errorCode: string | undefined, fallback = 'Something went wrong.'): string {
@@ -216,6 +223,41 @@ export function hasCreatorEntitlement(ent: SubscriptionEntitlements | null | und
   if (!ent) return false;
   if (ent.is_owner) return true;
   return !!ent.creator_tier || !!ent.lifetime_creator_tier;
+}
+
+export function isGamemasterAccount(ent: SubscriptionEntitlements | null | undefined): boolean {
+  if (!ent || ent.is_owner) return false;
+  return ent.is_gamemaster === true || ent.creator_tier === 'gamemaster' || ent.lifetime_creator_tier === 'gamemaster';
+}
+
+export function needsGamemasterClubSetup(ent: SubscriptionEntitlements | null | undefined): boolean {
+  return isGamemasterAccount(ent) && ent?.club_setup_complete === false;
+}
+
+export async function gamemasterCompleteSetup(params: {
+  clubName: string;
+  clubLogoUrl?: string | null;
+  clubPaymentUrl?: string | null;
+}): Promise<{
+  success: boolean;
+  error?: string;
+  club_name?: string;
+  club_logo_url?: string | null;
+  club_payment_url?: string | null;
+}> {
+  const { data, error } = await (supabase as any).rpc('gamemaster_complete_setup', {
+    p_club_name: params.clubName,
+    p_club_logo_url: params.clubLogoUrl ?? null,
+    p_club_payment_url: params.clubPaymentUrl ?? null,
+  });
+  if (error) throw error;
+  return (data ?? { success: false, error: 'unknown' }) as {
+    success: boolean;
+    error?: string;
+    club_name?: string;
+    club_logo_url?: string | null;
+    club_payment_url?: string | null;
+  };
 }
 
 export function participantTierLabel(ent: SubscriptionEntitlements | null | undefined): string {

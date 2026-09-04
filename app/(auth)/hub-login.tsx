@@ -10,6 +10,7 @@ import {
   Alert,
   Platform,
   KeyboardAvoidingView,
+  Image,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +29,7 @@ import {
   sportLabel,
   type KioskSport,
 } from '@/lib/kioskSession';
+import { pickClubLogoImage, uploadClubLogo } from '@/lib/clubLogoStorage';
 
 /**
  * Staff-only Hub login: Gamemaster / Owner signs in here, picks a competition,
@@ -48,6 +50,7 @@ export default function HubLoginSetupScreen() {
   const [staffUsername, setStaffUsername] = useState<string | null>(null);
   const [clubName, setClubName] = useState<string | null>(null);
   const [clubLogoUrl, setClubLogoUrl] = useState<string | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [signingIn, setSigningIn] = useState(false);
@@ -141,6 +144,26 @@ export default function HubLoginSetupScreen() {
     }
   };
 
+  const onUploadLogo = async () => {
+    if (!userId) return;
+    setUploadingLogo(true);
+    try {
+      const picked = await pickClubLogoImage();
+      if (!picked) return;
+      const url = await uploadClubLogo({
+        userId,
+        uri: picked.uri,
+        mimeType: picked.mimeType,
+        fileName: picked.fileName,
+      });
+      setClubLogoUrl(url);
+    } catch (e) {
+      Alert.alert('Logo', e instanceof Error ? e.message : 'Could not upload logo');
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
   const onActivate = async () => {
     if (!userId || !selected) return;
     if (!selected.join_code?.trim()) {
@@ -179,10 +202,6 @@ export default function HubLoginSetupScreen() {
       const exitPinHash = await hashKioskPin(pin);
       const clubNameTrim = (clubName ?? '').trim() || null;
       const clubLogoTrim = (clubLogoUrl ?? '').trim() || null;
-      if (clubLogoTrim && !/^https?:\/\//i.test(clubLogoTrim)) {
-        Alert.alert('Club logo', 'Logo URL must start with http:// or https://');
-        return;
-      }
 
       await (supabase.from('profiles') as any)
         .update({
@@ -332,19 +351,49 @@ export default function HubLoginSetupScreen() {
               onChangeText={setClubName}
               placeholder="Club name"
               placeholderTextColor={theme.colors.textMuted}
-              editable={!saving}
+              editable={!saving && !uploadingLogo}
             />
-            <TextInput
-              style={styles.input}
-              value={clubLogoUrl ?? ''}
-              onChangeText={setClubLogoUrl}
-              placeholder="Logo image URL (https://…)"
-              placeholderTextColor={theme.colors.textMuted}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              editable={!saving}
-            />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              {clubLogoUrl ? (
+                <Image
+                  source={{ uri: clubLogoUrl }}
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 12,
+                    backgroundColor: theme.colors.surface,
+                  }}
+                  resizeMode="contain"
+                />
+              ) : (
+                <View
+                  style={{
+                    width: 64,
+                    height: 64,
+                    borderRadius: 12,
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: theme.colors.border,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text style={styles.hint}>No logo</Text>
+                </View>
+              )}
+              <Pressable
+                style={[styles.secondaryBtn, (saving || uploadingLogo) && styles.primaryBtnDisabled]}
+                disabled={saving || uploadingLogo || !userId}
+                onPress={() => void onUploadLogo()}
+              >
+                {uploadingLogo ? (
+                  <ActivityIndicator color={theme.colors.accent} />
+                ) : (
+                  <Text style={styles.secondaryBtnText}>
+                    {clubLogoUrl ? 'Replace logo' : 'Upload logo'}
+                  </Text>
+                )}
+              </Pressable>
+            </View>
 
             <Text style={styles.sectionLabel}>Online payment link (optional)</Text>
             <Text style={styles.hint}>
@@ -552,6 +601,21 @@ function makeStyles(
       fontFamily: theme.fontFamily.baiBold,
       fontSize: 16,
       color: theme.colors.white,
+    },
+    secondaryBtn: {
+      borderRadius: theme.radius.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minWidth: 120,
+    },
+    secondaryBtnText: {
+      fontFamily: theme.fontFamily.baiSemiBold,
+      fontSize: 14,
+      color: theme.colors.textSecondary,
     },
   });
 }

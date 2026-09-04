@@ -5,6 +5,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { getLastRoute } from '@/lib/lastRoute';
 import { getKioskDeviceConfig } from '@/lib/kioskSession';
+import {
+  fetchMyEntitlements,
+  isGamemasterAccount,
+} from '@/lib/subscriptionEntitlements';
 
 export default function Index() {
   const theme = useTheme();
@@ -45,6 +49,11 @@ export default function Index() {
       }
       if (!session) {
         if (!cancelled) setResolvedRoute(null);
+        return;
+      }
+      const ent = await fetchMyEntitlements();
+      if (isGamemasterAccount(ent)) {
+        if (!cancelled) setResolvedRoute('/gamemaster-hub');
         return;
       }
       const last = await getLastRoute();

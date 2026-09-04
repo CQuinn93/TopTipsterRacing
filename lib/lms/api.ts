@@ -1297,7 +1297,11 @@ export async function lmsAdminCreateCompetition(
   name: string,
   startGameweekId: string,
   season = '2026/27',
-  extraLives = 0
+  extraLives = 0,
+  options?: {
+    continuationMode?: 'none' | 'full_rollover' | 'mass_wipeout_revive';
+    gamemasterQuoteId?: string | null;
+  }
 ) {
   const { data, error } = await db.rpc('lms_admin_create_competition', {
     p_code: adminCode,
@@ -1305,6 +1309,8 @@ export async function lmsAdminCreateCompetition(
     p_start_gameweek_id: startGameweekId,
     p_season: season,
     p_extra_lives: extraLives,
+    p_continuation_mode: options?.continuationMode ?? 'full_rollover',
+    p_gamemaster_quote_id: options?.gamemasterQuoteId ?? null,
   });
   if (error) throw error;
   return data as {
@@ -1314,6 +1320,8 @@ export async function lmsAdminCreateCompetition(
     access_code?: string;
     start_gameweek_id?: string;
     start_gameweek_number?: number;
+    continuation_mode?: string;
+    gamemaster_quote_id?: string | null;
   };
 }
 

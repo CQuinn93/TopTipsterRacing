@@ -29,9 +29,14 @@ import {
   isCurrentUserBanned,
   ownerListCompetitions,
   ownerListUsers,
+  ownerListGamemasters,
+  ownerGetGamemasterAccount,
+  ownerSetGamemasterQuoteStatus,
   ownerSetUserBanned,
   type OwnerCompetitionRow,
   type OwnerUserRow,
+  type OwnerGamemasterListRow,
+  type OwnerGamemasterAccount,
 } from '@/lib/ownerApi';
 import {
   DEFAULT_HUB_GAME_MODES,
@@ -46,9 +51,14 @@ import {
   ownerSetFootballPlayerFlagged,
 } from '@/lib/f2t/api';
 import { F2tAlertsPanel } from '@/components/f2t/F2tAlertsPanel';
-import { GamemasterCustomPricingPanel } from '@/components/GamemasterCustomPricingPanel';
+import { OwnerGamemasterPromoteFlow } from '@/components/OwnerGamemasterPromoteFlow';
 import { AccountSubscriptionPanel } from '@/components/AccountSubscriptionPanel';
-import { fetchMyEntitlements, type SubscriptionEntitlements } from '@/lib/subscriptionEntitlements';
+import { estimateLeagueBillFromActualPlayers } from '@/lib/gamemasterCustomPricing';
+import {
+  fetchMyEntitlements,
+  isGamemasterAccount,
+  type SubscriptionEntitlements,
+} from '@/lib/subscriptionEntitlements';
 import {
   lmsAdminSetFixtureExcluded,
   lmsGetCurrentGameweek,
@@ -58,8 +68,15 @@ import {
   type LmsGameweek,
 } from '@/lib/lms/api';
 
-const DESKTOP_BREAKPOINT = 900;
-const COMPACT_BREAKPOINT = 420;
+import {
+  COMPACT_BREAKPOINT,
+  DESKTOP_BREAKPOINT,
+  DESKTOP_COLUMN_GAP,
+  DESKTOP_FORM_MAX,
+  DESKTOP_SIDE_RAIL,
+  DESKTOP_STAGE_MAX,
+  desktopHorizontalPad,
+} from '@/lib/desktopLayout';
 
 const TERMS_OF_USE_URL =
   'https://doc-hosting.flycricket.io/top-tipster-racing-terms-of-use/bf206b6c-02a2-4394-aedc-dbf95f95d955/terms';
@@ -68,7 +85,10 @@ const PRIVACY_POLICY_URL =
 
 type HubTab = 'football' | 'racing' | 'admin' | 'account';
 
-type AdminCategory = 'football' | 'racing' | 'users' | 'gamemaster';
+type AdminCategory = 'sports' | 'accounts';
+type SportsSubTab = 'football' | 'racing';
+type AccountsSubTab = 'users' | 'gamemasters';
+type GamemasterSubTab = 'promote' | 'manage';
 type FootballAdminTab = 'f2t_alerts' | 'exclusions' | 'competitions';
 
 const LMS_SEASON = '2026/27';
@@ -92,6 +112,7 @@ type ModeItem = {
 type ModeTileProps = {
   item: ModeItem;
   accent: string;
+  desktop?: boolean;
 };
 
 function buildHubModeItem(
@@ -120,20 +141,20 @@ function buildHubModeItem(
   return { key, title, status: 'Open', onPress };
 }
 
-function ModeTile({ item, accent }: ModeTileProps) {
+function ModeTile({ item, accent, desktop }: ModeTileProps) {
   const theme = useTheme();
 
   const styles = useMemo(
     () =>
       StyleSheet.create({
         tile: {
-          width: '47%',
+          width: desktop ? '31.5%' : '47%',
           flexGrow: 0,
-          flexBasis: '47%',
-          maxWidth: '48.5%',
-          minHeight: 88,
-          paddingVertical: 16,
-          paddingHorizontal: 14,
+          flexBasis: desktop ? '31.5%' : '47%',
+          maxWidth: desktop ? '32.5%' : '48.5%',
+          minHeight: desktop ? 108 : 88,
+          paddingVertical: desktop ? 20 : 16,
+          paddingHorizontal: desktop ? 18 : 14,
           borderRadius: theme.radius.md,
           borderWidth: 1.5,
           borderColor: item.unavailable ? theme.colors.border : `${accent}66`,
@@ -152,10 +173,10 @@ function ModeTile({ item, accent }: ModeTileProps) {
         },
         title: {
           fontFamily: theme.fontFamily.baiBold,
-          fontSize: 15,
+          fontSize: desktop ? 17 : 15,
           color: theme.colors.text,
           letterSpacing: -0.2,
-          lineHeight: 20,
+          lineHeight: desktop ? 22 : 20,
         },
         status: {
           fontFamily: theme.fontFamily.baiMedium,
@@ -165,7 +186,7 @@ function ModeTile({ item, accent }: ModeTileProps) {
           color: item.unavailable ? theme.colors.textMuted : accent,
         },
       }),
-    [theme, accent, item.unavailable]
+    [theme, accent, item.unavailable, desktop]
   );
 
   const body = (
@@ -245,7 +266,10 @@ export default function CompetitionHubScreen() {
   const [isOwner, setIsOwner] = useState(false);
   const [hubModes, setHubModes] = useState<HubGameModes>(DEFAULT_HUB_GAME_MODES);
   const [hubModesSaving, setHubModesSaving] = useState(false);
-  const [adminCategory, setAdminCategory] = useState<AdminCategory>('football');
+  const [adminCategory, setAdminCategory] = useState<AdminCategory>('sports');
+  const [sportsSubTab, setSportsSubTab] = useState<SportsSubTab>('football');
+  const [accountsSubTab, setAccountsSubTab] = useState<AccountsSubTab>('users');
+  const [gamemasterSubTab, setGamemasterSubTab] = useState<GamemasterSubTab>('promote');
   const [footballAdminTab, setFootballAdminTab] = useState<FootballAdminTab>('f2t_alerts');
   const [fplAlertPlayers, setFplAlertPlayers] = useState<Array<Record<string, unknown>>>([]);
   const [fplAlertsLoading, setFplAlertsLoading] = useState(false);
@@ -261,6 +285,14 @@ export default function CompetitionHubScreen() {
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [ownerComps, setOwnerComps] = useState<OwnerCompetitionRow[]>([]);
   const [ownerCompsLoading, setOwnerCompsLoading] = useState(false);
+  const [ownerGamemasters, setOwnerGamemasters] = useState<OwnerGamemasterListRow[]>([]);
+  const [ownerGamemastersLoading, setOwnerGamemastersLoading] = useState(false);
+  const [selectedGamemasterId, setSelectedGamemasterId] = useState<string | null>(null);
+  const [selectedGamemasterAccount, setSelectedGamemasterAccount] =
+    useState<OwnerGamemasterAccount | null>(null);
+  const [selectedGamemasterAccountLoading, setSelectedGamemasterAccountLoading] =
+    useState(false);
+  const [busyQuoteId, setBusyQuoteId] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [signingOutAll, setSigningOutAll] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
@@ -383,6 +415,71 @@ export default function CompetitionHubScreen() {
     }
   }, [isOwner]);
 
+  const loadOwnerGamemasters = useCallback(async () => {
+    if (!isOwner) return;
+    setOwnerGamemastersLoading(true);
+    try {
+      const list = await ownerListGamemasters();
+      setOwnerGamemasters(list);
+      setSelectedGamemasterId((prev) => {
+        if (prev && list.some((g) => g.id === prev)) return prev;
+        return list[0]?.id ?? null;
+      });
+    } catch (e) {
+      console.warn('[competition-hub] gamemasters load failed', e);
+      Alert.alert(
+        'Error',
+        e instanceof Error ? e.message : 'Failed to load gamemasters'
+      );
+      setOwnerGamemasters([]);
+      setSelectedGamemasterId(null);
+    } finally {
+      setOwnerGamemastersLoading(false);
+    }
+  }, [isOwner]);
+
+  const loadOwnerGamemasterAccount = useCallback(async (userId: string) => {
+    if (!isOwner) return;
+    setSelectedGamemasterAccountLoading(true);
+    try {
+      const res = await ownerGetGamemasterAccount(userId);
+      if (!res.success) {
+        Alert.alert('Error', res.error ?? 'Could not load gamemaster');
+        setSelectedGamemasterAccount(null);
+        return;
+      }
+      setSelectedGamemasterAccount(res);
+    } catch (e) {
+      console.warn('[competition-hub] gamemaster account load failed', e);
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load gamemaster');
+      setSelectedGamemasterAccount(null);
+    } finally {
+      setSelectedGamemasterAccountLoading(false);
+    }
+  }, [isOwner]);
+
+  const setGamemasterQuoteStatus = async (
+    quoteId: string,
+    status: 'paid_active' | 'paid_complete' | 'pending_payment'
+  ) => {
+    setBusyQuoteId(quoteId);
+    try {
+      const res = await ownerSetGamemasterQuoteStatus(quoteId, status);
+      if (!res.success) {
+        Alert.alert('Error', res.error ?? 'Could not update quote status');
+        return;
+      }
+      if (selectedGamemasterId) {
+        await loadOwnerGamemasterAccount(selectedGamemasterId);
+        await loadOwnerGamemasters();
+      }
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not update quote status');
+    } finally {
+      setBusyQuoteId(null);
+    }
+  };
+
   const loadOwnerComps = useCallback(async () => {
     if (!isOwner) return;
     setOwnerCompsLoading(true);
@@ -500,28 +597,50 @@ export default function CompetitionHubScreen() {
 
   useEffect(() => {
     if (tab !== 'admin' || !isOwner) return;
-    if (adminCategory === 'football' && footballAdminTab === 'f2t_alerts') {
+    if (adminCategory === 'sports' && sportsSubTab === 'football' && footballAdminTab === 'f2t_alerts') {
       void loadFplAlerts();
-    } else if (adminCategory === 'football' && footballAdminTab === 'exclusions') {
+    } else if (adminCategory === 'sports' && sportsSubTab === 'football' && footballAdminTab === 'exclusions') {
       void loadExclusions(selectedGwId);
     } else if (
-      (adminCategory === 'football' && footballAdminTab === 'competitions') ||
-      adminCategory === 'racing'
+      (adminCategory === 'sports' && sportsSubTab === 'football' && footballAdminTab === 'competitions') ||
+      (adminCategory === 'sports' && sportsSubTab === 'racing')
     ) {
       void loadOwnerComps();
-    } else if (adminCategory === 'users') {
+    } else if (adminCategory === 'accounts' && accountsSubTab === 'users') {
       void loadOwnerUsers();
+    } else if (adminCategory === 'accounts' && accountsSubTab === 'gamemasters') {
+      void loadOwnerUsers();
+      void loadOwnerGamemasters();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     tab,
     isOwner,
     adminCategory,
+    sportsSubTab,
+    accountsSubTab,
     footballAdminTab,
     loadFplAlerts,
     loadExclusions,
     loadOwnerUsers,
+    loadOwnerGamemasters,
     loadOwnerComps,
+  ]);
+
+  useEffect(() => {
+    if (tab !== 'admin' || !isOwner) return;
+    if (adminCategory !== 'accounts' || accountsSubTab !== 'gamemasters') return;
+    if (gamemasterSubTab !== 'manage') return;
+    if (!selectedGamemasterId) return;
+    void loadOwnerGamemasterAccount(selectedGamemasterId);
+  }, [
+    tab,
+    isOwner,
+    adminCategory,
+    accountsSubTab,
+    gamemasterSubTab,
+    selectedGamemasterId,
+    loadOwnerGamemasterAccount,
   ]);
 
   useEffect(() => {
@@ -546,6 +665,13 @@ export default function CompetitionHubScreen() {
           Alert.alert('Account banned', 'This account has been banned and cannot continue.');
           await signOut();
           router.replace('/(auth)/login');
+          return;
+        }
+
+        const entitlements = await fetchMyEntitlements();
+        if (cancelled) return;
+        if (isGamemasterAccount(entitlements)) {
+          router.replace('/gamemaster-hub');
           return;
         }
 
@@ -799,8 +925,8 @@ export default function CompetitionHubScreen() {
     Animated.parallel(animations).start();
   };
 
-  const horizontalPad = isCompact ? theme.spacing.md : isDesktop ? theme.spacing.xxl : theme.spacing.lg;
-  const contentMax = isDesktop ? 1080 : 640;
+  const horizontalPad = desktopHorizontalPad(theme.spacing, width, height);
+  const contentMax = isDesktop ? DESKTOP_STAGE_MAX : 640;
 
   const footballAccent = theme.colors.accent;
   const racingAccent = isDark ? '#c4a35a' : '#9a7b2f';
@@ -1021,8 +1147,47 @@ export default function CompetitionHubScreen() {
         },
         contentInner: {
           width: '100%',
-          maxWidth: isDesktop ? 560 : 480,
+          maxWidth: isDesktop
+            ? tab === 'admin'
+              ? DESKTOP_STAGE_MAX
+              : tab === 'account'
+                ? DESKTOP_FORM_MAX
+                : 920
+            : 480,
           alignSelf: 'center',
+        },
+        formCap: {
+          width: '100%',
+          maxWidth: isDesktop ? DESKTOP_FORM_MAX : '100%',
+          alignSelf: 'flex-start' as const,
+        },
+        manageSplit: {
+          flexDirection: isDesktop ? ('row' as const) : ('column' as const),
+          alignItems: isDesktop ? ('flex-start' as const) : ('stretch' as const),
+          gap: DESKTOP_COLUMN_GAP,
+          marginTop: 8,
+        },
+        manageRail: {
+          width: isDesktop ? DESKTOP_SIDE_RAIL : '100%',
+          maxWidth: isDesktop ? DESKTOP_SIDE_RAIL : '100%',
+          gap: 8,
+          flexShrink: 0,
+        },
+        manageDetail: {
+          flex: 1,
+          minWidth: 0,
+          width: isDesktop ? undefined : '100%',
+          gap: 10,
+        },
+        workspaceCard: {
+          width: '100%',
+          marginBottom: theme.spacing.md,
+          padding: isDesktop ? theme.spacing.lg : theme.spacing.md,
+          borderRadius: theme.radius.lg,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+          backgroundColor: theme.colors.surface,
+          gap: theme.spacing.sm,
         },
         sectionTitle: {
           fontFamily: theme.fontFamily.baiBold,
@@ -1052,13 +1217,14 @@ export default function CompetitionHubScreen() {
         modeGrid: {
           flexDirection: 'row',
           flexWrap: 'wrap',
-          gap: 10,
+          gap: isDesktop ? DESKTOP_COLUMN_GAP : 10,
+          justifyContent: isDesktop ? 'flex-start' : 'flex-start',
         },
         gameModesCard: {
           width: '100%',
           marginBottom: theme.spacing.md,
-          padding: theme.spacing.md,
-          borderRadius: theme.radius.md,
+          padding: isDesktop ? theme.spacing.lg : theme.spacing.md,
+          borderRadius: theme.radius.lg,
           borderWidth: StyleSheet.hairlineWidth,
           borderColor: theme.colors.border,
           backgroundColor: theme.colors.surface,
@@ -1069,6 +1235,40 @@ export default function CompetitionHubScreen() {
           fontSize: 13,
           color: theme.colors.textSecondary,
           lineHeight: 18,
+        },
+        divider: {
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.colors.border,
+          marginVertical: theme.spacing.sm,
+        },
+        sectionLabel: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 11,
+          color: theme.colors.textMuted,
+          letterSpacing: 1.1,
+          textTransform: 'uppercase',
+          marginTop: theme.spacing.sm,
+          marginBottom: theme.spacing.sm,
+        },
+        metaRow: {
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          gap: 12,
+          paddingVertical: 6,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          borderTopColor: theme.colors.border,
+        },
+        metaLabel: {
+          fontFamily: theme.fontFamily.baiLight,
+          fontSize: 13,
+          color: theme.colors.textSecondary,
+        },
+        metaValue: {
+          flex: 1,
+          textAlign: 'right',
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 13,
+          color: theme.colors.text,
         },
         gameModeRow: {
           flexDirection: 'row',
@@ -1331,6 +1531,7 @@ export default function CompetitionHubScreen() {
         },
       }),
     [
+      tab,
       theme,
       isCompact,
       isDesktop,
@@ -1516,13 +1717,12 @@ export default function CompetitionHubScreen() {
                 <>
                   {tab === 'admin' && isOwner ? (
                     <>
+                      {/* ── Top-level admin tabs: Sports | Manage Accounts ── */}
                       <View style={styles.adminCatRow}>
                         {(
                           [
-                            { key: 'football' as const, label: 'Football' },
-                            { key: 'racing' as const, label: 'Racing' },
-                            { key: 'users' as const, label: 'Users' },
-                            { key: 'gamemaster' as const, label: 'Club pricing' },
+                            { key: 'sports' as const, label: 'Sports' },
+                            { key: 'accounts' as const, label: 'Manage Accounts' },
                           ] as const
                         ).map((cat) => {
                           const active = adminCategory === cat.key;
@@ -1547,17 +1747,50 @@ export default function CompetitionHubScreen() {
                         })}
                       </View>
 
-                      {adminCategory !== 'users' && adminCategory !== 'gamemaster' ? (
-                        <View style={styles.gameModesCard}>
-                          <Text style={styles.panelLabel}>Game modes for users</Text>
-                          <Text style={styles.gameModesHint}>
-                            Toggle which {adminCategory === 'football' ? 'football' : 'racing'}{' '}
-                            modes appear open. You always have access to every mode.
-                          </Text>
-                          {(adminCategory === 'football'
-                            ? FOOTBALL_MODE_KEYS
-                            : RACING_MODE_KEYS
-                          ).map((key) => {
+                      {/* ═══ SPORTS TAB ═══ */}
+                      {adminCategory === 'sports' ? (
+                        <>
+                          {/* Sub-tabs: Football | Racing */}
+                          <View style={styles.adminSubRow}>
+                            {(
+                              [
+                                { key: 'football' as const, label: 'Football' },
+                                { key: 'racing' as const, label: 'Racing' },
+                              ] as const
+                            ).map((sub) => {
+                              const active = sportsSubTab === sub.key;
+                              return (
+                                <Pressable
+                                  key={sub.key}
+                                  style={[styles.adminSubChip, active && styles.adminSubChipActive]}
+                                  onPress={() => setSportsSubTab(sub.key)}
+                                  accessibilityRole="button"
+                                  accessibilityState={{ selected: active }}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.adminSubChipText,
+                                      active && styles.adminSubChipTextActive,
+                                    ]}
+                                  >
+                                    {sub.label}
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+
+                          {/* Game modes toggle (both football & racing) */}
+                          <View style={styles.gameModesCard}>
+                            <Text style={styles.panelLabel}>Game modes for users</Text>
+                            <Text style={styles.gameModesHint}>
+                              Toggle which {sportsSubTab === 'football' ? 'football' : 'racing'}{' '}
+                              modes appear open. You always have access to every mode.
+                            </Text>
+                            {(sportsSubTab === 'football'
+                              ? FOOTBALL_MODE_KEYS
+                              : RACING_MODE_KEYS
+                            ).map((key) => {
                             const open = hubModes[key];
                             return (
                               <View key={key} style={styles.gameModeRow}>
@@ -1585,10 +1818,9 @@ export default function CompetitionHubScreen() {
                               </View>
                             );
                           })}
-                        </View>
-                      ) : null}
+                          </View>
 
-                      {adminCategory === 'football' ? (
+                          {sportsSubTab === 'football' ? (
                         <>
                           <View style={styles.adminSubRow}>
                             {(
@@ -1808,130 +2040,424 @@ export default function CompetitionHubScreen() {
                               )}
                             </View>
                           )}
+                          </>
+                          ) : null}
+
+                          {sportsSubTab === 'racing' ? (
+                            <View style={styles.gameModesCard}>
+                              <Text style={styles.panelLabel}>Manage competitions</Text>
+                              <Text style={styles.gameModesHint}>
+                                Open any racing festival as Owner.
+                              </Text>
+                              <Pressable
+                                style={[styles.adminCatChip, styles.adminCatChipActive]}
+                                onPress={() => openOwnerPanel('competitions')}
+                              >
+                                <Text style={[styles.adminCatChipText, styles.adminCatChipTextActive]}>
+                                  Full owner console
+                                </Text>
+                              </Pressable>
+                              {ownerCompsLoading ? (
+                                <ActivityIndicator size="small" color={adminAccent} style={{ marginTop: 8 }} />
+                              ) : (
+                                <View style={{ gap: 8, marginTop: 8 }}>
+                                  {ownerComps
+                                    .filter((c) => c.sport === 'racing')
+                                    .map((c) => (
+                                      <Pressable
+                                        key={`${c.sport}-${c.id}`}
+                                        style={styles.adminUserRow}
+                                        onPress={() => router.push(`/(app)/competition/${c.id}` as any)}
+                                      >
+                                        <View style={{ flex: 1, minWidth: 0 }}>
+                                          <Text style={styles.adminUserName} numberOfLines={1}>{c.name}</Text>
+                                          <Text style={styles.gameModesHint} numberOfLines={1}>
+                                            Racing · {c.join_code?.trim() || 'no code'} · {c.status}
+                                          </Text>
+                                        </View>
+                                        <Text style={styles.adminCatChipTextActive}>Manage</Text>
+                                      </Pressable>
+                                    ))}
+                                  {ownerComps.filter((c) => c.sport === 'racing').length === 0 ? (
+                                    <Text style={styles.gameModesHint}>No racing competitions yet.</Text>
+                                  ) : null}
+                                </View>
+                              )}
+                            </View>
+                          ) : null}
                         </>
                       ) : null}
 
-                      {adminCategory === 'racing' ? (
-                        <View style={styles.gameModesCard}>
-                          <Text style={styles.panelLabel}>Manage competitions</Text>
-                          <Text style={styles.gameModesHint}>
-                            Open any racing festival as Owner. Day-to-day tools also live in the
-                            racing app.
-                          </Text>
-                          <Pressable
-                            style={[styles.adminCatChip, styles.adminCatChipActive]}
-                            onPress={() => openOwnerPanel('competitions')}
-                          >
-                            <Text style={[styles.adminCatChipText, styles.adminCatChipTextActive]}>
-                              Full owner console
-                            </Text>
-                          </Pressable>
-                          {ownerCompsLoading ? (
-                            <ActivityIndicator
-                              size="small"
-                              color={adminAccent}
-                              style={{ marginTop: 8 }}
-                            />
-                          ) : (
-                            <View style={{ gap: 8, marginTop: 8 }}>
-                              {ownerComps
-                                .filter((c) => c.sport === 'racing')
-                                .map((c) => (
-                                  <Pressable
-                                    key={`${c.sport}-${c.id}`}
-                                    style={styles.adminUserRow}
-                                    onPress={() =>
-                                      router.push(`/(app)/competition/${c.id}` as any)
-                                    }
-                                  >
-                                    <View style={{ flex: 1, minWidth: 0 }}>
-                                      <Text style={styles.adminUserName} numberOfLines={1}>
-                                        {c.name}
-                                      </Text>
-                                      <Text style={styles.gameModesHint} numberOfLines={1}>
-                                        Racing · {c.join_code?.trim() || 'no code'} · {c.status}
-                                      </Text>
-                                    </View>
-                                    <Text style={styles.adminCatChipTextActive}>Manage</Text>
-                                  </Pressable>
-                                ))}
-                              {ownerComps.filter((c) => c.sport === 'racing').length === 0 ? (
-                                <Text style={styles.gameModesHint}>No racing competitions yet.</Text>
-                              ) : null}
-                            </View>
-                          )}
-                        </View>
-                      ) : null}
-
-                      {adminCategory === 'gamemaster' ? (
-                        <View style={styles.gameModesCard}>
-                          <Text style={styles.panelLabel}>Club League Bill</Text>
-                          <GamemasterCustomPricingPanel accent={adminAccent} />
-                        </View>
-                      ) : null}
-
-                      {adminCategory === 'users' ? (
-                        <View style={styles.gameModesCard}>
-                          <Text style={styles.panelLabel}>Users</Text>
-                          <Text style={styles.gameModesHint}>
-                            Ban or reinstate accounts here. Open the full owner console for roles,
-                            deletions, and competitions.
-                          </Text>
-                          <Pressable
-                            style={[styles.adminCatChip, { alignSelf: 'flex-start' }]}
-                            onPress={() => openOwnerPanel('users')}
-                          >
-                            <Text style={styles.adminCatChipText}>Full owner console</Text>
-                          </Pressable>
-                          {usersLoading ? (
-                            <ActivityIndicator
-                              size="small"
-                              color={adminAccent}
-                              style={{ marginTop: 8 }}
-                            />
-                          ) : ownerUsers.length === 0 ? (
-                            <Text style={styles.gameModesHint}>No users found.</Text>
-                          ) : (
-                            ownerUsers.map((u) => {
-                              const banned = !!u.banned_at;
-                              const busy = busyUserId === u.id;
-                              const isSelf = u.id === userId;
+                      {/* ═══ MANAGE ACCOUNTS TAB ═══ */}
+                      {adminCategory === 'accounts' ? (
+                        <>
+                          {/* Sub-tabs: Users | Gamemasters */}
+                          <View style={styles.adminSubRow}>
+                            {(
+                              [
+                                { key: 'users' as const, label: 'Users' },
+                                { key: 'gamemasters' as const, label: 'Gamemasters' },
+                              ] as const
+                            ).map((sub) => {
+                              const active = accountsSubTab === sub.key;
                               return (
-                                <View key={u.id} style={styles.userCard}>
-                                  <Text style={styles.userName} numberOfLines={1}>
-                                    {u.username?.trim() || 'User'}
+                                <Pressable
+                                  key={sub.key}
+                                  style={[styles.adminSubChip, active && styles.adminSubChipActive]}
+                                  onPress={() => setAccountsSubTab(sub.key)}
+                                  accessibilityRole="button"
+                                  accessibilityState={{ selected: active }}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.adminSubChipText,
+                                      active && styles.adminSubChipTextActive,
+                                    ]}
+                                  >
+                                    {sub.label}
                                   </Text>
-                                  <Text style={styles.excludeMeta}>
-                                    {u.role}
-                                    {u.email ? ` · ${u.email}` : ''}
-                                  </Text>
-                                  {!isSelf && u.role !== 'Owner' ? (
-                                    <View style={styles.excludeRow}>
-                                      <Text style={styles.excludeLabel}>
-                                        {banned ? 'Banned' : 'Active'}
-                                      </Text>
-                                      {busy ? (
-                                        <ActivityIndicator size="small" color={adminAccent} />
-                                      ) : (
-                                        <Switch
-                                          value={banned}
-                                          onValueChange={(value) =>
-                                            void toggleUserBanned(u, value)
-                                          }
-                                          trackColor={{
-                                            false: theme.colors.border,
-                                            true: adminAccent,
-                                          }}
-                                          thumbColor={theme.colors.surface}
-                                        />
-                                      )}
-                                    </View>
-                                  ) : null}
-                                </View>
+                                </Pressable>
                               );
-                            })
-                          )}
-                        </View>
+                            })}
+                          </View>
+
+                          {/* ── Users sub-tab ── */}
+                          {accountsSubTab === 'users' ? (
+                            <View style={[styles.workspaceCard, styles.formCap]}>
+                              <Text style={styles.panelLabel}>Users</Text>
+                              <Text style={styles.gameModesHint}>
+                                Ban or reinstate accounts here. Open the full owner console for roles,
+                                deletions, and competitions.
+                              </Text>
+                              <Pressable
+                                style={[styles.adminCatChip, { alignSelf: 'flex-start' }]}
+                                onPress={() => openOwnerPanel('users')}
+                              >
+                                <Text style={styles.adminCatChipText}>Full owner console</Text>
+                              </Pressable>
+                              {usersLoading ? (
+                                <ActivityIndicator size="small" color={adminAccent} style={{ marginTop: 8 }} />
+                              ) : ownerUsers.length === 0 ? (
+                                <Text style={styles.gameModesHint}>No users found.</Text>
+                              ) : (
+                                ownerUsers.map((u) => {
+                                  const banned = !!u.banned_at;
+                                  const busy = busyUserId === u.id;
+                                  const isSelf = u.id === userId;
+                                  return (
+                                    <View key={u.id} style={styles.userCard}>
+                                      <Text style={styles.userName} numberOfLines={1}>
+                                        {u.username?.trim() || 'User'}
+                                      </Text>
+                                      <Text style={styles.excludeMeta}>
+                                        {u.role}
+                                        {u.email ? ` · ${u.email}` : ''}
+                                      </Text>
+                                      {!isSelf && u.role !== 'Owner' ? (
+                                        <View style={styles.excludeRow}>
+                                          <Text style={styles.excludeLabel}>
+                                            {banned ? 'Banned' : 'Active'}
+                                          </Text>
+                                          {busy ? (
+                                            <ActivityIndicator size="small" color={adminAccent} />
+                                          ) : (
+                                            <Switch
+                                              value={banned}
+                                              onValueChange={(value) => void toggleUserBanned(u, value)}
+                                              trackColor={{ false: theme.colors.border, true: adminAccent }}
+                                              thumbColor={theme.colors.surface}
+                                            />
+                                          )}
+                                        </View>
+                                      ) : null}
+                                    </View>
+                                  );
+                                })
+                              )}
+                            </View>
+                          ) : null}
+
+                          {/* ── Gamemasters sub-tab ── */}
+                          {accountsSubTab === 'gamemasters' ? (
+                            <>
+                              <View style={styles.adminSubRow}>
+                                {(
+                                  [
+                                    { key: 'promote' as const, label: 'Promote' },
+                                    { key: 'manage' as const, label: 'Manage' },
+                                  ] as const
+                                ).map((sub) => {
+                                  const active = gamemasterSubTab === sub.key;
+                                  return (
+                                    <Pressable
+                                      key={sub.key}
+                                      style={[styles.adminSubChip, active && styles.adminSubChipActive]}
+                                      onPress={() => setGamemasterSubTab(sub.key)}
+                                      accessibilityRole="button"
+                                      accessibilityState={{ selected: active }}
+                                    >
+                                      <Text
+                                        style={[
+                                          styles.adminSubChipText,
+                                          active && styles.adminSubChipTextActive,
+                                        ]}
+                                      >
+                                        {sub.label}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </View>
+
+                              {gamemasterSubTab === 'promote' ? (
+                                <View style={styles.formCap}>
+                                  <OwnerGamemasterPromoteFlow
+                                    users={ownerUsers}
+                                    usersLoading={usersLoading}
+                                    accent={adminAccent}
+                                    onRegistered={() => {
+                                      void loadOwnerUsers();
+                                      void loadOwnerGamemasters();
+                                    }}
+                                  />
+                                </View>
+                              ) : (
+                                <View style={styles.workspaceCard}>
+                                  <Text style={styles.panelLabel}>Gamemaster accounts</Text>
+                                  <Text style={styles.gameModesHint}>
+                                    Select a club Gamemaster to view their account details, quotes, and competition usage.
+                                  </Text>
+
+                                  {ownerGamemastersLoading ? (
+                                    <ActivityIndicator size="small" color={adminAccent} style={{ marginTop: 8 }} />
+                                  ) : ownerGamemasters.length === 0 ? (
+                                    <Text style={styles.gameModesHint}>No Gamemaster accounts yet.</Text>
+                                  ) : (
+                                    <View style={styles.manageSplit}>
+                                      <View style={styles.manageRail}>
+                                        {ownerGamemasters.map((g) => {
+                                          const active = g.id === selectedGamemasterId;
+                                          return (
+                                            <Pressable
+                                              key={g.id}
+                                              style={[styles.userCard, active && { borderColor: adminAccent, borderWidth: 2 }]}
+                                              onPress={() => setSelectedGamemasterId(g.id)}
+                                              accessibilityRole="button"
+                                              accessibilityLabel={`Select gamemaster ${g.club_name ?? g.username ?? ''}`}
+                                            >
+                                              <Text style={styles.userName} numberOfLines={1}>
+                                                {g.club_name?.trim() || g.username?.trim() || 'Gamemaster'}
+                                              </Text>
+                                              <Text style={styles.excludeMeta} numberOfLines={1}>
+                                                {g.email ? `· ${g.email}` : null}
+                                              </Text>
+                                              <Text style={styles.gameModesHint} numberOfLines={1}>
+                                                Hub licences: {g.kiosk_licenses_count} · Requests: {g.request_count} · Current: {g.current_count}
+                                              </Text>
+                                            </Pressable>
+                                          );
+                                        })}
+                                      </View>
+
+                                      <View style={styles.manageDetail}>
+                                        {selectedGamemasterAccount ? (
+                                          selectedGamemasterAccountLoading ? (
+                                            <ActivityIndicator size="small" color={adminAccent} />
+                                          ) : (
+                                            <>
+                                              <View style={styles.metaRow}>
+                                                <Text style={styles.metaLabel}>Club</Text>
+                                                <Text style={styles.metaValue}>
+                                                  {selectedGamemasterAccount.profile?.club_name ?? '—'}
+                                                </Text>
+                                              </View>
+                                              <View style={styles.metaRow}>
+                                                <Text style={styles.metaLabel}>Email</Text>
+                                                <Text style={styles.metaValue}>
+                                                  {selectedGamemasterAccount.profile?.email ?? '—'}
+                                                </Text>
+                                              </View>
+                                              <View style={styles.metaRow}>
+                                                <Text style={styles.metaLabel}>Setup</Text>
+                                                <Text style={styles.metaValue}>
+                                                  {selectedGamemasterAccount.profile?.club_setup_complete ? 'Complete' : 'Pending'}
+                                                </Text>
+                                              </View>
+
+                                              <View style={styles.divider} />
+
+                                              <Text style={styles.panelLabel}>Quotes</Text>
+                                              <Text style={styles.gameModesHint}>
+                                                Mark paid & activate when payment lands. Season complete is automatic when every linked competition finishes (sole winner, or wipeout with No Continuation). Use the button below only as a manual override.
+                                              </Text>
+                                              {(() => {
+                                                const qs = selectedGamemasterAccount.quotes ?? [];
+                                                const requests = qs.filter((q) => q.kind === 'request' && q.status === 'requested');
+                                                const current = qs.filter((q) => q.status !== 'requested');
+                                                const statusLabel = (q: (typeof qs)[number]) => {
+                                                  if (q.status === 'pending_payment') {
+                                                    if (q.notes?.startsWith('Edit requested')) return 'Edit requested';
+                                                    if (q.notes?.toLowerCase().includes('accepted')) {
+                                                      return 'Accepted — awaiting payment';
+                                                    }
+                                                    return 'Pending payment';
+                                                  }
+                                                  if (q.status === 'paid_active') return 'Paid & active';
+                                                  if (q.status === 'paid_complete') return 'Paid & complete';
+                                                  return q.status.replaceAll('_', ' ');
+                                                };
+                                                return (
+                                                  <>
+                                                    <Text style={styles.sectionLabel}>Requests</Text>
+                                                    {requests.length === 0 ? (
+                                                      <Text style={styles.gameModesHint}>No quote requests.</Text>
+                                                    ) : (
+                                                      requests.map((q) => (
+                                                        <View key={q.id} style={styles.userCard}>
+                                                          <Text style={styles.userName} numberOfLines={1}>
+                                                            Quote request · {q.payload.competitions.length} comps · {q.payload.competitionHubs} hub
+                                                            {q.payload.competitionHubs === 1 ? '' : 's'}
+                                                          </Text>
+                                                          <Text style={styles.gameModesHint}>
+                                                            Status: {statusLabel(q)}
+                                                          </Text>
+                                                          {q.notes ? (
+                                                            <Text style={styles.gameModesHint}>{q.notes}</Text>
+                                                          ) : null}
+                                                        </View>
+                                                      ))
+                                                    )}
+
+                                                    <Text style={styles.sectionLabel}>Current</Text>
+                                                    {current.length === 0 ? (
+                                                      <Text style={styles.gameModesHint}>No current package yet.</Text>
+                                                    ) : (
+                                                      current.map((q) => (
+                                                        <View key={q.id} style={styles.userCard}>
+                                                          {(() => {
+                                                            const comps = selectedGamemasterAccount.competitions ?? [];
+                                                            const lmsActual = comps.filter((c) => c.sport === 'lms').map((c) => c.participant_count);
+                                                            const f2tActual = comps.filter((c) => c.sport === 'f2t').map((c) => c.participant_count);
+                                                            let lmsIdx = 0;
+                                                            let f2tIdx = 0;
+                                                            const estimate = estimateLeagueBillFromActualPlayers(
+                                                              q.payload,
+                                                              (c) => {
+                                                                if (c.footballMode === 'lms') {
+                                                                  const v = lmsActual[lmsIdx] ?? 0;
+                                                                  lmsIdx++;
+                                                                  return v;
+                                                                }
+                                                                const v = f2tActual[f2tIdx] ?? 0;
+                                                                f2tIdx++;
+                                                                return v;
+                                                              }
+                                                            );
+                                                            return (
+                                                              <Text style={styles.gameModesHint}>
+                                                                Expected (actual users): €{estimate.dueToday.toFixed(2)}
+                                                              </Text>
+                                                            );
+                                                          })()}
+                                                          <Text style={styles.userName} numberOfLines={1}>
+                                                            {q.kind === 'onboarding' ? 'Onboarding package' : 'Quote'} · {q.payload.competitions.length} comps
+                                                          </Text>
+                                                          <Text style={styles.gameModesHint}>
+                                                            Status: {statusLabel(q)}
+                                                          </Text>
+                                                          <Text style={styles.gameModesHint}>
+                                                            Due today: {q.due_today != null ? `€${q.due_today.toFixed(2)}` : '—'}
+                                                          </Text>
+                                                          {q.notes ? (
+                                                            <Text style={styles.gameModesHint}>{q.notes}</Text>
+                                                          ) : null}
+
+                                                          {q.status === 'pending_payment' ? (
+                                                            <Pressable
+                                                              style={[
+                                                                styles.adminCatChip,
+                                                                styles.adminCatChipActive,
+                                                                { alignSelf: 'flex-start', marginTop: 8 },
+                                                                busyQuoteId === q.id && { opacity: 0.6 },
+                                                              ]}
+                                                              disabled={busyQuoteId === q.id}
+                                                              onPress={() =>
+                                                                void setGamemasterQuoteStatus(q.id, 'paid_active')
+                                                              }
+                                                            >
+                                                              {busyQuoteId === q.id ? (
+                                                                <ActivityIndicator size="small" color={theme.colors.white} />
+                                                              ) : (
+                                                                <Text
+                                                                  style={[
+                                                                    styles.adminCatChipText,
+                                                                    styles.adminCatChipTextActive,
+                                                                  ]}
+                                                                >
+                                                                  Mark paid & activate
+                                                                </Text>
+                                                              )}
+                                                            </Pressable>
+                                                          ) : null}
+
+                                                          {q.status === 'paid_active' ? (
+                                                            <Pressable
+                                                              style={[
+                                                                styles.adminCatChip,
+                                                                { alignSelf: 'flex-start', marginTop: 8 },
+                                                                busyQuoteId === q.id && { opacity: 0.6 },
+                                                              ]}
+                                                              disabled={busyQuoteId === q.id}
+                                                              onPress={() =>
+                                                                void setGamemasterQuoteStatus(q.id, 'paid_complete')
+                                                              }
+                                                            >
+                                                              {busyQuoteId === q.id ? (
+                                                                <ActivityIndicator size="small" color={adminAccent} />
+                                                              ) : (
+                                                                <Text style={styles.adminCatChipText}>
+                                                                  Mark season complete (manual)
+                                                                </Text>
+                                                              )}
+                                                            </Pressable>
+                                                          ) : null}
+                                                        </View>
+                                                      ))
+                                                    )}
+                                                  </>
+                                                );
+                                              })()}
+
+                                              <View style={styles.divider} />
+
+                                              <Text style={styles.panelLabel}>Competitions</Text>
+                                              {selectedGamemasterAccount.competitions?.length ? (
+                                                selectedGamemasterAccount.competitions.map((c) => (
+                                                  <View key={c.id} style={styles.userCard}>
+                                                    <Text style={styles.userName} numberOfLines={1}>{c.name}</Text>
+                                                    <Text style={styles.gameModesHint}>
+                                                      {c.sport.toUpperCase()} · {c.status} · Active users: {c.active_count} · Total users: {c.participant_count}
+                                                    </Text>
+                                                  </View>
+                                                ))
+                                              ) : (
+                                                <Text style={styles.gameModesHint}>No competitions yet.</Text>
+                                              )}
+                                            </>
+                                          )
+                                        ) : (
+                                          <Text style={styles.gameModesHint}>
+                                            Select a Gamemaster from the list to view their account.
+                                          </Text>
+                                        )}
+                                      </View>
+                                    </View>
+                                  )}
+                                </View>
+                              )}
+                            </>
+                          ) : null}
+                        </>
                       ) : null}
                     </>
                   ) : (
@@ -1951,7 +2477,7 @@ export default function CompetitionHubScreen() {
                       <Text style={styles.panelLabel}>Select a mode</Text>
                       <View style={styles.modeGrid}>
                         {modes.map((item) => (
-                          <ModeTile key={item.key} item={item} accent={activeAccent} />
+                          <ModeTile key={item.key} item={item} accent={activeAccent} desktop={isDesktop} />
                         ))}
                       </View>
                     </>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -17,6 +17,7 @@ import {
   type ClubFootballMode,
   type CompetitionDraft,
   type LeagueBillInput,
+  type LeagueBillQuote,
   type LmsContinuationMode,
   type Tipster20ContinuationMode,
 } from '@/lib/gamemasterCustomPricing';
@@ -105,9 +106,14 @@ const stepperStyles = StyleSheet.create({
 
 type Props = {
   accent: string;
+  /**
+   * Called whenever the built quote changes. Useful for “attach quote” flows.
+   * Note: only valid once the user has added at least 1 competition.
+   */
+  onQuoteChange?: (quote: LeagueBillQuote, input: LeagueBillInput) => void;
 };
 
-export function GamemasterCustomPricingPanel({ accent }: Props) {
+export function GamemasterCustomPricingPanel({ accent, onQuoteChange }: Props) {
   const theme = useTheme();
   const [input, setInput] = useState<LeagueBillInput>({
     competitions: [],
@@ -117,6 +123,9 @@ export function GamemasterCustomPricingPanel({ accent }: Props) {
   const [draft, setDraft] = useState<CompetitionDraft | null>(null);
 
   const quote = useMemo(() => calculateLeagueBill(input), [input]);
+  useEffect(() => {
+    onQuoteChange?.(quote, input);
+  }, [onQuoteChange, quote, input]);
   const canAddMore = input.competitions.length < LEAGUE_BILL_LIMITS.maxCompetitions;
 
   const styles = useMemo(

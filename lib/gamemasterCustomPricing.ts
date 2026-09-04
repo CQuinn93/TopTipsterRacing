@@ -217,9 +217,14 @@ export function clampLeagueBillInput(input: LeagueBillInput): LeagueBillInput {
   };
 }
 
-function priceOneCompetition(c: CompetitionDraft, index: number) {
+function priceOneCompetition(
+  c: CompetitionDraft,
+  index: number,
+  playerCount?: number | null
+) {
   const rates = LEAGUE_BILL_RATES;
-  const planning = planningPlayersForCap(c.maxPlayers);
+  const planning =
+    playerCount != null ? Math.max(0, Math.round(playerCount)) : planningPlayersForCap(c.maxPlayers);
   const platformRate = platformRateForCap(c.maxPlayers);
   const factor = index === 0 ? 1 : rates.multiCompFactor;
   const modeLabel = FOOTBALL_MODE_OPTIONS.find((m) => m.key === c.footballMode)?.label ?? c.footballMode;
@@ -231,7 +236,10 @@ function priceOneCompetition(c: CompetitionDraft, index: number) {
   breakdown.push({
     label: 'Platform fee',
     amount: platformFee,
-    detail: `${planning} players (75% of ${c.maxPlayers}) × ${formatEuro(platformRate)}/player`,
+    detail:
+      playerCount != null
+        ? `${planning} actual players × ${formatEuro(platformRate)}/player`
+        : `${planning} players (75% of ${c.maxPlayers}) × ${formatEuro(platformRate)}/player`,
   });
 
   const adsOff = roundMoney(planning * rates.adsOffPerPlayer);
@@ -366,6 +374,87 @@ export function calculateLeagueBill(raw: LeagueBillInput): LeagueBillQuote {
   const seasonTotal = roundMoney(lines.reduce((sum, line) => sum + line.amount, 0));
   const hubDepositTotal = input.competitionHubs * rates.hubDeposit;
   const hubMonthlyTotal = input.competitionHubs * rates.hubMonthly;
+
+  const dueTodayLines: LeagueBillLine[] = [];
+  if (input.competitionHubs > 0) {
+    dueTodayLines.push({
+      label: `${input.competitionHubs} competition hub${input.competitionHubs === 1 ? '' : 's'} · deposit (refundable)`,
+      amount: hubDepositTotal,
+    });
+    dueTodayLines.push({
+      label: `${input.competitionHubs} hub${input.competitionHubs === 1 ? '' : 's'} · first month rental`,
+      amount: hubMonthlyTotal,
+    });
+  }
+
+  return {
+    seasonTotal,
+    hubDepositTotal,
+    hubMonthlyTotal,
+    dueToday: roundMoney(seasonTotal + hubDepositTotal + hubMonthlyTotal),
+    assumedSeasonWeeks: ASSUMED_SEASON_WEEKS,
+    lines,
+    dueTodayLines,
+    competitionSummaries,
+    recommendedCaps: {
+      competitions: input.competitions.map((c) => ({
+        football_mode: c.footballMode,
+        max_participants: c.maxPlayers,
+        continuation:
+          c.footballMode === 'lms' ? c.lmsContinuation : c.tipster20Continuation,
+      })),
+      max_concurrent_creates: 1,
+      kiosk_licenses_count: input.competitionHubs,
+      include_festival_pass: input.includeFestivalPass,
+      assumed_season_weeks: ASSUMED_SEASON_WEEKS,
+    },
+  };
+}
+
+/**
+ * Estimate pricing using actual joined users instead of the “75% of cap” planning players.
+ * Used by Owner admin to show expected cost for a gamemaster’s actual quota usage.
+ */
+export function estimateLeagueBillFromActualPlayers(
+  raw: LeagueBillInput,
+  playerCountFor: (c: CompetitionDraft, index: number) => number | null | undefined
+): LeagueBillQuote {
+  const input = clampLeagueBillInput(raw);
+  const lines: LeagueBillLine[] = [];
+  const competitionSummaries: LeagueBillQuote['competitionSummaries'] = [];
+
+  input.competitions.forEach((c, index) => {
+    const actualPlayers = playerCountFor(c, index);
+    const priced = priceOneCompetition(c, index, actualPlayers);
+
+    competitionSummaries.push({
+      id: c.id,
+      title: priced.title,
+      planningPlayers: priced.planningPlayers,
+      platformRate: priced.platformRate,
+      amount: priced.amount,
+      continuationLabel: priced.continuationLabel,
+      notes: priced.notes,
+      breakdown: priced.breakdown,
+    });
+
+    lines.push({
+      label: `${priced.modeLabel} · cap ${c.maxPlayers} · ${priced.continuationLabel}`,
+      amount: priced.amount,
+      detail: `${priced.planningPlayers} actual × ${formatEuro(priced.platformRate)} + ads-off + cushion`,
+    });
+  });
+
+  if (input.includeFestivalPass) {
+    lines.push({
+      label: '1 racing festival pass (named meeting)',
+      amount: LEAGUE_BILL_RATES.festivalPass,
+    });
+  }
+
+  const seasonTotal = roundMoney(lines.reduce((sum, line) => sum + line.amount, 0));
+  const hubDepositTotal = input.competitionHubs * LEAGUE_BILL_RATES.hubDeposit;
+  const hubMonthlyTotal = input.competitionHubs * LEAGUE_BILL_RATES.hubMonthly;
 
   const dueTodayLines: LeagueBillLine[] = [];
   if (input.competitionHubs > 0) {
