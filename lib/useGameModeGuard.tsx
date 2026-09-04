@@ -9,13 +9,13 @@ import {
   getHubGameModes,
   type HubGameModeKey,
 } from '@/lib/hubGameModes';
+import { fetchMyEntitlements, isGamemasterAccount } from '@/lib/subscriptionEntitlements';
 
 /**
  * Redirects non-owners away when a hub game mode is closed.
- * Owner always has access to all implemented modes.
+ * Owner and Gamemaster always have access (GMs create from paid quotes).
  */
 export function useGameModeGuard(mode: HubGameModeKey): boolean {
-  const theme = useTheme();
   const { userId } = useAuth();
   const [allowed, setAllowed] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -26,11 +26,16 @@ export function useGameModeGuard(mode: HubGameModeKey): boolean {
       try {
         const modes = await getHubGameModes();
         let isOwner = false;
+        let isGamemaster = false;
         if (userId) {
           const role = await getProfileRole(userId);
           isOwner = isOwnerRole(role);
+          if (!isOwner) {
+            const ent = await fetchMyEntitlements();
+            isGamemaster = isGamemasterAccount(ent);
+          }
         }
-        const ok = canAccessGameMode(mode, modes, isOwner);
+        const ok = canAccessGameMode(mode, modes, isOwner) || isGamemaster;
         if (cancelled) return;
         if (!ok) {
           router.replace('/competition-hub' as any);

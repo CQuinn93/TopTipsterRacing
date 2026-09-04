@@ -75,7 +75,7 @@ export async function gamemasterRespondToQuote(params: {
   };
 }
 
-/** Re-run provisioning for the Gamemaster's own paid_active quote (repair). */
+/** Re-run provisioning for the Gamemaster's own paid_active quote (owner/repair). */
 export async function gamemasterProvisionMyQuote(quoteId: string): Promise<{
   success: boolean;
   error?: string;
@@ -94,5 +94,26 @@ export async function gamemasterProvisionMyQuote(quoteId: string): Promise<{
     skipped?: boolean;
     existing_count?: number;
   };
+}
+
+export type GamemasterCreateCreditsRes = {
+  success: boolean;
+  error?: string;
+  total_remaining?: number;
+  modes?: {
+    mode: string;
+    label: string;
+    quoted: number;
+    used: number;
+    remaining: number;
+    quote_id: string | null;
+  }[];
+};
+
+/** Remaining create slots by competition type (from paid_active quotes). */
+export async function gamemasterListCreateCredits(): Promise<GamemasterCreateCreditsRes> {
+  const { data, error } = await db.rpc('gamemaster_list_create_credits');
+  if (error) throw error;
+  return (data ?? { success: false, error: 'unknown' }) as GamemasterCreateCreditsRes;
 }
 

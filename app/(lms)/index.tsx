@@ -66,10 +66,15 @@ export default function LmsHomeScreen() {
   const { openSidebar } = useSidebar();
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
-  const { tab: tabParam, code: codeParam } = useLocalSearchParams<{
-    tab?: string;
-    code?: string;
-  }>();
+  const { tab: tabParam, code: codeParam, create: createParam, quoteId: quoteIdParam } =
+    useLocalSearchParams<{
+      tab?: string;
+      code?: string;
+      create?: string;
+      quoteId?: string;
+    }>();
+  const gamemasterQuoteId =
+    typeof quoteIdParam === 'string' && quoteIdParam.trim() ? quoteIdParam.trim() : null;
   const [comps, setComps] = useState<LmsCompetitionHomeSummary[]>([]);
   const [pending, setPending] = useState<LmsPendingJoin[]>([]);
   const [loading, setLoading] = useState(true);
@@ -133,6 +138,13 @@ export default function LmsHomeScreen() {
     setCode(raw.slice(0, 6));
     setTab('join');
   }, [codeParam]);
+
+  useEffect(() => {
+    if (createParam === '1' || createParam === 'true') {
+      setTab('competitions');
+      setShowCreate(true);
+    }
+  }, [createParam]);
 
   const upcomingFixtures = useMemo(() => {
     const open = fixtures.filter((f) => f.status !== 'finished' && !f.excluded_from_lms);
@@ -562,7 +574,8 @@ export default function LmsHomeScreen() {
         createGwId,
         '2026/27',
         createEntry.trim() || undefined,
-        createExtraLives
+        createExtraLives,
+        gamemasterQuoteId ? { gamemasterQuoteId } : undefined
       );
       if (!res.success) {
         Alert.alert('Failed', res.error ?? 'Could not create competition');

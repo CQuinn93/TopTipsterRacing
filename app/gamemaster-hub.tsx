@@ -10,6 +10,7 @@ import {
   RefreshControl,
   useWindowDimensions,
   Alert,
+  Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -24,7 +25,19 @@ import {
   needsGamemasterClubSetup,
   type SubscriptionEntitlements,
 } from '@/lib/subscriptionEntitlements';
-import { gamemasterListMyQuotes, gamemasterRequestQuote, gamemasterProvisionMyQuote, type GamemasterQuote } from '@/lib/gamemasterApi';
+import {
+  gamemasterListMyQuotes,
+  gamemasterRequestQuote,
+  gamemasterListCreateCredits,
+  type GamemasterQuote,
+} from '@/lib/gamemasterApi';
+import {
+  creditLabel,
+  routeForCreateMode,
+  totalCreateCreditsRemaining,
+  type GamemasterCreateMode,
+  type GamemasterModeCredit,
+} from '@/lib/gamemasterCredits';
 import { kioskListMyCompetitions, type KioskCompetitionOption } from '@/lib/kioskApi';
 import { sportLabel, type KioskSport } from '@/lib/kioskSession';
 import { formatEuro } from '@/lib/gamemasterCustomPricing';
@@ -38,6 +51,19 @@ import {
 } from '@/lib/desktopLayout';
 
 type TabKey = 'account' | 'quotes' | 'competitions';
+
+function mapCreditsFromRpc(
+  modes: NonNullable<Awaited<ReturnType<typeof gamemasterListCreateCredits>>['modes']>
+): GamemasterModeCredit[] {
+  return modes.map((m) => ({
+    mode: m.mode as GamemasterCreateMode,
+    label: m.label || creditLabel(m.mode),
+    quoted: m.quoted ?? 0,
+    used: m.used ?? 0,
+    remaining: m.remaining ?? 0,
+    quoteId: m.quote_id ?? null,
+  }));
+}
 
 export default function GamemasterHubScreen() {
   const theme = useTheme();
@@ -60,7 +86,9 @@ export default function GamemasterHubScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [quotes, setQuotes] = useState<GamemasterQuote[]>([]);
   const [quotesLoading, setQuotesLoading] = useState(false);
-  const [provisionBusy, setProvisionBusy] = useState(false);
+  const [credits, setCredits] = useState<GamemasterModeCredit[]>([]);
+  const [creditsLoading, setCreditsLoading] = useState(false);
+  const [createPickerOpen, setCreatePickerOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -101,6 +129,23 @@ export default function GamemasterHubScreen() {
     }
   }, [userId]);
 
+  const loadCredits = useCallback(async () => {
+    if (!userId) return;
+    setCreditsLoading(true);
+    try {
+      const res = await gamemasterListCreateCredits();
+      if (res.success && Array.isArray(res.modes)) {
+        setCredits(mapCreditsFromRpc(res.modes));
+      } else {
+        setCredits([]);
+      }
+    } catch {
+      setCredits([]);
+    } finally {
+      setCreditsLoading(false);
+    }
+  }, [userId]);
+
   useEffect(() => {
     void load();
   }, [load]);
@@ -109,14 +154,18 @@ export default function GamemasterHubScreen() {
     if (ent && isGamemasterAccount(ent) && ent.club_setup_complete) {
       void loadComps();
       void loadQuotes();
+      void loadCredits();
     }
-  }, [ent?.club_setup_complete, ent, loadComps, loadQuotes]);
+  }, [ent?.club_setup_complete, ent, loadComps, loadQuotes, loadCredits]);
 
   const onRefresh = async () => {
     setRefreshing(true);
     await load();
-    if (ent?.club_setup_complete !== false) await loadComps();
-    if (ent?.club_setup_complete !== false) await loadQuotes();
+    if (ent?.club_setup_complete !== false) {
+      await loadComps();
+      await loadQuotes();
+      await loadCredits();
+    }
     setRefreshing(false);
   };
 
@@ -126,31 +175,18 @@ export default function GamemasterHubScreen() {
   const currentQuotes = quotes.filter((q) => q.status !== 'requested');
   const paidActiveQuote = currentQuotes.find((q) => q.status === 'paid_active');
   const awaitingPaymentQuote = currentQuotes.find((q) => q.status === 'pending_payment');
+  const remainingCreates = totalCreateCreditsRemaining(credits);
 
-  const runProvision = async () => {
-    if (!paidActiveQuote) return;
-    setProvisionBusy(true);
-    try {
-      const res = await gamemasterProvisionMyQuote(paidActiveQuote.id);
-      if (!res.success) {
-        Alert.alert('Could not create competitions', res.error ?? 'Try again or ask your club owner.');
-        return;
-      }
-      const createdCount = Array.isArray(res.created) ? res.created.length : 0;
-      if (createdCount > 0) {
-        Alert.alert(
-          'Competitions ready',
-          `Created ${createdCount} competition${createdCount === 1 ? '' : 's'}.`
-        );
-      } else if (res.skipped) {
-        Alert.alert('Already set up', 'Your quote competitions are already on this account.');
-      }
-      await loadComps();
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Could not create competitions');
-    } finally {
-      setProvisionBusy(false);
+  const onPickCreateMode = (credit: GamemasterModeCredit) => {
+    if (credit.remaining <= 0 || !credit.quoteId) {
+      Alert.alert(
+        'Not available',
+        'Your paid package does not include this competition type, or you have used all remaining slots.'
+      );
+      return;
     }
+    setCreatePickerOpen(false);
+    router.push(routeForCreateMode(credit.mode, credit.quoteId) as any);
   };
 
   if (authLoading || loading) {
@@ -343,33 +379,25 @@ export default function GamemasterHubScreen() {
             <View style={[styles.card, isDesktop && !isCompact ? styles.compsDesktop : null]}>
               <Text style={styles.cardTitle}>Your competitions</Text>
               <Text style={styles.cardBody}>
-                {comps.length > 0
-                  ? 'Open a competition to manage join codes, requests, and game settings.'
-                  : paidActiveQuote
-                    ? 'Your package is paid. Create the quoted competitions below if they are not listed yet.'
-                    : awaitingPaymentQuote
-                      ? 'Competitions unlock after your club owner confirms payment on your quote.'
-                      : 'Competitions unlock after your quote is issued and payment is confirmed.'}
+                {paidActiveQuote || remainingCreates > 0
+                  ? remainingCreates > 0
+                    ? `Your account has ${remainingCreates} competition${
+                        remainingCreates === 1 ? '' : 's'
+                      } available to create.`
+                    : 'You have used all competition slots from your paid package. Open a competition below to manage it, or request another quote.'
+                  : awaitingPaymentQuote
+                    ? 'Competitions unlock after your club owner confirms payment on your quote.'
+                    : 'Competitions unlock after your quote is issued and payment is confirmed.'}
               </Text>
-              {compsLoading ? (
+              {remainingCreates > 0 ? (
+                <Pressable style={styles.linkBtn} onPress={() => setCreatePickerOpen(true)}>
+                  <Text style={styles.linkBtnText}>Create competition</Text>
+                </Pressable>
+              ) : null}
+              {compsLoading || creditsLoading ? (
                 <ActivityIndicator color={theme.colors.accent} style={{ marginTop: 12 }} />
               ) : comps.length === 0 ? (
-                <View style={{ gap: 12 }}>
-                  <Text style={styles.empty}>No competitions yet.</Text>
-                  {paidActiveQuote ? (
-                    <Pressable
-                      style={[styles.linkBtn, provisionBusy && { opacity: 0.6 }]}
-                      disabled={provisionBusy}
-                      onPress={() => void runProvision()}
-                    >
-                      {provisionBusy ? (
-                        <ActivityIndicator color={theme.colors.accent} />
-                      ) : (
-                        <Text style={styles.linkBtnText}>Create competitions from quote</Text>
-                      )}
-                    </Pressable>
-                  ) : null}
-                </View>
+                <Text style={[styles.empty, { marginTop: 12 }]}>No competitions yet.</Text>
               ) : (
                 <View style={styles.compsGrid}>
                   {comps.map((c) => (
@@ -395,6 +423,54 @@ export default function GamemasterHubScreen() {
           ) : null}
         </View>
       </ScrollView>
+
+      <Modal
+        visible={createPickerOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setCreatePickerOpen(false)}
+      >
+        <Pressable style={styles.pickerBackdrop} onPress={() => setCreatePickerOpen(false)}>
+          <Pressable style={styles.pickerSheet} onPress={(e) => e.stopPropagation?.()}>
+            <Text style={styles.pickerTitle}>Choose competition type</Text>
+            <Text style={styles.pickerBody}>
+              Types included in your package are highlighted. Others are unavailable until they are
+              on a quote.
+            </Text>
+            <View style={styles.pickerGrid}>
+              {(credits.length > 0
+                ? credits
+                : ([
+                    { mode: 'lms', label: 'Last Man Standing', remaining: 0, quoted: 0, used: 0, quoteId: null },
+                    { mode: 'f2t', label: 'First2 Twenty', remaining: 0, quoted: 0, used: 0, quoteId: null },
+                    { mode: 'racing', label: 'Top Tipster Racing', remaining: 0, quoted: 0, used: 0, quoteId: null },
+                    { mode: 'f2t6', label: 'First2 6', remaining: 0, quoted: 0, used: 0, quoteId: null },
+                  ] as GamemasterModeCredit[])
+              ).map((credit) => {
+                const enabled = credit.remaining > 0 && !!credit.quoteId;
+                return (
+                  <Pressable
+                    key={credit.mode}
+                    style={[styles.typeCard, !enabled && styles.typeCardDimmed]}
+                    disabled={!enabled}
+                    onPress={() => onPickCreateMode(credit)}
+                  >
+                    <Text style={[styles.typeCardTitle, !enabled && styles.typeCardTextDimmed]}>
+                      {credit.label}
+                    </Text>
+                    <Text style={[styles.typeCardMeta, !enabled && styles.typeCardTextDimmed]}>
+                      {enabled ? `Remaining: ${credit.remaining}` : 'Not on your package'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Pressable style={styles.pickerClose} onPress={() => setCreatePickerOpen(false)}>
+              <Text style={styles.pickerCloseText}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -658,6 +734,76 @@ function makeStyles(
     },
     empty: {
       fontFamily: theme.fontFamily.baiLight,
+      fontSize: 14,
+      color: theme.colors.textMuted,
+    },
+    pickerBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.65)',
+      justifyContent: 'center',
+      padding: theme.spacing.lg,
+    },
+    pickerSheet: {
+      backgroundColor: theme.colors.surface,
+      borderRadius: theme.radius.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border,
+      padding: theme.spacing.lg,
+      gap: 12,
+      maxWidth: 520,
+      width: '100%',
+      alignSelf: 'center',
+    },
+    pickerTitle: {
+      fontFamily: theme.fontFamily.baiBold,
+      fontSize: 20,
+      color: theme.colors.text,
+    },
+    pickerBody: {
+      fontFamily: theme.fontFamily.baiLight,
+      fontSize: 14,
+      color: theme.colors.textMuted,
+      lineHeight: 20,
+    },
+    pickerGrid: {
+      gap: 10,
+      marginTop: 4,
+    },
+    typeCard: {
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.accent,
+      backgroundColor: theme.colors.accentMuted,
+      gap: 4,
+    },
+    typeCardDimmed: {
+      borderColor: theme.colors.border,
+      backgroundColor: theme.colors.background,
+      opacity: 0.45,
+    },
+    typeCardTitle: {
+      fontFamily: theme.fontFamily.baiBold,
+      fontSize: 16,
+      color: theme.colors.text,
+    },
+    typeCardMeta: {
+      fontFamily: theme.fontFamily.baiSemiBold,
+      fontSize: 13,
+      color: theme.colors.accent,
+    },
+    typeCardTextDimmed: {
+      color: theme.colors.textMuted,
+    },
+    pickerClose: {
+      alignSelf: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      marginTop: 4,
+    },
+    pickerCloseText: {
+      fontFamily: theme.fontFamily.baiSemiBold,
       fontSize: 14,
       color: theme.colors.textMuted,
     },

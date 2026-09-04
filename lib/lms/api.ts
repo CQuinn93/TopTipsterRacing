@@ -1767,9 +1767,16 @@ export async function lmsCreateCompetition(
   startGameweekId: string,
   season = '2026/27',
   entry?: string,
-  extraLives = 0
+  extraLives = 0,
+  options?: {
+    continuationMode?: 'none' | 'full_rollover' | 'mass_wipeout_revive';
+    gamemasterQuoteId?: string | null;
+  }
 ) {
-  const created = await lmsAdminCreateCompetition('', name, startGameweekId, season, extraLives);
+  const created = await lmsAdminCreateCompetition('', name, startGameweekId, season, extraLives, {
+    continuationMode: options?.continuationMode,
+    gamemasterQuoteId: options?.gamemasterQuoteId,
+  });
   const trimmed = entry?.trim();
   if (created.success && created.competition_id && trimmed) {
     const setRes = await lmsSetCompetitionEntry(created.competition_id, trimmed);

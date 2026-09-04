@@ -211,7 +211,8 @@ export async function f2tCreateCompetition(
   name: string,
   startGameweekId: string,
   season = '2026/27',
-  entry?: string
+  entry?: string,
+  options?: { gamemasterQuoteId?: string | null }
 ) {
   const { data, error } = await db.rpc('f2t_admin_create_competition', {
     p_code: '',
@@ -219,6 +220,7 @@ export async function f2tCreateCompetition(
     p_start_gameweek_id: startGameweekId,
     p_season: season,
     p_entry: entry ?? null,
+    p_gamemaster_quote_id: options?.gamemasterQuoteId ?? null,
   });
   if (error) throw error;
   return data as {

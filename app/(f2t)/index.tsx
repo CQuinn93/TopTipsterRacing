@@ -41,7 +41,13 @@ export default function F2tHomeScreen() {
   const { openSidebar } = useSidebar();
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
-  const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
+  const { tab: tabParam, create: createParam, quoteId: quoteIdParam } = useLocalSearchParams<{
+    tab?: string;
+    create?: string;
+    quoteId?: string;
+  }>();
+  const gamemasterQuoteId =
+    typeof quoteIdParam === 'string' && quoteIdParam.trim() ? quoteIdParam.trim() : null;
 
   const [comps, setComps] = useState<F2tCompetitionHomeSummary[]>([]);
   const [pending, setPending] = useState<F2tPendingJoin[]>([]);
@@ -71,6 +77,13 @@ export default function F2tHomeScreen() {
       setTab(tabParam);
     }
   }, [tabParam]);
+
+  useEffect(() => {
+    if (createParam === '1' || createParam === 'true') {
+      setTab('competitions');
+      setShowCreate(true);
+    }
+  }, [createParam]);
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -182,7 +195,8 @@ export default function F2tHomeScreen() {
         createName.trim(),
         createGwId,
         F2T_SEASON,
-        createEntry.trim() || undefined
+        createEntry.trim() || undefined,
+        gamemasterQuoteId ? { gamemasterQuoteId } : undefined
       );
       if (!res.success) {
         Alert.alert('Failed', res.error ?? 'Could not create competition');

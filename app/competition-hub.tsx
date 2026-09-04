@@ -476,7 +476,7 @@ export default function CompetitionHubScreen() {
         if (provision && provision.success === false) {
           Alert.alert(
             'Activated, but competitions not created',
-            provision.error ?? 'Use Provision competitions to retry.'
+            provision.error ?? 'The Gamemaster can still create competitions from their hub.'
           );
         } else {
           const createdCount = Array.isArray(provision?.created) ? provision.created.length : 0;
@@ -484,6 +484,11 @@ export default function CompetitionHubScreen() {
             Alert.alert(
               'Activated',
               `Created ${createdCount} competition${createdCount === 1 ? '' : 's'} for this Gamemaster.`
+            );
+          } else {
+            Alert.alert(
+              'Paid & active',
+              'The Gamemaster can create competitions from their hub using remaining package slots.'
             );
           }
         }
