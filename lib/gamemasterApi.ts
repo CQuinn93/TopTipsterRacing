@@ -75,3 +75,24 @@ export async function gamemasterRespondToQuote(params: {
   };
 }
 
+/** Re-run provisioning for the Gamemaster's own paid_active quote (repair). */
+export async function gamemasterProvisionMyQuote(quoteId: string): Promise<{
+  success: boolean;
+  error?: string;
+  created?: unknown[];
+  skipped?: boolean;
+  existing_count?: number;
+}> {
+  const { data, error } = await db.rpc('gamemaster_provision_quote_competitions', {
+    p_quote_id: quoteId,
+  });
+  if (error) throw error;
+  return (data ?? { success: false, error: 'unknown' }) as {
+    success: boolean;
+    error?: string;
+    created?: unknown[];
+    skipped?: boolean;
+    existing_count?: number;
+  };
+}
+

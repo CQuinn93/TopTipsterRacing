@@ -32,6 +32,8 @@ import {
   ownerListGamemasters,
   ownerGetGamemasterAccount,
   ownerSetGamemasterQuoteStatus,
+  ownerProvisionGamemasterQuote,
+  ownerTransferCompetition,
   ownerSetUserBanned,
   type OwnerCompetitionRow,
   type OwnerUserRow,
@@ -469,6 +471,23 @@ export default function CompetitionHubScreen() {
         Alert.alert('Error', res.error ?? 'Could not update quote status');
         return;
       }
+      if (status === 'paid_active') {
+        const provision = res.provision;
+        if (provision && provision.success === false) {
+          Alert.alert(
+            'Activated, but competitions not created',
+            provision.error ?? 'Use Provision competitions to retry.'
+          );
+        } else {
+          const createdCount = Array.isArray(provision?.created) ? provision.created.length : 0;
+          if (createdCount > 0) {
+            Alert.alert(
+              'Activated',
+              `Created ${createdCount} competition${createdCount === 1 ? '' : 's'} for this Gamemaster.`
+            );
+          }
+        }
+      }
       if (selectedGamemasterId) {
         await loadOwnerGamemasterAccount(selectedGamemasterId);
         await loadOwnerGamemasters();
@@ -478,6 +497,81 @@ export default function CompetitionHubScreen() {
     } finally {
       setBusyQuoteId(null);
     }
+  };
+
+  const provisionGamemasterQuote = async (quoteId: string) => {
+    setBusyQuoteId(quoteId);
+    try {
+      const res = await ownerProvisionGamemasterQuote(quoteId);
+      if (!res.success) {
+        Alert.alert('Error', res.error ?? 'Could not provision competitions');
+        return;
+      }
+      const createdCount = Array.isArray(res.created) ? res.created.length : 0;
+      if (res.skipped && createdCount === 0) {
+        Alert.alert('Already provisioned', 'This quote already has its competitions.');
+      } else {
+        Alert.alert(
+          'Provisioned',
+          createdCount > 0
+            ? `Created ${createdCount} competition${createdCount === 1 ? '' : 's'}.`
+            : 'No new competitions were needed.'
+        );
+      }
+      if (selectedGamemasterId) {
+        await loadOwnerGamemasterAccount(selectedGamemasterId);
+        await loadOwnerGamemasters();
+      }
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not provision competitions');
+    } finally {
+      setBusyQuoteId(null);
+    }
+  };
+
+  const transferCompetitionToGamemaster = async (
+    sport: 'lms' | 'f2t' | 'racing',
+    competitionId: string,
+    name: string
+  ) => {
+    if (!selectedGamemasterId) {
+      Alert.alert('Select a Gamemaster', 'Open Manage Gamemasters and select who should own this competition.');
+      return;
+    }
+    const club =
+      selectedGamemasterAccount?.profile?.club_name?.trim() ||
+      selectedGamemasterAccount?.profile?.username ||
+      'this Gamemaster';
+    Alert.alert(
+      'Transfer competition?',
+      `Move “${name}” to ${club}? They will see it in their Competitions list.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Transfer',
+          onPress: () => {
+            void (async () => {
+              try {
+                const res = await ownerTransferCompetition({
+                  sport,
+                  competitionId,
+                  toUserId: selectedGamemasterId,
+                });
+                if (!res.success) {
+                  Alert.alert('Error', res.error ?? 'Transfer failed');
+                  return;
+                }
+                await loadOwnerComps();
+                await loadOwnerGamemasterAccount(selectedGamemasterId);
+                Alert.alert('Transferred', `“${name}” now belongs to the Gamemaster.`);
+              } catch (e) {
+                Alert.alert('Error', e instanceof Error ? e.message : 'Transfer failed');
+              }
+            })();
+          },
+        },
+      ]
+    );
   };
 
   const loadOwnerComps = useCallback(async () => {
@@ -1881,31 +1975,44 @@ export default function CompetitionHubScreen() {
                                 />
                               ) : (
                                 <View style={{ gap: 8, marginTop: 8 }}>
+                                  <Text style={styles.gameModesHint}>
+                                    Use Transfer after selecting a Gamemaster under Manage accounts → Gamemasters,
+                                    so the league shows in their Competitions list.
+                                  </Text>
                                   {ownerComps
                                     .filter((c) => c.sport === 'lms' || c.sport === 'f2t')
                                     .map((c) => (
-                                      <Pressable
-                                        key={`${c.sport}-${c.id}`}
-                                        style={styles.adminUserRow}
-                                        onPress={() => {
-                                          if (c.sport === 'lms') {
-                                            router.push(`/(lms)/${c.id}` as any);
-                                          } else {
-                                            router.push(`/(f2t)/${c.id}` as any);
-                                          }
-                                        }}
-                                      >
-                                        <View style={{ flex: 1, minWidth: 0 }}>
+                                      <View key={`${c.sport}-${c.id}`} style={styles.adminUserRow}>
+                                        <Pressable
+                                          style={{ flex: 1, minWidth: 0 }}
+                                          onPress={() => {
+                                            if (c.sport === 'lms') {
+                                              router.push(`/(lms)/${c.id}` as any);
+                                            } else {
+                                              router.push(`/(f2t)/${c.id}` as any);
+                                            }
+                                          }}
+                                        >
                                           <Text style={styles.adminUserName} numberOfLines={1}>
                                             {c.name}
                                           </Text>
                                           <Text style={styles.gameModesHint} numberOfLines={1}>
                                             {c.sport === 'lms' ? 'LMS' : 'F2T'} ·{' '}
                                             {c.join_code?.trim() || 'no code'} · {c.status}
+                                            {c.creator_username ? ` · ${c.creator_username}` : ''}
                                           </Text>
-                                        </View>
-                                        <Text style={styles.adminCatChipTextActive}>Manage</Text>
-                                      </Pressable>
+                                        </Pressable>
+                                        <Pressable
+                                          onPress={() =>
+                                            void transferCompetitionToGamemaster(c.sport, c.id, c.name)
+                                          }
+                                          hitSlop={8}
+                                          style={{ marginRight: 10 }}
+                                        >
+                                          <Text style={styles.adminCatChipText}>Transfer</Text>
+                                        </Pressable>
+                                        <Text style={styles.adminCatChipTextActive}>Open</Text>
+                                      </View>
                                     ))}
                                   {ownerComps.filter((c) => c.sport === 'lms' || c.sport === 'f2t')
                                     .length === 0 ? (
@@ -2061,22 +2168,35 @@ export default function CompetitionHubScreen() {
                                 <ActivityIndicator size="small" color={adminAccent} style={{ marginTop: 8 }} />
                               ) : (
                                 <View style={{ gap: 8, marginTop: 8 }}>
+                                  <Text style={styles.gameModesHint}>
+                                    Use Transfer after selecting a Gamemaster under Manage accounts → Gamemasters,
+                                    so the league shows in their Competitions list.
+                                  </Text>
                                   {ownerComps
                                     .filter((c) => c.sport === 'racing')
                                     .map((c) => (
-                                      <Pressable
-                                        key={`${c.sport}-${c.id}`}
-                                        style={styles.adminUserRow}
-                                        onPress={() => router.push(`/(app)/competition/${c.id}` as any)}
-                                      >
-                                        <View style={{ flex: 1, minWidth: 0 }}>
+                                      <View key={`${c.sport}-${c.id}`} style={styles.adminUserRow}>
+                                        <Pressable
+                                          style={{ flex: 1, minWidth: 0 }}
+                                          onPress={() => router.push(`/(app)/competition/${c.id}` as any)}
+                                        >
                                           <Text style={styles.adminUserName} numberOfLines={1}>{c.name}</Text>
                                           <Text style={styles.gameModesHint} numberOfLines={1}>
                                             Racing · {c.join_code?.trim() || 'no code'} · {c.status}
+                                            {c.creator_username ? ` · ${c.creator_username}` : ''}
                                           </Text>
-                                        </View>
-                                        <Text style={styles.adminCatChipTextActive}>Manage</Text>
-                                      </Pressable>
+                                        </Pressable>
+                                        <Pressable
+                                          onPress={() =>
+                                            void transferCompetitionToGamemaster('racing', c.id, c.name)
+                                          }
+                                          hitSlop={8}
+                                          style={{ marginRight: 10 }}
+                                        >
+                                          <Text style={styles.adminCatChipText}>Transfer</Text>
+                                        </Pressable>
+                                        <Text style={styles.adminCatChipTextActive}>Open</Text>
+                                      </View>
                                     ))}
                                   {ownerComps.filter((c) => c.sport === 'racing').length === 0 ? (
                                     <Text style={styles.gameModesHint}>No racing competitions yet.</Text>
@@ -2288,7 +2408,10 @@ export default function CompetitionHubScreen() {
 
                                               <Text style={styles.panelLabel}>Quotes</Text>
                                               <Text style={styles.gameModesHint}>
-                                                Mark paid & activate when payment lands. Season complete is automatic when every linked competition finishes (sole winner, or wipeout with No Continuation). Use the button below only as a manual override.
+                                                Mark paid & activate creates the quoted competitions under the
+                                                Gamemaster account. Season complete is automatic when every linked
+                                                competition finishes. Use Provision if competitions are missing after
+                                                payment.
                                               </Text>
                                               {(() => {
                                                 const qs = selectedGamemasterAccount.quotes ?? [];
@@ -2401,25 +2524,50 @@ export default function CompetitionHubScreen() {
                                                           ) : null}
 
                                                           {q.status === 'paid_active' ? (
-                                                            <Pressable
-                                                              style={[
-                                                                styles.adminCatChip,
-                                                                { alignSelf: 'flex-start', marginTop: 8 },
-                                                                busyQuoteId === q.id && { opacity: 0.6 },
-                                                              ]}
-                                                              disabled={busyQuoteId === q.id}
-                                                              onPress={() =>
-                                                                void setGamemasterQuoteStatus(q.id, 'paid_complete')
-                                                              }
-                                                            >
-                                                              {busyQuoteId === q.id ? (
-                                                                <ActivityIndicator size="small" color={adminAccent} />
-                                                              ) : (
-                                                                <Text style={styles.adminCatChipText}>
-                                                                  Mark season complete (manual)
-                                                                </Text>
-                                                              )}
-                                                            </Pressable>
+                                                            <>
+                                                              <Pressable
+                                                                style={[
+                                                                  styles.adminCatChip,
+                                                                  styles.adminCatChipActive,
+                                                                  { alignSelf: 'flex-start', marginTop: 8 },
+                                                                  busyQuoteId === q.id && { opacity: 0.6 },
+                                                                ]}
+                                                                disabled={busyQuoteId === q.id}
+                                                                onPress={() => void provisionGamemasterQuote(q.id)}
+                                                              >
+                                                                {busyQuoteId === q.id ? (
+                                                                  <ActivityIndicator size="small" color={theme.colors.white} />
+                                                                ) : (
+                                                                  <Text
+                                                                    style={[
+                                                                      styles.adminCatChipText,
+                                                                      styles.adminCatChipTextActive,
+                                                                    ]}
+                                                                  >
+                                                                    Provision competitions
+                                                                  </Text>
+                                                                )}
+                                                              </Pressable>
+                                                              <Pressable
+                                                                style={[
+                                                                  styles.adminCatChip,
+                                                                  { alignSelf: 'flex-start', marginTop: 8 },
+                                                                  busyQuoteId === q.id && { opacity: 0.6 },
+                                                                ]}
+                                                                disabled={busyQuoteId === q.id}
+                                                                onPress={() =>
+                                                                  void setGamemasterQuoteStatus(q.id, 'paid_complete')
+                                                                }
+                                                              >
+                                                                {busyQuoteId === q.id ? (
+                                                                  <ActivityIndicator size="small" color={adminAccent} />
+                                                                ) : (
+                                                                  <Text style={styles.adminCatChipText}>
+                                                                    Mark season complete (manual)
+                                                                  </Text>
+                                                                )}
+                                                              </Pressable>
+                                                            </>
                                                           ) : null}
                                                         </View>
                                                       ))
@@ -2431,12 +2579,18 @@ export default function CompetitionHubScreen() {
                                               <View style={styles.divider} />
 
                                               <Text style={styles.panelLabel}>Competitions</Text>
+                                              <Text style={styles.gameModesHint}>
+                                                Only competitions owned by this Gamemaster appear here and in their
+                                                hub. If you created one under the Owner account, transfer it from
+                                                Manage competitions while this Gamemaster is selected.
+                                              </Text>
                                               {selectedGamemasterAccount.competitions?.length ? (
                                                 selectedGamemasterAccount.competitions.map((c) => (
                                                   <View key={c.id} style={styles.userCard}>
                                                     <Text style={styles.userName} numberOfLines={1}>{c.name}</Text>
                                                     <Text style={styles.gameModesHint}>
                                                       {c.sport.toUpperCase()} · {c.status} · Active users: {c.active_count} · Total users: {c.participant_count}
+                                                      {c.join_code ? ` · ${c.join_code}` : ''}
                                                     </Text>
                                                   </View>
                                                 ))

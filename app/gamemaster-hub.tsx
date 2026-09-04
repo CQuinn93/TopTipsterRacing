@@ -9,6 +9,7 @@ import {
   Image,
   RefreshControl,
   useWindowDimensions,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -23,7 +24,7 @@ import {
   needsGamemasterClubSetup,
   type SubscriptionEntitlements,
 } from '@/lib/subscriptionEntitlements';
-import { gamemasterListMyQuotes, gamemasterRequestQuote, type GamemasterQuote } from '@/lib/gamemasterApi';
+import { gamemasterListMyQuotes, gamemasterRequestQuote, gamemasterProvisionMyQuote, type GamemasterQuote } from '@/lib/gamemasterApi';
 import { kioskListMyCompetitions, type KioskCompetitionOption } from '@/lib/kioskApi';
 import { sportLabel, type KioskSport } from '@/lib/kioskSession';
 import { formatEuro } from '@/lib/gamemasterCustomPricing';
@@ -59,6 +60,7 @@ export default function GamemasterHubScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [quotes, setQuotes] = useState<GamemasterQuote[]>([]);
   const [quotesLoading, setQuotesLoading] = useState(false);
+  const [provisionBusy, setProvisionBusy] = useState(false);
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -122,6 +124,34 @@ export default function GamemasterHubScreen() {
 
   const requestQuotes = quotes.filter((q) => q.kind === 'request');
   const currentQuotes = quotes.filter((q) => q.status !== 'requested');
+  const paidActiveQuote = currentQuotes.find((q) => q.status === 'paid_active');
+  const awaitingPaymentQuote = currentQuotes.find((q) => q.status === 'pending_payment');
+
+  const runProvision = async () => {
+    if (!paidActiveQuote) return;
+    setProvisionBusy(true);
+    try {
+      const res = await gamemasterProvisionMyQuote(paidActiveQuote.id);
+      if (!res.success) {
+        Alert.alert('Could not create competitions', res.error ?? 'Try again or ask your club owner.');
+        return;
+      }
+      const createdCount = Array.isArray(res.created) ? res.created.length : 0;
+      if (createdCount > 0) {
+        Alert.alert(
+          'Competitions ready',
+          `Created ${createdCount} competition${createdCount === 1 ? '' : 's'}.`
+        );
+      } else if (res.skipped) {
+        Alert.alert('Already set up', 'Your quote competitions are already on this account.');
+      }
+      await loadComps();
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not create competitions');
+    } finally {
+      setProvisionBusy(false);
+    }
+  };
 
   if (authLoading || loading) {
     return (
@@ -313,13 +343,33 @@ export default function GamemasterHubScreen() {
             <View style={[styles.card, isDesktop && !isCompact ? styles.compsDesktop : null]}>
               <Text style={styles.cardTitle}>Your competitions</Text>
               <Text style={styles.cardBody}>
-                Competitions unlock after your quote payment is confirmed. Until then you can review
-                Quotes and finish club branding.
+                {comps.length > 0
+                  ? 'Open a competition to manage join codes, requests, and game settings.'
+                  : paidActiveQuote
+                    ? 'Your package is paid. Create the quoted competitions below if they are not listed yet.'
+                    : awaitingPaymentQuote
+                      ? 'Competitions unlock after your club owner confirms payment on your quote.'
+                      : 'Competitions unlock after your quote is issued and payment is confirmed.'}
               </Text>
               {compsLoading ? (
                 <ActivityIndicator color={theme.colors.accent} style={{ marginTop: 12 }} />
               ) : comps.length === 0 ? (
-                <Text style={styles.empty}>No competitions yet.</Text>
+                <View style={{ gap: 12 }}>
+                  <Text style={styles.empty}>No competitions yet.</Text>
+                  {paidActiveQuote ? (
+                    <Pressable
+                      style={[styles.linkBtn, provisionBusy && { opacity: 0.6 }]}
+                      disabled={provisionBusy}
+                      onPress={() => void runProvision()}
+                    >
+                      {provisionBusy ? (
+                        <ActivityIndicator color={theme.colors.accent} />
+                      ) : (
+                        <Text style={styles.linkBtnText}>Create competitions from quote</Text>
+                      )}
+                    </Pressable>
+                  ) : null}
+                </View>
               ) : (
                 <View style={styles.compsGrid}>
                   {comps.map((c) => (

@@ -231,7 +231,18 @@ export async function ownerIssueGamemasterQuote(
 export async function ownerSetGamemasterQuoteStatus(
   quoteId: string,
   status: Exclude<GamemasterQuoteStatus, 'requested'>
-): Promise<{ success: boolean; error?: string; quote?: GamemasterQuote }> {
+): Promise<{
+  success: boolean;
+  error?: string;
+  quote?: GamemasterQuote;
+  provision?: {
+    success?: boolean;
+    error?: string;
+    created?: unknown[];
+    skipped?: boolean;
+    existing_count?: number;
+  };
+}> {
   const { data, error } = await db.rpc('owner_set_gamemaster_quote_status', {
     p_quote_id: quoteId,
     p_status: status,
@@ -241,5 +252,49 @@ export async function ownerSetGamemasterQuoteStatus(
     success: boolean;
     error?: string;
     quote?: GamemasterQuote;
+    provision?: {
+      success?: boolean;
+      error?: string;
+      created?: unknown[];
+      skipped?: boolean;
+      existing_count?: number;
+    };
+  };
+}
+
+export async function ownerProvisionGamemasterQuote(quoteId: string): Promise<{
+  success: boolean;
+  error?: string;
+  created?: unknown[];
+  skipped?: boolean;
+  existing_count?: number;
+}> {
+  const { data, error } = await db.rpc('owner_provision_gamemaster_quote', {
+    p_quote_id: quoteId,
+  });
+  if (error) throw error;
+  return (data ?? { success: false, error: 'unknown' }) as {
+    success: boolean;
+    error?: string;
+    created?: unknown[];
+    skipped?: boolean;
+    existing_count?: number;
+  };
+}
+
+export async function ownerTransferCompetition(params: {
+  sport: 'lms' | 'f2t' | 'racing';
+  competitionId: string;
+  toUserId: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const { data, error } = await db.rpc('owner_transfer_competition', {
+    p_sport: params.sport,
+    p_competition_id: params.competitionId,
+    p_to_user_id: params.toUserId,
+  });
+  if (error) throw error;
+  return (data ?? { success: false, error: 'unknown' }) as {
+    success: boolean;
+    error?: string;
   };
 }
