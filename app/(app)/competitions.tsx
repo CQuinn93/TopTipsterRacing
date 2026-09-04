@@ -22,6 +22,12 @@ import { clearSelectionsBulkCache } from '@/lib/selectionsBulkCache';
 import { getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
 import { confirmJoinLimitDisclaimer } from '@/lib/joinLimitDisclaimer';
+import { FundraiserForClub } from '@/components/FundraiserForClub';
+import {
+  fetchCompetitionsFundraiserBranding,
+  fundraiserKey,
+  type FundraiserBranding,
+} from '@/lib/fundraiserBranding';
 import { useNarrowWebCompact, cfs } from '@/lib/narrowWebTypography';
 import { getProfileRole, isOwnerRole, canCreateCompetitions } from '@/lib/adminSession';
 import {
@@ -52,6 +58,7 @@ export default function MyCompetitionsScreen() {
   const compact = useNarrowWebCompact();
   const { userId } = useAuth();
   const params = useLocalSearchParams<{ join?: string }>();
+  const [fundraiserByComp, setFundraiserByComp] = useState<Record<string, FundraiserBranding>>({});
   const [list, setList] = useState<UserCompetition[]>([]);
   const [pendingList, setPendingList] = useState<PendingCompetition[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -219,6 +226,18 @@ export default function MyCompetitionsScreen() {
           }
         }
         setList(joined);
+        try {
+          const branding = await fetchCompetitionsFundraiserBranding(
+            (joined).map((c) => ({
+              sport: 'racing' as const,
+              competition_id: c.competition_id,
+            }))
+          );
+          setFundraiserByComp(branding);
+        } catch {
+          setFundraiserByComp({});
+        }
+
         const newlyApproved = joined.filter((c) => prevPendingIds.has(c.competition_id));
         setNewlyApprovedNames(newlyApproved.length > 0 ? newlyApproved.map((c) => c.name) : []);
       }
@@ -800,6 +819,13 @@ export default function MyCompetitionsScreen() {
                 <Text style={styles.cardTitle}>{c.name}</Text>
                 {isCreatedByMe(c) ? <Text style={styles.adminBadge}>Admin</Text> : null}
               </View>
+              {fundraiserByComp[fundraiserKey('racing', c.competition_id)] ? (
+                <FundraiserForClub
+                  clubName={fundraiserByComp[fundraiserKey('racing', c.competition_id)].club_name}
+                  clubLogoUrl={fundraiserByComp[fundraiserKey('racing', c.competition_id)].club_logo_url}
+                  size="compact"
+                />
+              ) : null}
               <Text style={styles.cardMeta}>
                 {new Date(c.festival_start_date).toLocaleDateString()} – {new Date(c.festival_end_date).toLocaleDateString()}
               </Text>

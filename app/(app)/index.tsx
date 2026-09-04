@@ -31,6 +31,12 @@ import type { AvailableRaceDay } from '@/lib/availableRacesForUser';
 import { getCompetitionDisplayStatus } from '@/lib/appUtils';
 import { joinCompetitionWithAccessCode } from '@/lib/joinCompetitionWithAccessCode';
 import { confirmJoinLimitDisclaimer } from '@/lib/joinLimitDisclaimer';
+import { FundraiserForClub } from '@/components/FundraiserForClub';
+import {
+  fetchCompetitionsFundraiserBranding,
+  fundraiserKey,
+  type FundraiserBranding,
+} from '@/lib/fundraiserBranding';
 import { racingCreateCompetition } from '@/lib/racingAdminApi';
 import { canCreateCompetitions } from '@/lib/adminSession';
 import {
@@ -69,6 +75,7 @@ export default function HomeScreen() {
     Record<string, { start: string; end: string }>
   >({});
   const [creatorByCompId, setCreatorByCompId] = useState<Record<string, string | null>>({});
+  const [fundraiserByComp, setFundraiserByComp] = useState<Record<string, FundraiserBranding>>({});
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<HomeTab>('competitions');
   const [homePanelExpanded, setHomePanelExpanded] = useState(true);
@@ -189,6 +196,7 @@ export default function HomeScreen() {
           setCompStatusByCompId({});
           setCompDateRangeByCompId({});
           setCreatorByCompId({});
+          setFundraiserByComp({});
           return;
         }
 
@@ -229,6 +237,17 @@ export default function HomeScreen() {
         setCompStatusByCompId(statusByComp);
         setCompDateRangeByCompId(dateRangeByComp);
         setCreatorByCompId(creatorByComp);
+        try {
+          const branding = await fetchCompetitionsFundraiserBranding(
+            Object.keys(creatorByComp).map((id) => ({
+              sport: 'racing' as const,
+              competition_id: id,
+            }))
+          );
+          setFundraiserByComp(branding);
+        } catch {
+          setFundraiserByComp({});
+        }
       } finally {
         if (isPullRefresh) setRefreshing(false);
       }
@@ -1528,6 +1547,13 @@ export default function HomeScreen() {
                                   ? `${c.status} · ${c.range.start} – ${c.range.end}`
                                   : c.status}
                               </Text>
+                              {fundraiserByComp[fundraiserKey('racing', c.id)] ? (
+                                <FundraiserForClub
+                                  clubName={fundraiserByComp[fundraiserKey('racing', c.id)].club_name}
+                                  clubLogoUrl={fundraiserByComp[fundraiserKey('racing', c.id)].club_logo_url}
+                                  size="compact"
+                                />
+                              ) : null}
                               {c.pickHint ? (
                                 <Text
                                   style={

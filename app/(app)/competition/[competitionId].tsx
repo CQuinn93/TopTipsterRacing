@@ -22,6 +22,12 @@ import {
   racingCanManageCompetition,
   type RacingJoinRequestRow,
 } from '@/lib/racingAdminApi';
+import { FundraiserForClub } from '@/components/FundraiserForClub';
+import {
+  fetchCompetitionsFundraiserBranding,
+  fundraiserKey,
+  type FundraiserBranding,
+} from '@/lib/fundraiserBranding';
 import { useNarrowWebCompact, cfs } from '@/lib/narrowWebTypography';
 
 type HubTab = 'overview' | 'admin';
@@ -33,6 +39,7 @@ export default function RacingCompetitionHubScreen() {
   const competitionId = String(params.competitionId ?? '');
 
   const [name, setName] = useState('');
+  const [fundraiser, setFundraiser] = useState<FundraiserBranding | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [canManage, setCanManage] = useState(false);
@@ -53,6 +60,14 @@ export default function RacingCompetitionHubScreen() {
       ]);
       if (compRes.error) throw compRes.error;
       setName((compRes.data as { name?: string } | null)?.name ?? 'Competition');
+      try {
+        const branding = await fetchCompetitionsFundraiserBranding([
+          { sport: 'racing', competition_id: competitionId },
+        ]);
+        setFundraiser(branding[fundraiserKey('racing', competitionId)] ?? null);
+      } catch {
+        setFundraiser(null);
+      }
       setCanManage(!!manage);
 
       if (manage) {
@@ -346,6 +361,16 @@ export default function RacingCompetitionHubScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {fundraiser ? (
+        <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+          <FundraiserForClub
+            clubName={fundraiser.club_name}
+            clubLogoUrl={fundraiser.club_logo_url}
+            size="header"
+          />
+        </View>
+      ) : null}
 
       <ScrollView
         contentContainerStyle={styles.content}

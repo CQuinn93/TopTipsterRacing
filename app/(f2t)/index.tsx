@@ -31,6 +31,12 @@ import {
 import { lmsListGameweeks, type LmsGameweek } from '@/lib/lms/api';
 import { canCreateCompetitions } from '@/lib/adminSession';
 import { confirmJoinLimitDisclaimer } from '@/lib/joinLimitDisclaimer';
+import { FundraiserForClub } from '@/components/FundraiserForClub';
+import {
+  fetchCompetitionsFundraiserBranding,
+  fundraiserKey,
+  type FundraiserBranding,
+} from '@/lib/fundraiserBranding';
 
 type HomeTab = 'competitions' | 'join' | 'table';
 const F2T_SEASON = '2026/27';
@@ -50,6 +56,7 @@ export default function F2tHomeScreen() {
     typeof quoteIdParam === 'string' && quoteIdParam.trim() ? quoteIdParam.trim() : null;
 
   const [comps, setComps] = useState<F2tCompetitionHomeSummary[]>([]);
+  const [fundraiserByComp, setFundraiserByComp] = useState<Record<string, FundraiserBranding>>({});
   const [pending, setPending] = useState<F2tPendingJoin[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -91,6 +98,17 @@ export default function F2tHomeScreen() {
       const data = await f2tGetHome(F2T_SEASON);
       setComps(data.competitions ?? []);
       setPending(data.pending ?? []);
+      try {
+        const branding = await fetchCompetitionsFundraiserBranding(
+          (data.competitions ?? []).map((c) => ({
+            sport: 'f2t' as const,
+            competition_id: c.competition_id,
+          }))
+        );
+        setFundraiserByComp(branding);
+      } catch {
+        setFundraiserByComp({});
+      }
       setTab((prev) => {
         if (tabParam === 'table' || tabParam === 'join' || tabParam === 'competitions') {
           return tabParam;
@@ -769,6 +787,19 @@ export default function F2tHomeScreen() {
                                     GW{c.start_gameweek_number} start ·{' '}
                                     {statusLabel(c.participant_status)}
                                   </Text>
+                                  {fundraiserByComp[fundraiserKey('f2t', c.competition_id)] ? (
+                                    <FundraiserForClub
+                                      clubName={
+                                        fundraiserByComp[fundraiserKey('f2t', c.competition_id)]
+                                          .club_name
+                                      }
+                                      clubLogoUrl={
+                                        fundraiserByComp[fundraiserKey('f2t', c.competition_id)]
+                                          .club_logo_url
+                                      }
+                                      size="compact"
+                                    />
+                                  ) : null}
                                   <Text style={styles.rowProgress}>
                                     {c.scored_count}/20 scored · {c.selection_count} picked
                                   </Text>
