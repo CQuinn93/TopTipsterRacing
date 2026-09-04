@@ -9,8 +9,6 @@ import {
   Image,
   RefreshControl,
   useWindowDimensions,
-  Alert,
-  Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -19,6 +17,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { GamemasterWelcomeSetupModal } from '@/components/GamemasterWelcomeSetupModal';
 import { GamemasterQuoteRequestForm } from '@/components/GamemasterQuoteRequestForm';
+import { GamemasterCreateCompetitionWizard } from '@/components/GamemasterCreateCompetitionWizard';
 import {
   fetchMyEntitlements,
   isGamemasterAccount,
@@ -33,7 +32,6 @@ import {
 } from '@/lib/gamemasterApi';
 import {
   creditLabel,
-  routeForCreateMode,
   totalCreateCreditsRemaining,
   type GamemasterCreateMode,
   type GamemasterModeCredit,
@@ -160,13 +158,19 @@ export default function GamemasterHubScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await load();
-    if (ent?.club_setup_complete !== false) {
-      await loadComps();
-      await loadQuotes();
-      await loadCredits();
+    try {
+      const next = await fetchMyEntitlements();
+      setEnt(next);
+      if (!isGamemasterAccount(next)) {
+        router.replace('/competition-hub');
+        return;
+      }
+      if (next.club_setup_complete) {
+        await Promise.all([loadComps(), loadQuotes(), loadCredits()]);
+      }
+    } finally {
+      setRefreshing(false);
     }
-    setRefreshing(false);
   };
 
   const showSetup = needsGamemasterClubSetup(ent);
@@ -176,18 +180,6 @@ export default function GamemasterHubScreen() {
   const paidActiveQuote = currentQuotes.find((q) => q.status === 'paid_active');
   const awaitingPaymentQuote = currentQuotes.find((q) => q.status === 'pending_payment');
   const remainingCreates = totalCreateCreditsRemaining(credits);
-
-  const onPickCreateMode = (credit: GamemasterModeCredit) => {
-    if (credit.remaining <= 0 || !credit.quoteId) {
-      Alert.alert(
-        'Not available',
-        'Your paid package does not include this competition type, or you have used all remaining slots.'
-      );
-      return;
-    }
-    setCreatePickerOpen(false);
-    router.push(routeForCreateMode(credit.mode, credit.quoteId) as any);
-  };
 
   if (authLoading || loading) {
     return (
@@ -256,7 +248,12 @@ export default function GamemasterHubScreen() {
       <ScrollView
         contentContainerStyle={styles.body}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => void onRefresh()}
+            tintColor={theme.colors.accent}
+            colors={[theme.colors.accent]}
+          />
         }
       >
         <View style={styles.stage}>
@@ -342,7 +339,11 @@ export default function GamemasterHubScreen() {
                         <View style={{ flex: 1 }}>
                           <Text style={styles.quoteTitle}>
                             {q.kind === 'onboarding' ? 'Onboarding' : 'Request'} ·{' '}
-                            {q.status.replaceAll('_', ' ')}
+                            {q.status === 'pending_payment'
+                              ? 'awaiting payment'
+                              : q.status === 'paid_active'
+                                ? 'paid & active'
+                                : q.status.replaceAll('_', ' ')}
                           </Text>
                           <Text style={styles.quoteMeta}>
                             {q.payload.competitions.length} competitions · {q.payload.competitionHubs}{' '}
@@ -386,9 +387,22 @@ export default function GamemasterHubScreen() {
                       } available to create.`
                     : 'You have used all competition slots from your paid package. Open a competition below to manage it, or request another quote.'
                   : awaitingPaymentQuote
-                    ? 'Competitions unlock after your club owner confirms payment on your quote.'
-                    : 'Competitions unlock after your quote is issued and payment is confirmed.'}
+                    ? 'Competitions unlock after your club owner confirms payment on your quote. Pull down to refresh, or tap Check status.'
+                    : 'Competitions unlock after your quote is issued and payment is confirmed. Pull down to refresh after your package is updated.'}
               </Text>
+              {awaitingPaymentQuote && remainingCreates === 0 && !paidActiveQuote ? (
+                <Pressable
+                  style={[styles.linkBtn, refreshing && { opacity: 0.6 }]}
+                  disabled={refreshing}
+                  onPress={() => void onRefresh()}
+                >
+                  {refreshing ? (
+                    <ActivityIndicator color={theme.colors.accent} />
+                  ) : (
+                    <Text style={styles.linkBtnText}>Check status</Text>
+                  )}
+                </Pressable>
+              ) : null}
               {remainingCreates > 0 ? (
                 <Pressable style={styles.linkBtn} onPress={() => setCreatePickerOpen(true)}>
                   <Text style={styles.linkBtnText}>Create competition</Text>
@@ -424,53 +438,16 @@ export default function GamemasterHubScreen() {
         </View>
       </ScrollView>
 
-      <Modal
+      <GamemasterCreateCompetitionWizard
         visible={createPickerOpen}
-        animationType="fade"
-        transparent
-        onRequestClose={() => setCreatePickerOpen(false)}
-      >
-        <Pressable style={styles.pickerBackdrop} onPress={() => setCreatePickerOpen(false)}>
-          <Pressable style={styles.pickerSheet} onPress={(e) => e.stopPropagation?.()}>
-            <Text style={styles.pickerTitle}>Choose competition type</Text>
-            <Text style={styles.pickerBody}>
-              Types included in your package are highlighted. Others are unavailable until they are
-              on a quote.
-            </Text>
-            <View style={styles.pickerGrid}>
-              {(credits.length > 0
-                ? credits
-                : ([
-                    { mode: 'lms', label: 'Last Man Standing', remaining: 0, quoted: 0, used: 0, quoteId: null },
-                    { mode: 'f2t', label: 'First2 Twenty', remaining: 0, quoted: 0, used: 0, quoteId: null },
-                    { mode: 'racing', label: 'Top Tipster Racing', remaining: 0, quoted: 0, used: 0, quoteId: null },
-                    { mode: 'f2t6', label: 'First2 6', remaining: 0, quoted: 0, used: 0, quoteId: null },
-                  ] as GamemasterModeCredit[])
-              ).map((credit) => {
-                const enabled = credit.remaining > 0 && !!credit.quoteId;
-                return (
-                  <Pressable
-                    key={credit.mode}
-                    style={[styles.typeCard, !enabled && styles.typeCardDimmed]}
-                    disabled={!enabled}
-                    onPress={() => onPickCreateMode(credit)}
-                  >
-                    <Text style={[styles.typeCardTitle, !enabled && styles.typeCardTextDimmed]}>
-                      {credit.label}
-                    </Text>
-                    <Text style={[styles.typeCardMeta, !enabled && styles.typeCardTextDimmed]}>
-                      {enabled ? `Remaining: ${credit.remaining}` : 'Not on your package'}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <Pressable style={styles.pickerClose} onPress={() => setCreatePickerOpen(false)}>
-              <Text style={styles.pickerCloseText}>Cancel</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        credits={credits}
+        onClose={() => setCreatePickerOpen(false)}
+        onCreated={() => {
+          setCreatePickerOpen(false);
+          void loadComps();
+          void loadCredits();
+        }}
+      />
     </View>
   );
 }
@@ -734,76 +711,6 @@ function makeStyles(
     },
     empty: {
       fontFamily: theme.fontFamily.baiLight,
-      fontSize: 14,
-      color: theme.colors.textMuted,
-    },
-    pickerBackdrop: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.65)',
-      justifyContent: 'center',
-      padding: theme.spacing.lg,
-    },
-    pickerSheet: {
-      backgroundColor: theme.colors.surface,
-      borderRadius: theme.radius.lg,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: theme.colors.border,
-      padding: theme.spacing.lg,
-      gap: 12,
-      maxWidth: 520,
-      width: '100%',
-      alignSelf: 'center',
-    },
-    pickerTitle: {
-      fontFamily: theme.fontFamily.baiBold,
-      fontSize: 20,
-      color: theme.colors.text,
-    },
-    pickerBody: {
-      fontFamily: theme.fontFamily.baiLight,
-      fontSize: 14,
-      color: theme.colors.textMuted,
-      lineHeight: 20,
-    },
-    pickerGrid: {
-      gap: 10,
-      marginTop: 4,
-    },
-    typeCard: {
-      paddingVertical: 14,
-      paddingHorizontal: 16,
-      borderRadius: theme.radius.md,
-      borderWidth: 1,
-      borderColor: theme.colors.accent,
-      backgroundColor: theme.colors.accentMuted,
-      gap: 4,
-    },
-    typeCardDimmed: {
-      borderColor: theme.colors.border,
-      backgroundColor: theme.colors.background,
-      opacity: 0.45,
-    },
-    typeCardTitle: {
-      fontFamily: theme.fontFamily.baiBold,
-      fontSize: 16,
-      color: theme.colors.text,
-    },
-    typeCardMeta: {
-      fontFamily: theme.fontFamily.baiSemiBold,
-      fontSize: 13,
-      color: theme.colors.accent,
-    },
-    typeCardTextDimmed: {
-      color: theme.colors.textMuted,
-    },
-    pickerClose: {
-      alignSelf: 'center',
-      paddingVertical: 10,
-      paddingHorizontal: 16,
-      marginTop: 4,
-    },
-    pickerCloseText: {
-      fontFamily: theme.fontFamily.baiSemiBold,
       fontSize: 14,
       color: theme.colors.textMuted,
     },

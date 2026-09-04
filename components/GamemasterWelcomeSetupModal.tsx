@@ -11,6 +11,7 @@ import {
   ScrollView,
   Platform,
   KeyboardAvoidingView,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -54,6 +55,8 @@ export function GamemasterWelcomeSetupModal({ visible, onComplete }: Props) {
   const [doneMessage, setDoneMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [loadingQuote, setLoadingQuote] = useState(false);
+  const [refreshingStatus, setRefreshingStatus] = useState(false);
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -86,6 +89,7 @@ export function GamemasterWelcomeSetupModal({ visible, onComplete }: Props) {
     setEditNotes('');
     setError(null);
     setDoneMessage('');
+    setPaymentConfirmed(false);
   }, [visible]);
 
   const loadOnboardingQuote = async () => {
@@ -190,9 +194,10 @@ export function GamemasterWelcomeSetupModal({ visible, onComplete }: Props) {
         }
       }
       setDoneMessage(
-        'Quote accepted. Thanks — payment isn’t handled in the app yet. Once payment is confirmed, your competitions will be unlocked.'
+        'Quote accepted. Thanks — payment isn’t handled in the app yet. Once your club owner confirms payment, pull to refresh or tap Check status to unlock competitions.'
       );
       setStep('done');
+      setPaymentConfirmed(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not accept quote');
     } finally {
@@ -234,6 +239,30 @@ export function GamemasterWelcomeSetupModal({ visible, onComplete }: Props) {
     }
   };
 
+  const checkPaymentStatus = async () => {
+    setRefreshingStatus(true);
+    setError(null);
+    try {
+      const list = await gamemasterListMyQuotes();
+      const paid = list.find((q) => q.status === 'paid_active' || q.status === 'paid_complete');
+      if (paid) {
+        setPaymentConfirmed(true);
+        setDoneMessage(
+          'Payment confirmed. Your package is active — you can create competitions from the Competitions tab.'
+        );
+        return;
+      }
+      setPaymentConfirmed(false);
+      setDoneMessage(
+        'Still waiting on payment confirmation from your club owner. Pull down to refresh, or tap Check status.'
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not check payment status');
+    } finally {
+      setRefreshingStatus(false);
+    }
+  };
+
   const onCloseDone = () => {
     onComplete();
   };
@@ -265,7 +294,17 @@ export function GamemasterWelcomeSetupModal({ visible, onComplete }: Props) {
           <ScrollView
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
-            bounces={false}
+            bounces={step === 'done'}
+            refreshControl={
+              step === 'done' && !paymentConfirmed ? (
+                <RefreshControl
+                  refreshing={refreshingStatus}
+                  onRefresh={() => void checkPaymentStatus()}
+                  tintColor={theme.colors.accent}
+                  colors={[theme.colors.accent]}
+                />
+              ) : undefined
+            }
           >
             <View style={styles.card}>
               {step === 'welcome' ? (
@@ -478,10 +517,28 @@ export function GamemasterWelcomeSetupModal({ visible, onComplete }: Props) {
               {step === 'done' ? (
                 <>
                   <Text style={styles.brand}>TOP TIPSTER</Text>
-                  <Text style={styles.welcomeTitle}>You’re set</Text>
+                  <Text style={styles.welcomeTitle}>
+                    {paymentConfirmed ? 'You’re ready' : 'You’re set'}
+                  </Text>
                   <Text style={styles.body}>{doneMessage}</Text>
+                  {error ? <Text style={styles.error}>{error}</Text> : null}
+                  {!paymentConfirmed ? (
+                    <Pressable
+                      style={[styles.secondaryBtn, (busy || refreshingStatus) && styles.disabled]}
+                      onPress={() => void checkPaymentStatus()}
+                      disabled={busy || refreshingStatus}
+                    >
+                      {refreshingStatus ? (
+                        <ActivityIndicator color={theme.colors.accent} />
+                      ) : (
+                        <Text style={styles.secondaryBtnText}>Check status</Text>
+                      )}
+                    </Pressable>
+                  ) : null}
                   <Pressable style={styles.primaryBtn} onPress={onCloseDone}>
-                    <Text style={styles.primaryBtnText}>Close</Text>
+                    <Text style={styles.primaryBtnText}>
+                      {paymentConfirmed ? 'Continue' : 'Close'}
+                    </Text>
                   </Pressable>
                 </>
               ) : null}
