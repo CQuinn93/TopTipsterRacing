@@ -70,6 +70,32 @@ export async function fetchMyEntitlements(): Promise<SubscriptionEntitlements | 
   return (data as SubscriptionEntitlements) ?? null;
 }
 
+/** Signed-up count and competition quota (max_participants). */
+export async function fetchCompetitionCapacity(
+  mode: 'lms' | 'f2t' | 'racing',
+  competitionId: string
+): Promise<{ currentParticipants: number; maxParticipants: number | null }> {
+  const { data, error } = await (supabase as any).rpc('subscription_check_competition_capacity', {
+    p_mode: mode,
+    p_competition_id: competitionId,
+  });
+  if (error) {
+    console.warn('[subscription] competition capacity failed', error.message);
+    return { currentParticipants: 0, maxParticipants: null };
+  }
+  const row = (data ?? {}) as {
+    current_participants?: number | null;
+    max_participants?: number | null;
+  };
+  return {
+    currentParticipants: Number(row.current_participants ?? 0),
+    maxParticipants:
+      row.max_participants == null || Number.isNaN(Number(row.max_participants))
+        ? null
+        : Number(row.max_participants),
+  };
+}
+
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }

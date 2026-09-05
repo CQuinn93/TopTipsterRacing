@@ -19,6 +19,11 @@ import {
   fundraiserKey,
   type FundraiserBranding,
 } from '@/lib/fundraiserBranding';
+import {
+  fetchMyEntitlements,
+  fetchCompetitionCapacity,
+  isGamemasterAccount,
+} from '@/lib/subscriptionEntitlements';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { PlayerProgressGrid } from '@/components/f2t/PlayerProgressGrid';
 import { F2tPlayerPicker } from '@/components/f2t/F2tPlayerPicker';
@@ -73,6 +78,9 @@ export default function F2tCompetitionScreen() {
   >([]);
   const [canManage, setCanManage] = useState(false);
   const [canHandleJoins, setCanHandleJoins] = useState(false);
+  const [isGamemasterAdmin, setIsGamemasterAdmin] = useState(false);
+  const [signedUpCount, setSignedUpCount] = useState(0);
+  const [quotaMax, setQuotaMax] = useState<number | null>(null);
   const [isCompManager, setIsCompManager] = useState(false);
   const [entry, setEntry] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState<string | null>(null);
@@ -127,6 +135,22 @@ export default function F2tCompetitionScreen() {
       setCanManage(data.permissions?.can_manage ?? false);
       setCanHandleJoins(data.permissions?.can_handle_joins ?? false);
       setIsCompManager(data.permissions?.is_manager ?? false);
+      const ent = await fetchMyEntitlements().catch(() => null);
+      const gmAdmin = isGamemasterAccount(ent) && !!(data.permissions?.can_handle_joins);
+      setIsGamemasterAdmin(gmAdmin);
+      if (gmAdmin) {
+        setTab('admin');
+        try {
+          const cap = await fetchCompetitionCapacity('f2t', competitionId);
+          setSignedUpCount(cap.currentParticipants);
+          setQuotaMax(cap.maxParticipants);
+        } catch {
+          setSignedUpCount((data.leaderboard ?? []).length);
+          setQuotaMax(null);
+        }
+      } else {
+        setIsGamemasterAdmin(false);
+      }
       setEntry(data.competition.entry ?? null);
       const code =
         typeof data.competition.join_code === 'string'
@@ -515,12 +539,18 @@ export default function F2tCompetitionScreen() {
   );
 
   const tabItems = (
-    [
-      { key: 'team' as const, label: 'Team' },
-      { key: 'leaderboard' as const, label: 'Standings' },
-      ...(canHandleJoins ? [{ key: 'admin' as const, label: 'Admin' }] : []),
-    ] as { key: TabKey; label: string }[]
+    isGamemasterAdmin
+      ? ([{ key: 'admin' as const, label: 'Admin' }] as { key: TabKey; label: string }[])
+      : ([
+          { key: 'team' as const, label: 'Team' },
+          { key: 'leaderboard' as const, label: 'Standings' },
+          ...(canHandleJoins ? [{ key: 'admin' as const, label: 'Admin' }] : []),
+        ] as { key: TabKey; label: string }[])
   );
+
+  useEffect(() => {
+    if (isGamemasterAdmin && tab !== 'admin') setTab('admin');
+  }, [isGamemasterAdmin, tab]);
 
   return (
     <View style={styles.root}>
@@ -549,33 +579,50 @@ export default function F2tCompetitionScreen() {
       {!loading ? (
         <View style={styles.survivalBanner}>
           <View style={styles.survivalLeft}>
-            <Text style={[styles.survivalStatus, { color: statusColor(participantStatus) }]}>
-              {statusLabel(participantStatus)}
+            <Text
+              style={[
+                styles.survivalStatus,
+                { color: isGamemasterAdmin ? theme.colors.accent : statusColor(participantStatus) },
+              ]}
+            >
+              {isGamemasterAdmin ? 'Admin' : statusLabel(participantStatus)}
             </Text>
-            <Text style={styles.survivalMeta}>{bannerMeta}</Text>
+            <Text style={styles.survivalMeta}>
+              {isGamemasterAdmin ? 'Club competition management' : bannerMeta}
+            </Text>
           </View>
           <View style={styles.survivalStat}>
             <Text style={styles.survivalStatValue}>
-              {playersRemaining != null ? playersRemaining : '—'}
+              {isGamemasterAdmin
+                ? quotaMax != null
+                  ? `${signedUpCount}/${quotaMax}`
+                  : `${signedUpCount}`
+                : playersRemaining != null
+                  ? playersRemaining
+                  : '—'}
             </Text>
-            <Text style={styles.survivalStatLabel}>Remaining Goalscorers</Text>
+            <Text style={styles.survivalStatLabel}>
+              {isGamemasterAdmin ? 'Signed up' : 'Remaining Goalscorers'}
+            </Text>
           </View>
         </View>
       ) : null}
 
-      <View style={styles.tabs}>
-        {tabItems.map((t) => (
-          <Pressable
-            key={t.key}
-            style={[styles.tab, tab === t.key && styles.tabActive]}
-            onPress={() => setTab(t.key)}
-          >
-            <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>
-              {t.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      {!isGamemasterAdmin ? (
+        <View style={styles.tabs}>
+          {tabItems.map((t) => (
+            <Pressable
+              key={t.key}
+              style={[styles.tab, tab === t.key && styles.tabActive]}
+              onPress={() => setTab(t.key)}
+            >
+              <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>
+                {t.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
 
       {loading ? (
         <ActivityIndicator style={{ marginTop: 40 }} color={theme.colors.accent} />

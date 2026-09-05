@@ -22,6 +22,11 @@ import {
   fundraiserKey,
   type FundraiserBranding,
 } from '@/lib/fundraiserBranding';
+import {
+  fetchMyEntitlements,
+  fetchCompetitionCapacity,
+  isGamemasterAccount,
+} from '@/lib/subscriptionEntitlements';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { TeamColourChip } from '@/components/lms/TeamColourChip';
@@ -153,6 +158,9 @@ export default function LmsCompetitionDashboard() {
   const [saving, setSaving] = useState(false);
   const [canManage, setCanManage] = useState(false);
   const [canHandleJoins, setCanHandleJoins] = useState(false);
+  const [isGamemasterAdmin, setIsGamemasterAdmin] = useState(false);
+  const [signedUpCount, setSignedUpCount] = useState(0);
+  const [quotaMax, setQuotaMax] = useState<number | null>(null);
   const [isCompManager, setIsCompManager] = useState(false);
   const [createdByUserId, setCreatedByUserId] = useState<string | null>(null);
   const [managerUserIds, setManagerUserIds] = useState<Set<string>>(new Set());
@@ -586,6 +594,22 @@ export default function LmsCompetitionDashboard() {
     setCanHandleJoins(!!manage.can_handle_joins);
     setIsCompManager(!!manage.is_manager);
     setCreatedByUserId(manage.created_by_user_id ?? null);
+    const ent = await fetchMyEntitlements().catch(() => null);
+    const gmAdmin = isGamemasterAccount(ent) && !!manage.can_handle_joins;
+    setIsGamemasterAdmin(gmAdmin);
+    if (gmAdmin) {
+      setTab('admin');
+      try {
+        const cap = await fetchCompetitionCapacity('lms', competitionId);
+        setSignedUpCount(cap.currentParticipants);
+        setQuotaMax(cap.maxParticipants);
+      } catch {
+        setSignedUpCount(parts.length);
+        setQuotaMax(null);
+      }
+    } else {
+      setIsGamemasterAdmin(false);
+    }
     currentGwIdRef.current = gw?.id ?? null;
 
     // Reset dependent slices when shell reloads (focus / pull-to-refresh).
@@ -936,10 +960,14 @@ export default function LmsCompetitionDashboard() {
   }, [expandedUserId, loadHistoryForUser]);
 
   useEffect(() => {
+    if (isGamemasterAdmin) {
+      if (tab !== 'admin') setTab('admin');
+      return;
+    }
     if (!canHandleJoins && tab === 'admin') {
       setTab('leaderboard');
     }
-  }, [canHandleJoins, tab]);
+  }, [canHandleJoins, isGamemasterAdmin, tab]);
 
   useEffect(() => {
     if (
@@ -3164,48 +3192,64 @@ export default function LmsCompetitionDashboard() {
               <Text
                 style={[
                   styles.survivalStatus,
-                  { color: statusColor(me?.status ?? 'eliminated') },
+                  {
+                    color: isGamemasterAdmin
+                      ? theme.colors.accent
+                      : statusColor(me?.status ?? 'eliminated'),
+                  },
                 ]}
               >
-                {statusLabel(me?.status ?? '—')}
+                {isGamemasterAdmin ? 'Admin' : statusLabel(me?.status ?? '—')}
               </Text>
               <Text style={styles.survivalMeta}>
-                {currentGw
-                  ? `Gameweek ${currentGw.number}${deadlinePassed ? ' · picks closed' : ' · picks open'}`
-                  : startGwNumber != null
-                    ? `Starts GW${startGwNumber}`
-                    : 'Waiting for gameweek'}
+                {isGamemasterAdmin
+                  ? 'Club competition management'
+                  : currentGw
+                    ? `Gameweek ${currentGw.number}${deadlinePassed ? ' · picks closed' : ' · picks open'}`
+                    : startGwNumber != null
+                      ? `Starts GW${startGwNumber}`
+                      : 'Waiting for gameweek'}
               </Text>
             </View>
             <View style={styles.survivalStat}>
-              <Text style={styles.survivalStatValue}>{aliveCount}</Text>
-              <Text style={styles.survivalStatLabel}>Alive</Text>
+              <Text style={styles.survivalStatValue}>
+                {isGamemasterAdmin
+                  ? quotaMax != null
+                    ? `${signedUpCount}/${quotaMax}`
+                    : `${signedUpCount}`
+                  : aliveCount}
+              </Text>
+              <Text style={styles.survivalStatLabel}>
+                {isGamemasterAdmin ? 'Signed up' : 'Alive'}
+              </Text>
             </View>
           </View>
 
-          <View style={styles.tabs}>
-            {(
-              [
-                { key: 'gameweeks' as const, label: 'Gameweeks' },
-                { key: 'selection' as const, label: 'Selection' },
-                { key: 'leaderboard' as const, label: 'Standing' },
-                ...(canHandleJoins ? [{ key: 'admin' as const, label: 'Admin' }] : []),
-              ] as { key: TabKey; label: string }[]
-            ).map((t) => {
-              const active = tab === t.key;
-              return (
-                <Pressable
-                  key={t.key}
-                  style={[styles.tab, active && styles.tabActive]}
-                  onPress={() => setTab(t.key)}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: active }}
-                >
-                  <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          {!isGamemasterAdmin ? (
+            <View style={styles.tabs}>
+              {(
+                [
+                  { key: 'gameweeks' as const, label: 'Gameweeks' },
+                  { key: 'selection' as const, label: 'Selection' },
+                  { key: 'leaderboard' as const, label: 'Standing' },
+                  ...(canHandleJoins ? [{ key: 'admin' as const, label: 'Admin' }] : []),
+                ] as { key: TabKey; label: string }[]
+              ).map((t) => {
+                const active = tab === t.key;
+                return (
+                  <Pressable
+                    key={t.key}
+                    style={[styles.tab, active && styles.tabActive]}
+                    onPress={() => setTab(t.key)}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
 
           <ScrollView
             contentContainerStyle={[
