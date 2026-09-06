@@ -134,17 +134,18 @@ export function OwnerGamemasterPromoteFlow({ users, usersLoading, accent, onRegi
 
   const candidates = useMemo(() => {
     const q = userQuery.trim().toLowerCase();
+    if (!q) return [];
     return users
       .filter((u) => u.role !== 'Owner')
-      .filter((u) => {
-        if (!q) return true;
-        return (
+      .filter(
+        (u) =>
           (u.username ?? '').toLowerCase().includes(q) ||
           (u.email ?? '').toLowerCase().includes(q)
-        );
-      })
+      )
       .slice(0, 40);
   }, [users, userQuery]);
+
+  const searchActive = userQuery.trim().length > 0;
 
   const selected = users.find((u) => u.id === selectedUserId) ?? null;
 
@@ -300,38 +301,45 @@ export function OwnerGamemasterPromoteFlow({ users, usersLoading, accent, onRegi
         <TextInput
           style={styles.input}
           value={userQuery}
-          onChangeText={setUserQuery}
+          onChangeText={(text) => {
+            setUserQuery(text);
+            if (!text.trim()) setSelectedUserId(null);
+          }}
           placeholder="Search username or email"
           placeholderTextColor={theme.colors.textMuted}
           autoCapitalize="none"
         />
 
-        {usersLoading ? (
-          <ActivityIndicator color={accentColor} style={{ marginVertical: 8 }} />
+        {searchActive ? (
+          usersLoading ? (
+            <ActivityIndicator color={accentColor} style={{ marginVertical: 8 }} />
+          ) : (
+            <ScrollView style={styles.userList} contentContainerStyle={styles.userListContent} nestedScrollEnabled>
+              {candidates.map((u) => {
+                const active = u.id === selectedUserId;
+                return (
+                  <Pressable
+                    key={u.id}
+                    style={[styles.userRow, active && styles.userRowActive]}
+                    onPress={() => setSelectedUserId(u.id)}
+                  >
+                    <Text style={styles.userName} numberOfLines={1}>
+                      {u.username?.trim() || 'User'}
+                    </Text>
+                    <Text style={styles.userMeta} numberOfLines={1}>
+                      {u.role}
+                      {u.email ? ` · ${u.email}` : ''}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              {candidates.length === 0 ? (
+                <Text style={styles.hint}>No matching users.</Text>
+              ) : null}
+            </ScrollView>
+          )
         ) : (
-          <View style={styles.userList}>
-            {candidates.map((u) => {
-              const active = u.id === selectedUserId;
-              return (
-                <Pressable
-                  key={u.id}
-                  style={[styles.userRow, active && styles.userRowActive]}
-                  onPress={() => setSelectedUserId(u.id)}
-                >
-                  <Text style={styles.userName} numberOfLines={1}>
-                    {u.username?.trim() || 'User'}
-                  </Text>
-                  <Text style={styles.userMeta} numberOfLines={1}>
-                    {u.role}
-                    {u.email ? ` · ${u.email}` : ''}
-                  </Text>
-                </Pressable>
-              );
-            })}
-            {candidates.length === 0 ? (
-              <Text style={styles.hint}>No matching users.</Text>
-            ) : null}
-          </View>
+          <Text style={styles.hint}>Start typing a username or email to find a user.</Text>
         )}
 
         {selected ? (
@@ -643,11 +651,12 @@ export function OwnerGamemasterPromoteFlow({ users, usersLoading, accent, onRegi
 function makeStyles(theme: ReturnType<typeof useTheme>, accent: string) {
   return StyleSheet.create({
     card: {
+      width: '100%',
       backgroundColor: theme.colors.surface,
       borderRadius: theme.radius.lg,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: theme.colors.border,
-      padding: theme.spacing.md,
+      padding: theme.spacing.lg,
       gap: 8,
     },
     title: {
@@ -689,7 +698,8 @@ function makeStyles(theme: ReturnType<typeof useTheme>, accent: string) {
       fontSize: 16,
       color: theme.colors.text,
     },
-    userList: { maxHeight: 220, gap: 6, overflow: 'hidden' },
+    userList: { maxHeight: 280 },
+    userListContent: { gap: 6, paddingBottom: 4 },
     userRow: {
       paddingVertical: 10,
       paddingHorizontal: 12,

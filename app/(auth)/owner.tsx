@@ -966,7 +966,7 @@ export default function OwnerScreen() {
         ) : tab === 'competitions' ? (
           <>
             <Text style={styles.hint}>
-              Every competition across Racing, LMS, and First2Twenty, with join codes. Manage opens
+              Every competition across Racing, LMS, and Tipster20, with join codes. Manage opens
               the competition admin. Delete removes the competition permanently. Pull to refresh.
             </Text>
 
@@ -999,7 +999,7 @@ export default function OwnerScreen() {
                 { textTransform: 'uppercase', letterSpacing: 0.8, marginTop: theme.spacing.md },
               ]}
             >
-              First2 Twenty ({f2tComps.length})
+              Tipster20 ({f2tComps.length})
             </Text>
             {f2tComps.length === 0 ? (
               <Text style={styles.empty}>No F2T competitions</Text>

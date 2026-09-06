@@ -536,3 +536,68 @@ export async function ownerSyncFootballPlayersBbs(): Promise<OwnerSyncFootballPl
   if (error) throw error;
   return { success: false, error: 'empty_response' };
 }
+
+export type F2tGoalscorerRow = {
+  player_id: string;
+  display_name: string;
+  team_name: string;
+  team_short_name: string;
+  team_slug: string;
+  goals: number;
+};
+
+/** Goalscorers for a Premier League gameweek (Tipster20 home panel). */
+export async function f2tListGameweekGoalscorers(
+  gameweekId: string
+): Promise<F2tGoalscorerRow[]> {
+  const { data, error } = await db
+    .from('football_player_gameweek_goals')
+    .select('player_id, goals')
+    .eq('gameweek_id', gameweekId)
+    .order('goals', { ascending: false });
+  if (error) throw error;
+
+  const goalRows = (data ?? []) as { player_id: string; goals: number }[];
+  if (goalRows.length === 0) return [];
+
+  const ids = goalRows.map((r) => r.player_id);
+  const { data: players, error: pErr } = await db
+    .from('football_players')
+    .select('id, display_name, team:lms_teams!team_id(name, short_name, slug)')
+    .in('id', ids);
+  if (pErr) throw pErr;
+
+  const byId = new Map<
+    string,
+    {
+      display_name: string;
+      team_name: string;
+      team_short_name: string;
+      team_slug: string;
+    }
+  >();
+  for (const p of players ?? []) {
+    const team = (p as { team?: { name?: string; short_name?: string; slug?: string } | null })
+      .team;
+    byId.set(p.id, {
+      display_name: String((p as { display_name?: string }).display_name ?? 'Unknown'),
+      team_name: team?.name ?? '',
+      team_short_name: team?.short_name ?? '',
+      team_slug: team?.slug ?? '',
+    });
+  }
+
+  return goalRows
+    .map((r) => {
+      const meta = byId.get(r.player_id);
+      return {
+        player_id: r.player_id,
+        display_name: meta?.display_name ?? 'Unknown',
+        team_name: meta?.team_name ?? '',
+        team_short_name: meta?.team_short_name ?? '',
+        team_slug: meta?.team_slug ?? '',
+        goals: r.goals,
+      };
+    })
+    .sort((a, b) => b.goals - a.goals || a.display_name.localeCompare(b.display_name));
+}

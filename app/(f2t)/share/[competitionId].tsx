@@ -44,7 +44,7 @@ export default function F2tShareInviteScreen() {
 
   const shareText = useMemo(() => {
     const lines = [
-      `Join ${name || 'First2 Twenty'} on Top Tipster`,
+      `Join ${name || 'Tipster20'} on Top Tipster`,
       joinCode ? `Join code: ${joinCode}` : null,
       `Start: ${startLabel}`,
       `Entry: ${entryLabel}`,
@@ -125,12 +125,12 @@ export default function F2tShareInviteScreen() {
     try {
       if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.share) {
         await navigator.share({
-          title: `First2 Twenty — ${name}`,
+          title: `Tipster20 — ${name}`,
           text: shareText,
         });
         return;
       }
-      await Share.share({ message: shareText, title: `First2 Twenty — ${name}` });
+      await Share.share({ message: shareText, title: `Tipster20 — ${name}` });
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
       if (/abort|cancel/i.test(msg)) return;
@@ -281,7 +281,7 @@ export default function F2tShareInviteScreen() {
         ) : (
           <View style={styles.content}>
             <Text style={styles.wordmarkTop}>Top Tipster</Text>
-            <Text style={styles.wordmarkSub}>First2 Twenty</Text>
+            <Text style={styles.wordmarkSub}>Tipster20</Text>
             <Text style={styles.compName}>{name}</Text>
             <Pressable style={styles.codeBlock} onPress={() => void copyJoinCode()}>
               <Text style={styles.codeLabel}>Join code</Text>

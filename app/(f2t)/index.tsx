@@ -18,7 +18,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { FootballNextUpSpotlight } from '@/components/lms/FootballNextUpSpotlight';
-import { LeagueTablePanel } from '@/components/lms/LeagueTablePanel';
+import { GoalscorersPanel } from '@/components/f2t/GoalscorersPanel';
 import { LmsTrademarkDisclaimer } from '@/components/lms/LmsTrademarkDisclaimer';
 import {
   f2tCreateCompetition,
@@ -31,6 +31,7 @@ import {
 import { lmsListGameweeks, type LmsGameweek } from '@/lib/lms/api';
 import { canCreateCompetitions } from '@/lib/adminSession';
 import { confirmJoinLimitDisclaimer } from '@/lib/joinLimitDisclaimer';
+import { isFootballCompetitionRegistering } from '@/lib/appUtils';
 import { FundraiserForClub } from '@/components/FundraiserForClub';
 import {
   fetchCompetitionsFundraiserBranding,
@@ -38,7 +39,7 @@ import {
   type FundraiserBranding,
 } from '@/lib/fundraiserBranding';
 
-type HomeTab = 'competitions' | 'join' | 'table';
+type HomeTab = 'competitions' | 'join' | 'goalscorers';
 const F2T_SEASON = '2026/27';
 const MANUAL_REFRESH_COOLDOWN_MS = 60_000;
 
@@ -75,12 +76,13 @@ export default function F2tHomeScreen() {
   const [creating, setCreating] = useState(false);
 
   const homeLoadedRef = useRef(false);
-  const createGwsLoadedRef = useRef(false);
   const lastManualRefreshAtRef = useRef<number | null>(null);
   const loadRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
-    if (tabParam === 'table' || tabParam === 'join' || tabParam === 'competitions') {
+    if (tabParam === 'goalscorers' || tabParam === 'table') {
+      setTab('goalscorers');
+    } else if (tabParam === 'join' || tabParam === 'competitions') {
       setTab(tabParam);
     }
   }, [tabParam]);
@@ -110,10 +112,13 @@ export default function F2tHomeScreen() {
         setFundraiserByComp({});
       }
       setTab((prev) => {
-        if (tabParam === 'table' || tabParam === 'join' || tabParam === 'competitions') {
+        if (tabParam === 'goalscorers' || tabParam === 'table') {
+          return 'goalscorers';
+        }
+        if (tabParam === 'join' || tabParam === 'competitions') {
           return tabParam;
         }
-        if (prev === 'join' || prev === 'table') return prev;
+        if (prev === 'join' || prev === 'goalscorers') return prev;
         return (data.competitions?.length ?? 0) === 0 && (data.pending?.length ?? 0) === 0
           ? 'join'
           : 'competitions';
@@ -122,14 +127,11 @@ export default function F2tHomeScreen() {
       const staff = await canCreateCompetitions(userId);
       setIsStaff(staff);
 
-      if (staff && !createGwsLoadedRef.current) {
-        const gws = await lmsListGameweeks(F2T_SEASON);
-        createGwsLoadedRef.current = true;
-        setCreateGws(gws);
-        const defaultGw =
-          gws.find((g) => g.status !== 'complete')?.id ?? gws[0]?.id ?? null;
-        setCreateGwId((prev) => prev ?? defaultGw);
-      }
+      const gws = await lmsListGameweeks(F2T_SEASON);
+      setCreateGws(gws);
+      const defaultGw =
+        gws.find((g) => g.status !== 'complete')?.id ?? gws[0]?.id ?? null;
+      setCreateGwId((prev) => prev ?? defaultGw);
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load');
       setComps([]);
@@ -162,7 +164,7 @@ export default function F2tHomeScreen() {
     }
     lastManualRefreshAtRef.current = now;
     setRefreshing(true);
-    if (tab === 'table') setTableRefreshKey((k) => k + 1);
+    if (tab === 'goalscorers') setTableRefreshKey((k) => k + 1);
     setSpotlightRefreshKey((k) => k + 1);
     void load();
   }, [refreshing, loading, tab, load]);
@@ -240,6 +242,11 @@ export default function F2tHomeScreen() {
     if (status === 'observer') return 'Admin access';
     return status;
   };
+
+  const seasonOpenGw = useMemo(
+    () => createGws.find((g) => g.status !== 'complete') ?? null,
+    [createGws]
+  );
 
   const styles = useMemo(
     () =>
@@ -430,6 +437,27 @@ export default function F2tHomeScreen() {
           color: theme.colors.accent,
           marginTop: 2,
         },
+        rowTrailing: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          flexShrink: 0,
+        },
+        registeringChip: {
+          paddingVertical: 2,
+          paddingHorizontal: 6,
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.borderLight,
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        registeringChipText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 10,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: theme.colors.textSecondary,
+        },
         createToggle: {
           alignSelf: 'flex-start',
           flexDirection: 'row',
@@ -549,7 +577,7 @@ export default function F2tHomeScreen() {
           <Ionicons name="menu" size={24} color={theme.colors.text} />
         </Pressable>
         <View style={styles.titleBlock}>
-          <Text style={styles.title}>First2Twenty</Text>
+          <Text style={styles.title}>Tipster20</Text>
           <Text style={styles.sub}>Premier League {F2T_SEASON}</Text>
         </View>
         <Pressable
@@ -594,7 +622,7 @@ export default function F2tHomeScreen() {
                     [
                       { key: 'competitions' as const, label: 'My competitions' },
                       { key: 'join' as const, label: 'Join' },
-                      { key: 'table' as const, label: 'Table' },
+                      { key: 'goalscorers' as const, label: 'Goalscorers' },
                     ] as const
                   ).map((t) => {
                     const active = tab === t.key;
@@ -686,7 +714,7 @@ export default function F2tHomeScreen() {
                                   style={styles.createInput}
                                   value={createName}
                                   onChangeText={setCreateName}
-                                  placeholder="e.g. Office First2Twenty"
+                                  placeholder="e.g. Office Tipster20"
                                   placeholderTextColor={theme.colors.textMuted}
                                   autoCorrect={false}
                                 />
@@ -764,7 +792,12 @@ export default function F2tHomeScreen() {
                           </View>
                         ) : (
                           <View style={styles.list}>
-                            {comps.map((c, i) => (
+                            {comps.map((c, i) => {
+                              const registering = isFootballCompetitionRegistering(
+                                c.start_gameweek_number,
+                                seasonOpenGw
+                              );
+                              return (
                               <Pressable
                                 key={c.competition_id}
                                 style={[styles.row, i === comps.length - 1 && styles.rowLast]}
@@ -804,13 +837,21 @@ export default function F2tHomeScreen() {
                                     {c.scored_count}/20 scored · {c.selection_count} picked
                                   </Text>
                                 </View>
-                                <Ionicons
-                                  name="chevron-forward"
-                                  size={16}
-                                  color={theme.colors.textMuted}
-                                />
+                                <View style={styles.rowTrailing}>
+                                  {registering ? (
+                                    <View style={styles.registeringChip}>
+                                      <Text style={styles.registeringChipText}>Registering</Text>
+                                    </View>
+                                  ) : null}
+                                  <Ionicons
+                                    name="chevron-forward"
+                                    size={16}
+                                    color={theme.colors.textMuted}
+                                  />
+                                </View>
                               </Pressable>
-                            ))}
+                              );
+                            })}
                           </View>
                         )}
                       </View>
@@ -850,7 +891,9 @@ export default function F2tHomeScreen() {
                     </View>
                   ) : null}
 
-                  {tab === 'table' ? <LeagueTablePanel refreshKey={tableRefreshKey} /> : null}
+                  {tab === 'goalscorers' ? (
+                    <GoalscorersPanel refreshKey={tableRefreshKey} />
+                  ) : null}
                 </View>
               ) : null}
             </View>

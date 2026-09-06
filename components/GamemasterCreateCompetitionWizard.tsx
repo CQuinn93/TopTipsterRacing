@@ -87,7 +87,7 @@ export function GamemasterCreateCompetitionWizard({
       ? credits
       : ([
           { mode: 'lms', label: 'Last Man Standing', remaining: 0, quoted: 0, used: 0, quoteId: null },
-          { mode: 'f2t', label: 'First2 Twenty', remaining: 0, quoted: 0, used: 0, quoteId: null },
+          { mode: 'f2t', label: 'Tipster20', remaining: 0, quoted: 0, used: 0, quoteId: null },
           { mode: 'racing', label: 'Top Tipster Racing', remaining: 0, quoted: 0, used: 0, quoteId: null },
           { mode: 'f2t6', label: 'First2 6', remaining: 0, quoted: 0, used: 0, quoteId: null },
         ] as GamemasterModeCredit[]);

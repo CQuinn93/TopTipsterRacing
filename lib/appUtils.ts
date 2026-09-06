@@ -84,3 +84,19 @@ export function formatSportCompetitionStatusLabel(status: string): string {
   if (s.length === 0) return '—';
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
+
+/**
+ * LMS / F2T: competition has not reached its start gameweek yet
+ * (season open week is still before start, or start week is still upcoming).
+ */
+export function isFootballCompetitionRegistering(
+  startGameweekNumber: number | null | undefined,
+  seasonOpenGameweek: { number: number; status: string } | null | undefined
+): boolean {
+  if (startGameweekNumber == null || seasonOpenGameweek == null) return false;
+  if (seasonOpenGameweek.number < startGameweekNumber) return true;
+  return (
+    seasonOpenGameweek.number === startGameweekNumber &&
+    seasonOpenGameweek.status === 'upcoming'
+  );
+}

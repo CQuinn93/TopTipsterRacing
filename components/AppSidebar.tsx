@@ -150,11 +150,11 @@ export function AppSidebar() {
               <>
                 <TouchableOpacity
                   style={styles.menuButton}
-                  onPress={() => goTo('/(f2t)?tab=table')}
+                  onPress={() => goTo('/(f2t)?tab=goalscorers')}
                   activeOpacity={0.7}
                 >
-                  <Ionicons name="stats-chart-outline" size={22} color={theme.colors.accent} />
-                  <Text style={styles.menuButtonText}>Table</Text>
+                  <Ionicons name="football-outline" size={22} color={theme.colors.accent} />
+                  <Text style={styles.menuButtonText}>Goalscorers</Text>
                   <Ionicons name="chevron-forward" size={20} color={theme.colors.textMuted} />
                 </TouchableOpacity>
                 <TouchableOpacity

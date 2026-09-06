@@ -196,7 +196,7 @@ export function F2tAlertsPanel({
   if (loading) {
     return (
       <View style={styles.root}>
-        <Text style={styles.title}>First2Twenty · FPL alerts</Text>
+        <Text style={styles.title}>Tipster20 · FPL alerts</Text>
         <ActivityIndicator size="small" color={accent} style={{ marginTop: 8 }} />
       </View>
     );
@@ -204,7 +204,7 @@ export function F2tAlertsPanel({
 
   return (
     <View style={styles.root}>
-      <Text style={styles.title}>First2Twenty · FPL alerts</Text>
+      <Text style={styles.title}>Tipster20 · FPL alerts</Text>
       <Text style={styles.hint}>
         Players with injury, doubt, suspension, or availability news from the daily FPL sync.
         Exclude anyone who should not be pickable.

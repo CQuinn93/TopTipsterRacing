@@ -6,7 +6,7 @@ export type HubGameModes = Record<HubGameModeKey, boolean>;
 
 export const HUB_GAME_MODE_LABELS: Record<HubGameModeKey, string> = {
   lms: 'Last Man Standing',
-  f2t: 'First2 Twenty',
+  f2t: 'Tipster20',
   f2t6: 'First2 6',
   racing: 'Top Tipster Racing',
 };

@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { isFootballCompetitionRegistering } from '@/lib/appUtils';
 import {
   lmsCreateCompetition,
   lmsGetGameweekPickStats,
@@ -1110,6 +1111,27 @@ export default function LmsHomeScreen() {
           fontSize: 10,
           color: theme.colors.textSecondary,
           textTransform: 'uppercase',
+        },
+        rowTrailing: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          flexShrink: 0,
+        },
+        registeringChip: {
+          paddingVertical: 2,
+          paddingHorizontal: 6,
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.borderLight,
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        registeringChipText: {
+          fontFamily: theme.fontFamily.baiSemiBold,
+          fontSize: 10,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: theme.colors.textSecondary,
         },
         empty: {
           fontFamily: theme.fontFamily.baiLight,
@@ -2260,6 +2282,10 @@ export default function LmsHomeScreen() {
                               c.totalCount > 0
                                 ? `${c.aliveCount} of ${c.totalCount} remain`
                                 : statusLabel(c.participant_status);
+                            const registering = isFootballCompetitionRegistering(
+                              c.start_gameweek_number,
+                              gw
+                            );
                             return (
                               <Pressable
                                 key={c.competition_id}
@@ -2317,25 +2343,32 @@ export default function LmsHomeScreen() {
                                     </Text>
                                   ) : null}
                                 </View>
-                                {c.pickTeam ? (
-                                  <View style={styles.pickCol}>
-                                    <TeamColourChip
-                                      shortName={c.pickTeam.short_name}
-                                      name={c.pickTeam.name}
-                                      slug={c.pickTeam.slug}
-                                      size={28}
+                                <View style={styles.rowTrailing}>
+                                  {registering ? (
+                                    <View style={styles.registeringChip}>
+                                      <Text style={styles.registeringChipText}>Registering</Text>
+                                    </View>
+                                  ) : null}
+                                  {c.pickTeam ? (
+                                    <View style={styles.pickCol}>
+                                      <TeamColourChip
+                                        shortName={c.pickTeam.short_name}
+                                        name={c.pickTeam.name}
+                                        slug={c.pickTeam.slug}
+                                        size={28}
+                                      />
+                                      <Text style={styles.pickAbbr} numberOfLines={1}>
+                                        {c.pickTeam.short_name || c.pickTeam.name.slice(0, 3)}
+                                      </Text>
+                                    </View>
+                                  ) : (
+                                    <Ionicons
+                                      name="chevron-forward"
+                                      size={16}
+                                      color={theme.colors.textMuted}
                                     />
-                                    <Text style={styles.pickAbbr} numberOfLines={1}>
-                                      {c.pickTeam.short_name || c.pickTeam.name.slice(0, 3)}
-                                    </Text>
-                                  </View>
-                                ) : (
-                                  <Ionicons
-                                    name="chevron-forward"
-                                    size={16}
-                                    color={theme.colors.textMuted}
-                                  />
-                                )}
+                                  )}
+                                </View>
                               </Pressable>
                             );
                           })}

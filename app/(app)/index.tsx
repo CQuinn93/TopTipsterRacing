@@ -752,6 +752,27 @@ export default function HomeScreen() {
           textTransform: 'uppercase',
           color: theme.colors.accent,
         },
+        rowTrailing: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          flexShrink: 0,
+        },
+        registeringChip: {
+          paddingVertical: 2,
+          paddingHorizontal: 6,
+          borderRadius: theme.radius.sm,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.borderLight,
+          backgroundColor: theme.colors.surfaceElevated,
+        },
+        registeringChipText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 10,
+          letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          color: theme.colors.textSecondary,
+        },
         createToggle: {
           alignSelf: 'flex-start',
           flexDirection: 'row',
@@ -1566,11 +1587,18 @@ export default function HomeScreen() {
                                 </Text>
                               ) : null}
                             </View>
-                            <Ionicons
-                              name="chevron-forward"
-                              size={16}
-                              color={theme.colors.textMuted}
-                            />
+                            <View style={styles.rowTrailing}>
+                              {c.status === 'upcoming' ? (
+                                <View style={styles.registeringChip}>
+                                  <Text style={styles.registeringChipText}>Registering</Text>
+                                </View>
+                              ) : null}
+                              <Ionicons
+                                name="chevron-forward"
+                                size={16}
+                                color={theme.colors.textMuted}
+                              />
+                            </View>
                           </Pressable>
                         ))}
                       </View>

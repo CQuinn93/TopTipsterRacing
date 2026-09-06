@@ -91,7 +91,8 @@ type AdminCategory = 'sports' | 'accounts';
 type SportsSubTab = 'football' | 'racing';
 type AccountsSubTab = 'users' | 'gamemasters';
 type GamemasterSubTab = 'promote' | 'manage';
-type FootballAdminTab = 'f2t_alerts' | 'exclusions' | 'competitions';
+type FootballAdminTab = 'competitions' | 'f2t_alerts' | 'exclusions' | 'game_modes';
+type RacingAdminTab = 'competitions' | 'game_modes';
 
 const LMS_SEASON = '2026/27';
 const FOOTBALL_MODE_KEYS: HubGameModeKey[] = ['lms', 'f2t', 'f2t6'];
@@ -272,7 +273,8 @@ export default function CompetitionHubScreen() {
   const [sportsSubTab, setSportsSubTab] = useState<SportsSubTab>('football');
   const [accountsSubTab, setAccountsSubTab] = useState<AccountsSubTab>('users');
   const [gamemasterSubTab, setGamemasterSubTab] = useState<GamemasterSubTab>('promote');
-  const [footballAdminTab, setFootballAdminTab] = useState<FootballAdminTab>('f2t_alerts');
+  const [footballAdminTab, setFootballAdminTab] = useState<FootballAdminTab>('competitions');
+  const [racingAdminTab, setRacingAdminTab] = useState<RacingAdminTab>('competitions');
   const [fplAlertPlayers, setFplAlertPlayers] = useState<Array<Record<string, unknown>>>([]);
   const [fplAlertsLoading, setFplAlertsLoading] = useState(false);
   const [fplBusyPlayerId, setFplBusyPlayerId] = useState<string | null>(null);
@@ -702,7 +704,7 @@ export default function CompetitionHubScreen() {
       void loadExclusions(selectedGwId);
     } else if (
       (adminCategory === 'sports' && sportsSubTab === 'football' && footballAdminTab === 'competitions') ||
-      (adminCategory === 'sports' && sportsSubTab === 'racing')
+      (adminCategory === 'sports' && sportsSubTab === 'racing' && racingAdminTab === 'competitions')
     ) {
       void loadOwnerComps();
     } else if (adminCategory === 'accounts' && accountsSubTab === 'users') {
@@ -719,6 +721,7 @@ export default function CompetitionHubScreen() {
     sportsSubTab,
     accountsSubTab,
     footballAdminTab,
+    racingAdminTab,
     loadFplAlerts,
     loadExclusions,
     loadOwnerUsers,
@@ -1081,7 +1084,7 @@ export default function CompetitionHubScreen() {
           ),
           buildHubModeItem(
             'first2-twenty',
-            'First2 Twenty',
+            'Tipster20',
             'f2t',
             hubModes,
             isOwner,
@@ -1389,11 +1392,46 @@ export default function CompetitionHubScreen() {
           fontSize: 11,
           color: theme.colors.textMuted,
         },
-        adminCatRow: {
+        adminTabBar: {
           flexDirection: 'row',
-          gap: 8,
+          alignItems: 'stretch',
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          borderBottomColor: theme.colors.border,
           marginBottom: theme.spacing.md,
-          flexWrap: 'wrap',
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radius.md,
+          overflow: 'hidden',
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: theme.colors.border,
+        },
+        adminTabBarNested: {
+          marginBottom: theme.spacing.sm,
+        },
+        adminTab: {
+          flex: 1,
+          paddingVertical: 11,
+          paddingHorizontal: 4,
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderBottomWidth: 2,
+          borderBottomColor: 'transparent',
+        },
+        adminTabActive: {
+          borderBottomColor: adminAccent,
+          backgroundColor: adminPalette.accentMuted,
+        },
+        adminTabText: {
+          fontFamily: theme.fontFamily.baiMedium,
+          fontSize: 12,
+          color: theme.colors.textMuted,
+          textAlign: 'center',
+        },
+        adminTabTextActive: {
+          color: adminAccent,
+        },
+        adminTabTextCompact: {
+          fontSize: 11,
+          lineHeight: 14,
         },
         adminCatChip: {
           paddingHorizontal: 14,
@@ -1413,31 +1451,6 @@ export default function CompetitionHubScreen() {
           color: theme.colors.textMuted,
         },
         adminCatChipTextActive: {
-          color: adminAccent,
-        },
-        adminSubRow: {
-          flexDirection: 'row',
-          gap: 8,
-          marginBottom: theme.spacing.sm,
-        },
-        adminSubChip: {
-          paddingHorizontal: 12,
-          paddingVertical: 6,
-          borderRadius: theme.radius.sm,
-          borderBottomWidth: 2,
-          borderBottomColor: 'transparent',
-        },
-        adminSubChipActive: {
-          borderBottomColor: adminAccent,
-        },
-        adminSubChipText: {
-          fontFamily: theme.fontFamily.baiMedium,
-          fontSize: 12,
-          color: theme.colors.textMuted,
-          letterSpacing: 0.4,
-          textTransform: 'uppercase',
-        },
-        adminSubChipTextActive: {
           color: adminAccent,
         },
         gwScroll: {
@@ -1647,6 +1660,74 @@ export default function CompetitionHubScreen() {
     ]
   );
 
+  const renderAdminTabs = <T extends string>(
+    items: ReadonlyArray<{ key: T; label: string }>,
+    active: T,
+    onChange: (key: T) => void,
+    opts?: { compact?: boolean; nested?: boolean }
+  ) => (
+    <View style={[styles.adminTabBar, opts?.nested ? styles.adminTabBarNested : null]}>
+      {items.map((item) => {
+        const selected = active === item.key;
+        return (
+          <Pressable
+            key={item.key}
+            style={[styles.adminTab, selected && styles.adminTabActive]}
+            onPress={() => onChange(item.key)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+          >
+            <Text
+              style={[
+                styles.adminTabText,
+                selected && styles.adminTabTextActive,
+                opts?.compact ? styles.adminTabTextCompact : null,
+              ]}
+              numberOfLines={opts?.compact ? 2 : 1}
+            >
+              {item.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+
+  const renderGameModesPanel = (modeKeys: HubGameModeKey[], sportLabel: string) => (
+    <View style={styles.gameModesCard}>
+      <Text style={styles.panelLabel}>Game modes for users</Text>
+      <Text style={styles.gameModesHint}>
+        Toggle which {sportLabel} modes appear open. You always have access to every mode.
+      </Text>
+      {modeKeys.map((key) => {
+        const open = hubModes[key];
+        return (
+          <View key={key} style={styles.gameModeRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.gameModeLabel}>{HUB_GAME_MODE_LABELS[key]}</Text>
+              <Text style={styles.gameModeStatus}>
+                {open ? 'Open to users' : 'Hidden from users'}
+              </Text>
+            </View>
+            {hubModesSaving ? (
+              <ActivityIndicator size="small" color={adminAccent} />
+            ) : (
+              <Switch
+                value={open}
+                onValueChange={(value) => void saveHubMode(key, value)}
+                trackColor={{
+                  false: theme.colors.border,
+                  true: adminAccent,
+                }}
+                thumbColor={theme.colors.surface}
+              />
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+
   return (
     <View style={styles.root}>
       <Animated.View style={[styles.layer, { opacity: footballOpacity }]} pointerEvents="none">
@@ -1816,149 +1897,48 @@ export default function CompetitionHubScreen() {
                 <>
                   {tab === 'admin' && isOwner ? (
                     <>
-                      {/* ── Top-level admin tabs: Sports | Manage Accounts ── */}
-                      <View style={styles.adminCatRow}>
-                        {(
-                          [
-                            { key: 'sports' as const, label: 'Sports' },
-                            { key: 'accounts' as const, label: 'Manage Accounts' },
-                          ] as const
-                        ).map((cat) => {
-                          const active = adminCategory === cat.key;
-                          return (
-                            <Pressable
-                              key={cat.key}
-                              style={[styles.adminCatChip, active && styles.adminCatChipActive]}
-                              onPress={() => setAdminCategory(cat.key)}
-                              accessibilityRole="button"
-                              accessibilityState={{ selected: active }}
-                            >
-                              <Text
-                                style={[
-                                  styles.adminCatChipText,
-                                  active && styles.adminCatChipTextActive,
-                                ]}
-                              >
-                                {cat.label}
-                              </Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
+                      {/* Level 1: Sports | Manage Accounts */}
+                      {renderAdminTabs(
+                        [
+                          { key: 'sports' as const, label: 'Sports' },
+                          { key: 'accounts' as const, label: 'Manage Accounts' },
+                        ],
+                        adminCategory,
+                        setAdminCategory
+                      )}
 
-                      {/* ═══ SPORTS TAB ═══ */}
+                      {/* ═══ SPORTS ═══ */}
                       {adminCategory === 'sports' ? (
                         <>
-                          {/* Sub-tabs: Football | Racing */}
-                          <View style={styles.adminSubRow}>
-                            {(
-                              [
-                                { key: 'football' as const, label: 'Football' },
-                                { key: 'racing' as const, label: 'Racing' },
-                              ] as const
-                            ).map((sub) => {
-                              const active = sportsSubTab === sub.key;
-                              return (
-                                <Pressable
-                                  key={sub.key}
-                                  style={[styles.adminSubChip, active && styles.adminSubChipActive]}
-                                  onPress={() => setSportsSubTab(sub.key)}
-                                  accessibilityRole="button"
-                                  accessibilityState={{ selected: active }}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.adminSubChipText,
-                                      active && styles.adminSubChipTextActive,
-                                    ]}
-                                  >
-                                    {sub.label}
-                                  </Text>
-                                </Pressable>
-                              );
-                            })}
-                          </View>
-
-                          {/* Game modes toggle (both football & racing) */}
-                          <View style={styles.gameModesCard}>
-                            <Text style={styles.panelLabel}>Game modes for users</Text>
-                            <Text style={styles.gameModesHint}>
-                              Toggle which {sportsSubTab === 'football' ? 'football' : 'racing'}{' '}
-                              modes appear open. You always have access to every mode.
-                            </Text>
-                            {(sportsSubTab === 'football'
-                              ? FOOTBALL_MODE_KEYS
-                              : RACING_MODE_KEYS
-                            ).map((key) => {
-                            const open = hubModes[key];
-                            return (
-                              <View key={key} style={styles.gameModeRow}>
-                                <View style={{ flex: 1 }}>
-                                  <Text style={styles.gameModeLabel}>
-                                    {HUB_GAME_MODE_LABELS[key]}
-                                  </Text>
-                                  <Text style={styles.gameModeStatus}>
-                                    {open ? 'Open to users' : 'Hidden from users'}
-                                  </Text>
-                                </View>
-                                {hubModesSaving ? (
-                                  <ActivityIndicator size="small" color={adminAccent} />
-                                ) : (
-                                  <Switch
-                                    value={open}
-                                    onValueChange={(value) => void saveHubMode(key, value)}
-                                    trackColor={{
-                                      false: theme.colors.border,
-                                      true: adminAccent,
-                                    }}
-                                    thumbColor={theme.colors.surface}
-                                  />
-                                )}
-                              </View>
-                            );
-                          })}
-                          </View>
+                          {renderAdminTabs(
+                            [
+                              { key: 'football' as const, label: 'Football' },
+                              { key: 'racing' as const, label: 'Racing' },
+                            ],
+                            sportsSubTab,
+                            setSportsSubTab,
+                            { nested: true }
+                          )}
 
                           {sportsSubTab === 'football' ? (
                         <>
-                          <View style={styles.adminSubRow}>
-                            {(
-                              [
-                                { key: 'competitions' as const, label: 'Competitions' },
-                                { key: 'f2t_alerts' as const, label: 'F2T alerts' },
-                                { key: 'exclusions' as const, label: 'Exclusions' },
-                              ] as const
-                            ).map((sub) => {
-                              const active = footballAdminTab === sub.key;
-                              return (
-                                <Pressable
-                                  key={sub.key}
-                                  style={[
-                                    styles.adminSubChip,
-                                    active && styles.adminSubChipActive,
-                                  ]}
-                                  onPress={() => setFootballAdminTab(sub.key)}
-                                  accessibilityRole="button"
-                                  accessibilityState={{ selected: active }}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.adminSubChipText,
-                                      active && styles.adminSubChipTextActive,
-                                    ]}
-                                  >
-                                    {sub.label}
-                                  </Text>
-                                </Pressable>
-                              );
-                            })}
-                          </View>
+                          {renderAdminTabs(
+                            [
+                              { key: 'competitions' as const, label: 'Competitions' },
+                              { key: 'f2t_alerts' as const, label: 'Tipster20 alerts' },
+                              { key: 'exclusions' as const, label: 'Exclusions' },
+                              { key: 'game_modes' as const, label: 'Game modes' },
+                            ],
+                            footballAdminTab,
+                            setFootballAdminTab,
+                            { compact: true, nested: true }
+                          )}
 
                           {footballAdminTab === 'competitions' ? (
                             <View style={styles.gameModesCard}>
                               <Text style={styles.panelLabel}>Manage competitions</Text>
                               <Text style={styles.gameModesHint}>
-                                Open any LMS or First2Twenty league as Owner — join codes and
+                                Open any LMS or Tipster20 league as Owner — join codes and
                                 admin tools are available even if you are not a player in that
                                 league.
                               </Text>
@@ -2040,6 +2020,8 @@ export default function CompetitionHubScreen() {
                                 }
                               />
                             </View>
+                          ) : footballAdminTab === 'game_modes' ? (
+                            renderGameModesPanel(FOOTBALL_MODE_KEYS, 'football')
                           ) : (
                             <View style={styles.gameModesCard}>
                               <Text style={styles.panelLabel}>LMS fixture exclusions</Text>
@@ -2156,6 +2138,20 @@ export default function CompetitionHubScreen() {
                           ) : null}
 
                           {sportsSubTab === 'racing' ? (
+                            <>
+                              {renderAdminTabs(
+                                [
+                                  { key: 'competitions' as const, label: 'Competitions' },
+                                  { key: 'game_modes' as const, label: 'Game modes' },
+                                ],
+                                racingAdminTab,
+                                setRacingAdminTab,
+                                { nested: true }
+                              )}
+
+                              {racingAdminTab === 'game_modes' ? (
+                                renderGameModesPanel(RACING_MODE_KEYS, 'racing')
+                              ) : (
                             <View style={styles.gameModesCard}>
                               <Text style={styles.panelLabel}>Manage competitions</Text>
                               <Text style={styles.gameModesHint}>
@@ -2209,42 +2205,24 @@ export default function CompetitionHubScreen() {
                                 </View>
                               )}
                             </View>
+                              )}
+                            </>
                           ) : null}
                         </>
                       ) : null}
 
-                      {/* ═══ MANAGE ACCOUNTS TAB ═══ */}
+                      {/* ═══ MANAGE ACCOUNTS ═══ */}
                       {adminCategory === 'accounts' ? (
                         <>
-                          {/* Sub-tabs: Users | Gamemasters */}
-                          <View style={styles.adminSubRow}>
-                            {(
-                              [
-                                { key: 'users' as const, label: 'Users' },
-                                { key: 'gamemasters' as const, label: 'Gamemasters' },
-                              ] as const
-                            ).map((sub) => {
-                              const active = accountsSubTab === sub.key;
-                              return (
-                                <Pressable
-                                  key={sub.key}
-                                  style={[styles.adminSubChip, active && styles.adminSubChipActive]}
-                                  onPress={() => setAccountsSubTab(sub.key)}
-                                  accessibilityRole="button"
-                                  accessibilityState={{ selected: active }}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.adminSubChipText,
-                                      active && styles.adminSubChipTextActive,
-                                    ]}
-                                  >
-                                    {sub.label}
-                                  </Text>
-                                </Pressable>
-                              );
-                            })}
-                          </View>
+                          {renderAdminTabs(
+                            [
+                              { key: 'users' as const, label: 'Users' },
+                              { key: 'gamemasters' as const, label: 'Gamemasters' },
+                            ],
+                            accountsSubTab,
+                            setAccountsSubTab,
+                            { nested: true }
+                          )}
 
                           {/* ── Users sub-tab ── */}
                           {accountsSubTab === 'users' ? (
@@ -2305,47 +2283,26 @@ export default function CompetitionHubScreen() {
                           {/* ── Gamemasters sub-tab ── */}
                           {accountsSubTab === 'gamemasters' ? (
                             <>
-                              <View style={styles.adminSubRow}>
-                                {(
-                                  [
-                                    { key: 'promote' as const, label: 'Promote' },
-                                    { key: 'manage' as const, label: 'Manage' },
-                                  ] as const
-                                ).map((sub) => {
-                                  const active = gamemasterSubTab === sub.key;
-                                  return (
-                                    <Pressable
-                                      key={sub.key}
-                                      style={[styles.adminSubChip, active && styles.adminSubChipActive]}
-                                      onPress={() => setGamemasterSubTab(sub.key)}
-                                      accessibilityRole="button"
-                                      accessibilityState={{ selected: active }}
-                                    >
-                                      <Text
-                                        style={[
-                                          styles.adminSubChipText,
-                                          active && styles.adminSubChipTextActive,
-                                        ]}
-                                      >
-                                        {sub.label}
-                                      </Text>
-                                    </Pressable>
-                                  );
-                                })}
-                              </View>
+                              {renderAdminTabs(
+                                [
+                                  { key: 'promote' as const, label: 'Promote' },
+                                  { key: 'manage' as const, label: 'Manage' },
+                                ],
+                                gamemasterSubTab,
+                                setGamemasterSubTab,
+                                { nested: true }
+                              )}
 
                               {gamemasterSubTab === 'promote' ? (
-                                <View style={styles.formCap}>
-                                  <OwnerGamemasterPromoteFlow
-                                    users={ownerUsers}
-                                    usersLoading={usersLoading}
-                                    accent={adminAccent}
-                                    onRegistered={() => {
-                                      void loadOwnerUsers();
-                                      void loadOwnerGamemasters();
-                                    }}
-                                  />
-                                </View>
+                                <OwnerGamemasterPromoteFlow
+                                  users={ownerUsers}
+                                  usersLoading={usersLoading}
+                                  accent={adminAccent}
+                                  onRegistered={() => {
+                                    void loadOwnerUsers();
+                                    void loadOwnerGamemasters();
+                                  }}
+                                />
                               ) : (
                                 <View style={styles.workspaceCard}>
                                   <Text style={styles.panelLabel}>Gamemaster accounts</Text>
