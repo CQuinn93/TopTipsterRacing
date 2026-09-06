@@ -211,59 +211,46 @@ export default function F2tCompetitionScreen() {
     setPickerOpen(true);
   };
 
-  const togglePick = (playerId: string) => {
-    if (subMode) {
-      setPickedIds([playerId]);
-      return;
-    }
-    if (pickedIds.includes(playerId)) {
-      setPickedIds((prev) => prev.filter((id) => id !== playerId));
-      return;
-    }
-    if (pickedIds.length >= 20) {
-      Alert.alert('Selections', 'You already have 20 players. Uncheck one before adding another.');
-      return;
-    }
-    setPickedIds((prev) => [...prev, playerId]);
-  };
-
-  const submitPicks = async () => {
-    if (!competitionId) return;
-    setSubmitting(true);
-    try {
-      if (subMode && subOutId) {
-        const inId = pickedIds[0];
-        if (!inId) {
-          Alert.alert('Substitution', 'Choose a replacement player.');
-          return;
+  const submitPicks = useCallback(
+    async (pickedIds: string[]) => {
+      if (!competitionId) return;
+      setSubmitting(true);
+      try {
+        if (subMode && subOutId) {
+          const inId = pickedIds[0];
+          if (!inId) {
+            Alert.alert('Substitution', 'Choose a replacement player.');
+            return;
+          }
+          const flaggedOut = selections.find((s) => s.player_id === subOutId)?.owner_flagged;
+          const type = flaggedOut ? 'owner_flag' : 'regular';
+          const res = await f2tUseSubstitution(competitionId, subOutId, inId, type);
+          if (!res.success) {
+            Alert.alert('Substitution failed', res.error ?? 'Could not substitute');
+            return;
+          }
+        } else {
+          if (pickedIds.length !== 20) {
+            Alert.alert('Selections', 'Pick exactly 20 players.');
+            return;
+          }
+          const res = await f2tSubmitSelections(competitionId, pickedIds);
+          if (!res.success) {
+            Alert.alert('Submit failed', res.error ?? 'Could not save selections');
+            return;
+          }
         }
-        const flaggedOut = selections.find((s) => s.player_id === subOutId)?.owner_flagged;
-        const type = flaggedOut ? 'owner_flag' : 'regular';
-        const res = await f2tUseSubstitution(competitionId, subOutId, inId, type);
-        if (!res.success) {
-          Alert.alert('Substitution failed', res.error ?? 'Could not substitute');
-          return;
-        }
-      } else {
-        if (pickedIds.length !== 20) {
-          Alert.alert('Selections', 'Pick exactly 20 players.');
-          return;
-        }
-        const res = await f2tSubmitSelections(competitionId, pickedIds);
-        if (!res.success) {
-          Alert.alert('Submit failed', res.error ?? 'Could not save selections');
-          return;
-        }
+        setPickerOpen(false);
+        f2tSessionInvalidatePlayers(competitionId);
+        await load();
+      } catch (e) {
+        Alert.alert('Error', e instanceof Error ? e.message : 'Save failed');
+      } finally {
+        setSubmitting(false);
       }
-      setPickerOpen(false);
-      f2tSessionInvalidatePlayers(competitionId);
-      await load();
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Save failed');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    },
+    [competitionId, subMode, subOutId, selections, load]
+  );
 
   const canPick = !selectionsLocked;
   const canRegularSub = subEligible && !regularSubUsed;
@@ -775,7 +762,7 @@ export default function F2tCompetitionScreen() {
         title={subMode ? 'Choose replacement' : 'Pick 20 players'}
         players={players}
         loading={playersLoading}
-        selectedIds={pickedIds}
+        initialSelectedIds={pickedIds}
         submitting={submitting}
         subMode={subMode}
         outPlayer={
@@ -784,8 +771,7 @@ export default function F2tCompetitionScreen() {
             : null
         }
         onClose={() => setPickerOpen(false)}
-        onToggle={togglePick}
-        onSubmit={() => void submitPicks()}
+        onSubmit={submitPicks}
       />
     </View>
   );

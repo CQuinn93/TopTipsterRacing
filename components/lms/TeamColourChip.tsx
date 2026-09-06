@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
 import { lmsTeamChipColours, lmsTeamCode } from '@/lib/lms/teamColours';
 import { lmsTeamIconSource } from '@/lib/lms/teamIcons';
@@ -13,7 +14,12 @@ type Props = {
  * Team identifier: local kit icon when available, otherwise colour + TLA chip.
  * Icons live in assets/Icons/{TLA}.png (not official club crests).
  */
-export function TeamColourChip({ shortName, name, slug, size = 28 }: Props) {
+export const TeamColourChip = memo(function TeamColourChip({
+  shortName,
+  name,
+  slug,
+  size = 28,
+}: Props) {
   const icon = lmsTeamIconSource({ shortName, name, slug });
   const code = lmsTeamCode({ shortName, name });
   const label = name ? `${name} kit` : `${code} kit`;
@@ -66,7 +72,7 @@ export function TeamColourChip({ shortName, name, slug, size = 28 }: Props) {
       </Text>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   chip: {
